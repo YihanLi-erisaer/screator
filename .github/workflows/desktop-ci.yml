@@ -21,7 +21,7 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - name: Install Python dependencies and local media tools
         run: |
-          python -m pip install -r requirements-desktop-lock.txt
+          python -m pip install -r requirements-desktop-lock.txt -r services/douyin-broker/requirements.txt
           choco install ffmpeg --yes --no-progress
       - name: Backend regression
         env:
