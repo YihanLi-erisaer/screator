@@ -178,7 +178,7 @@ class DesktopService:
             capabilities.append("acfun_sync_v1")
         return {"protocol_version": 2, "schema_version": 5, "account_limit": 5,
                 "capabilities": capabilities,
-                "migration_notes": self.migration_notes, "version": "0.2.0-alpha.1", "queue": self.scheduler.snapshot(),
+                "migration_notes": self.migration_notes, "version": "0.3.0", "queue": self.scheduler.snapshot(),
                 "data_dir": str(self.paths.root)}
 
     def translation_status(self):

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yt2bili"
-version = "0.1.0"
+version = "0.3.0"
 description = "Download a YouTube video you are allowed to reprint, translate with DeepL, and submit to Bilibili."
 readme = "README.md"
 requires-python = ">=3.11"

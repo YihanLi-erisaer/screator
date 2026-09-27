@@ -511,7 +511,7 @@ export default function App() {
                 <Sun size={16} />
               </button>
             </div>
-            <span className="version">DESKTOP · 0.2.0 ALPHA</span>
+            <span className="version">DESKTOP · v0.3.0</span>
           </div>
         </aside>
         <div className="workspace">
