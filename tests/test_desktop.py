@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import os
 import sqlite3
 import tempfile
@@ -17,7 +18,7 @@ from yt2bili.db import Task, TaskStore
 from yt2bili.desktop_auth import LoginSession, validate_login
 from yt2bili.desktop_service import DesktopService, parse_urls
 from yt2bili.desktop_settings import DesktopSettings
-from yt2bili.desktop_worker import Protocol, redact
+from yt2bili.desktop_worker import DesktopLogHandler, Protocol, redact
 from yt2bili.exceptions import InvalidMediaError, Yt2BiliError
 from yt2bili.locking import FileLock, work_lock
 from yt2bili.paths import AppPaths
@@ -352,6 +353,18 @@ class DesktopTests(unittest.TestCase):
 
 
 class ContractTests(unittest.TestCase):
+    def test_worker_keeps_file_log_when_desktop_ipc_fails(self):
+        saved = []
+        class BrokenService:
+            def add_log(self, entry): raise BrokenPipeError("desktop disconnected")
+        class FileHandler:
+            def emit(self, record): saved.append(record.getMessage())
+        handler = DesktopLogHandler(BrokenService(), FileHandler())
+        record = logging.LogRecord("worker", logging.ERROR, "", 0, "last diagnostic", (), None)
+        with patch.object(handler, "handleError"):
+            handler.emit(record)
+        self.assertEqual(saved, ["last diagnostic"])
+
     def test_parse_urls_validates_host_and_deduplicates_video_id(self):
         items = parse_urls("https://www.youtube.com/watch?v=-abcdefghij&t=10")
         self.assertEqual(len(items), 1)

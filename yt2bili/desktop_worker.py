@@ -42,10 +42,12 @@ class DesktopLogHandler(logging.Handler):
             if not video_id:
                 match = re.search(r"\[([A-Za-z0-9_-]{11})\]", message)
                 video_id = match.group(1) if match else None
-            self.service.add_log({"time": time.strftime("%H:%M:%S"), "level": record.levelname,
-                                  "video_id": video_id, **events.current_identity(), "message": message})
+            # Persist the diagnostic before sending it through desktop IPC. A
+            # stalled or broken UI must not erase the last useful log entry.
             safe = logging.LogRecord(record.name, record.levelno, "", 0, message, (), None)
             self.file_handler.emit(safe)
+            self.service.add_log({"time": time.strftime("%H:%M:%S"), "level": record.levelname,
+                                  "video_id": video_id, **events.current_identity(), "message": message})
         except Exception:
             self.handleError(record)
 

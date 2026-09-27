@@ -26,4 +26,6 @@ with tempfile.TemporaryDirectory(prefix="yt2bili-native-") as folder:
         raise RuntimeError(result.stderr.decode("utf-8", errors="replace"))
     value = json.loads(report.read_text(encoding="utf-8"))
     assert value.get("ok") and value.get("protocol_version") == 2, value
+    shell_log = (Path(folder) / "logs/desktop-shell.log").read_text(encoding="utf-8")
+    assert "worker spawned pid=" in shell_log and "desktop expected exit" in shell_log, shell_log
     print(json.dumps(value))

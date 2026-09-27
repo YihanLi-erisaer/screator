@@ -1,12 +1,22 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde_json::{json, Value};
-use std::{collections::HashMap, io::{BufRead, BufReader, Write}, path::PathBuf,
-    process::{Child, ChildStdin, Command, Stdio}, sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}}, time::Duration};
+use std::{collections::HashMap, fs::OpenOptions, io::{BufRead, BufReader, Write}, path::PathBuf,
+    process::{Child, ChildStdin, Command, Stdio}, sync::{Arc, Mutex, OnceLock, atomic::{AtomicBool, AtomicU64, Ordering}}, time::{Duration, SystemTime, UNIX_EPOCH}};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::oneshot;
 
 type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>;
+static SHELL_LOG: OnceLock<PathBuf> = OnceLock::new();
+static EXPECTED_EXIT: AtomicBool = AtomicBool::new(false);
+
+fn log_shell(message: &str) {
+    let Some(path) = SHELL_LOG.get() else { return };
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{stamp} {message}");
+    }
+}
 struct Worker {
     child: Mutex<Option<Child>>,
     stdin: Mutex<Option<ChildStdin>>,
@@ -96,9 +106,11 @@ fn close_worker_job(_: WorkerProcess) {}
 async fn finish_close(app: tauri::AppHandle, worker: State<'_, Worker>) -> Result<(), String> {
     let status = request_worker(&worker, "system.shutdown_status".into(), json!({})).await?;
     if status["ready"] != true { return Err("后台仍在收尾，请等待上传完成。".into()); }
+    log_shell("confirmed shutdown: worker is ready");
     let process = take_worker_process(&worker);
     tauri::async_runtime::spawn_blocking(move || reap_worker(process)).await
         .map_err(|_| "后台退出任务未完成，请重试。".to_string())?;
+    EXPECTED_EXIT.store(true, Ordering::Release);
     app.exit(0);
     Ok(())
 }
@@ -110,6 +122,7 @@ fn frontend_ready(app: tauri::AppHandle, health: Value) {
             let value = json!({"ok":health["protocol_version"] == 2,"webview_loaded":true,
                 "frontend_ipc":true,"protocol_version":health["protocol_version"]});
             let _ = std::fs::write(report, value.to_string());
+            EXPECTED_EXIT.store(true, Ordering::Release);
             app.exit(0);
         }
     }
@@ -150,6 +163,10 @@ fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Er
     };
     let data = std::env::var_os("YT2BILI_DESKTOP_DATA").map(PathBuf::from)
         .unwrap_or(app.path().local_data_dir()?.join("StarDazz").join("yt2bili"));
+    let log_dir = data.join("logs");
+    std::fs::create_dir_all(&log_dir)?;
+    let _ = SHELL_LOG.set(log_dir.join("desktop-shell.log"));
+    log_shell("desktop starting");
     let mut command = if !cfg!(debug_assertions) {
         Command::new(resources.join("worker").join(if cfg!(windows) { "yt2bili-worker.exe" } else { "yt2bili-worker" }))
     } else if let Some(frozen) = std::env::var_os("YT2BILI_WORKER") {
@@ -174,6 +191,7 @@ fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Er
         command.process_group(0);
     }
     let mut child = command.spawn()?;
+    log_shell(&format!("worker spawned pid={}", child.id()));
     #[cfg(windows)]
     let job = match attach_job(&child) { Ok(job) => job, Err(error) => { let _ = child.kill(); return Err(error.into()); } };
     let stdin = child.stdin.take();
@@ -195,10 +213,14 @@ fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Er
                     } else { Ok(value["result"].clone()) };
                     let _ = sender.send(answer);
                 }
+            } else if value.get("event").and_then(Value::as_str) == Some("task.log") {
+                // The UI reads logs through logs.tail. Forwarding every log line
+                // also sends high-volume validation output into the WebView.
             } else if value.get("event").is_some() {
                 let _ = handle.emit("backend-event", value);
             }
         }
+        log_shell("worker stdout closed");
         for (_, sender) in replies.lock().unwrap().drain() { let _ = sender.send(Err("后台进程已停止，请重新启动应用。".into())); }
         let _ = handle.emit("backend-disconnected", ());
     });
@@ -207,6 +229,7 @@ fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Er
 }
 
 fn main() {
+    std::panic::set_hook(Box::new(|info| log_shell(&format!("desktop panic: {info}"))));
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
@@ -223,6 +246,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![backend_request, finish_close, frontend_ready])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                log_shell("window close requested");
                 api.prevent_close();
                 let _ = window.emit("app-close-requested", ());
             }
@@ -231,6 +255,7 @@ fn main() {
         .expect("无法启动桌面应用；请检查 Python 环境与后台日志。");
     app.run(|app, event| {
         if let tauri::RunEvent::Exit = event {
+            log_shell(if EXPECTED_EXIT.load(Ordering::Acquire) { "desktop expected exit" } else { "desktop unexpected event-loop exit" });
             let worker = app.state::<Worker>();
             force_stop_worker(take_worker_process(&worker));
         }
