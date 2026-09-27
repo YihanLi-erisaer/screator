@@ -116,12 +116,12 @@ test("production-style unconnected page never pretends to perform work", async (
   await expect(page.getByText("未连接到后台")).toBeVisible();
   await expect(page.getByRole("button", { name: /新建任务/ })).toBeDisabled();
 });
-test("five accounts plus Douyin and three shared stages have nine lanes", async ({
+test("five accounts plus Douyin and AcFun and three shared stages have ten lanes", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1024, height: 680 });
   await page.goto("/?preview&accounts=5");
-  await expect(page.locator(".queue-card")).toHaveCount(9);
+  await expect(page.locator(".queue-card")).toHaveCount(10);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth > innerWidth,
