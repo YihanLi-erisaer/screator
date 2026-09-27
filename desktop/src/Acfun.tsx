@@ -1,5 +1,109 @@
-import { useEffect, useState } from "react";
-import { request } from "./bridge";
+import { useEffect, useRef, useState } from "react";
+import { external, operationId, request } from "./bridge";
+
+export function AcfunVerification({ publicationId, busy, run }: {
+  publicationId: string;
+  busy: boolean;
+  run: (work: () => Promise<unknown>) => Promise<void>;
+}) {
+  const [challenge, setChallenge] = useState<{ challenge_id: string; url: string } | null>(null);
+  const [error, setError] = useState("");
+  const [needsRefresh, setNeedsRefresh] = useState(false);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const completing = useRef(false);
+  useEffect(() => {
+    if (!challenge) return;
+    const receive = (event: MessageEvent) => {
+      if (event.source !== frame.current?.contentWindow || event.origin !== new URL(challenge.url).origin || completing.current) return;
+      let data;
+      try { data = typeof event.data === "string" ? JSON.parse(event.data) : event.data; } catch { return; }
+      if (data?.msgType !== "RESULT") return;
+      if (data.msg?.result !== 1) {
+        setError("验证尚未通过或已取消，请重新打开官方验证。");
+        setChallenge(null);
+        return;
+      }
+      completing.current = true;
+      void run(async () => {
+        try {
+          await request("acfun.verification.complete", {
+            publication_id: publicationId, challenge_id: challenge.challenge_id,
+            verification_type: data.msg.type, token: data.msg.token,
+          });
+          setChallenge(null);
+        } finally { completing.current = false; }
+      });
+    };
+    window.addEventListener("message", receive);
+    return () => window.removeEventListener("message", receive);
+  }, [challenge, publicationId, run]);
+  return <div>
+    <p className="help">AcFun 要求手动安全验证。验证完成后请尽快确认投稿，未改变的视频将复用。</p>
+    {error && <p className="inline-error">{error}</p>}
+    <button disabled={busy || !!challenge} onClick={() => void run(async () => {
+      const next = await request("acfun.verification", { publication_id: publicationId });
+      if (next.status && next.status !== "ready") {
+        setChallenge(null); setError(next.message); setNeedsRefresh(next.status === "refresh_required");
+        return;
+      }
+      const url = new URL(next.url);
+      if (url.protocol !== "https:" || url.username || url.password || url.port ||
+        !["captcha.zt.kuaishou.com", "captcha.kuaishou.com", "passport.kuaishou.com", "app.m.kuaishou.com"].includes(url.hostname)) {
+        throw new Error("不支持此官方验证地址，请到 AcFun 创作中心处理。");
+      }
+      setError(""); setNeedsRefresh(false); setChallenge(next);
+    })}>完成 AcFun 安全验证</button>
+    {needsRefresh && <div>
+      <p className="help">点击下方按钮会复用素材，仅重试此 AcFun 目标。平台仍要求验证时，请再次点击“完成 AcFun 安全验证”；若平台已放行，本次重试将直接投稿。</p>
+      <button disabled={busy} onClick={() => void run(async () => {
+        await request("acfun.verification.refresh", { publication_id: publicationId, operation_id: operationId() });
+        setNeedsRefresh(false); setError("");
+      })}>重新获取验证入口并继续投稿</button>
+    </div>}
+    <button disabled={busy} onClick={() => void external("https://member.acfun.cn/")}>打开 AcFun 创作中心</button>
+    {challenge && <div role="dialog" aria-label="AcFun 官方安全验证">
+      <p className="help">请在下方官方页面手动完成验证。如无法显示，可关闭窗口后到创作中心处理。</p>
+      <iframe ref={frame} title="AcFun 官方安全验证" src={challenge.url}
+        sandbox="allow-scripts allow-same-origin allow-forms" referrerPolicy="no-referrer"
+        style={{ width: "100%", maxWidth: 420, height: 420, border: 0, background: "white" }} />
+      <button disabled={busy} onClick={() => setChallenge(null)}>关闭验证窗口</button>
+    </div>}
+  </div>;
+}
+
+export function AcfunChannelSelect({ value, onChange, disabled = false, label = "AcFun 分区" }: {
+  value: number;
+  onChange: (value: number) => void;
+  disabled?: boolean;
+  label?: string;
+}) {
+  const [items, setItems] = useState<{ channel_id: number; name: string }[]>([]);
+  const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError("");
+    request("acfun.channels").then((result) => {
+      if (alive) setItems(result.items);
+    }).catch((e) => { if (alive) setError(String(e)); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [reload]);
+  const invalid = value > 0 && !loading && !error && !items.some((item) => item.channel_id === value);
+  return <div>
+    <label className="field">{label}
+      <select value={value} disabled={disabled || loading || !items.length} onChange={(e) => onChange(Number(e.target.value))}>
+        <option value={0}>{loading ? "正在读取 AcFun 分区…" : "请选择具体分区"}</option>
+        {value > 0 && !items.some((item) => item.channel_id === value) && <option value={value} disabled>未匹配到可投稿分区（ID {value}）</option>}
+        {items.map((item) => <option key={item.channel_id} value={item.channel_id}>{item.name}（{item.channel_id}）</option>)}
+      </select>
+    </label>
+    {invalid && <p className="inline-error">该 ID 不是可投稿的视频子分区，请重新选择。</p>}
+    {error && <p className="help">{error} <button type="button" disabled={disabled || loading} onClick={() => setReload((n) => n + 1)}>重试读取分区</button></p>}
+  </div>;
+}
 
 export function AcfunAccountPanel() {
   const [status, setStatus] = useState<any>(null);
@@ -11,16 +115,25 @@ export function AcfunAccountPanel() {
   useEffect(() => { void refresh().catch((e) => setError(String(e))); }, []);
   useEffect(() => {
     if (!qr) return;
-    const id = window.setInterval(() => {
-      void request("acfun.auth.poll").then((value) => {
+    let stopped = false;
+    let timer: number;
+    const poll = async () => {
+      try {
+        const value: any = await request("acfun.auth.poll");
+        if (stopped) return;
         setPhase(value.status);
         if (["done", "expired", "failed"].includes(value.status)) {
           setQr("");
           void refresh();
+        } else {
+          timer = window.setTimeout(() => void poll(), 1000);
         }
-      }).catch((e) => { setError(String(e)); setQr(""); });
-    }, 2500);
-    return () => window.clearInterval(id);
+      } catch (e) {
+        if (!stopped) { setError(String(e)); setQr(""); }
+      }
+    };
+    timer = window.setTimeout(() => void poll(), 0);
+    return () => { stopped = true; window.clearTimeout(timer); };
   }, [qr]);
   const run = async (work: () => Promise<unknown>) => {
     setBusy(true); setError("");

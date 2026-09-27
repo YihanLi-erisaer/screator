@@ -23,7 +23,9 @@ def translate(payload):
         body = source["description"]
         budget = config["local_llm_num_ctx"] - 3072 - 1024
         def messages(text):
-            return [{"role": "system", "content": prompts.SYSTEM},
+            limit = payload.get("title_limit")
+            instruction = prompts.SYSTEM + (f"\n译文标题最多 {limit} 字，请在翻译时提炼，不要截断数字、型号或专名。" if limit else "")
+            return [{"role": "system", "content": instruction},
                     {"role": "user", "content": json.dumps({**source, "description": text}, ensure_ascii=False)}]
         while len(json.dumps(messages(body), ensure_ascii=False).encode("utf-8")) > budget:
             if not body:

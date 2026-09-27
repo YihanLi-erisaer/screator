@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { operationId, request } from "./bridge";
 import { labels, type Task, type Publication, type Progress } from "./types";
+import { AcfunChannelSelect, AcfunVerification } from "./Acfun";
 
 export function DouyinAccountPanel() {
   const [status, setStatus] = useState<any>(null);
@@ -160,20 +161,18 @@ function PublicationCard({
   const [text, setText] = useState(pub.text);
   const acfun = (() => { try { return JSON.parse(pub.snapshot || "{}"); } catch { return {}; } })();
   const [title, setTitle] = useState(acfun.title || "");
-  const [description, setDescription] = useState(acfun.description || "");
   const [channelId, setChannelId] = useState(String(acfun.channel_id || ""));
-  const [tags, setTags] = useState((acfun.tags || []).join("、"));
   const [remote, setRemote] = useState("");
   useEffect(() => setText(pub.text), [pub.text, pub.publication_id]);
   useEffect(() => {
-    setTitle(acfun.title || ""); setDescription(acfun.description || "");
-    setChannelId(String(acfun.channel_id || "")); setTags((acfun.tags || []).join("、"));
+    setTitle(acfun.title || "");
+    setChannelId(String(acfun.channel_id || ""));
   }, [pub.snapshot, pub.publication_id]);
   useEffect(() => {
     const changed = pub.platform === "douyin" ? text !== pub.text : pub.platform === "acfun" &&
-      (title !== (acfun.title || "") || description !== (acfun.description || "") || channelId !== String(acfun.channel_id || "") || tags !== (acfun.tags || []).join("、"));
+      (title !== (acfun.title || "") || channelId !== String(acfun.channel_id || ""));
     onDirtyChange(pub.publication_id, changed);
-  }, [text, title, description, channelId, tags, pub.text, pub.snapshot, pub.platform, onDirtyChange]);
+  }, [text, title, channelId, pub.text, pub.snapshot, pub.platform, onDirtyChange]);
   const call = (method: string, extra = {}) =>
     run(() =>
       request(method, { publication_id: pub.publication_id, ...extra }),
@@ -189,6 +188,8 @@ function PublicationCard({
         {pub.remote_id && ` · 作品 ID：${pub.remote_id}`}
       </p>
       {pub.error && <p className="inline-error">{pub.error}</p>}
+      {pub.platform === "acfun" && pub.status === "failed" && /(?:40\d{4}|410\d{3}|安全验证)/.test(pub.error) &&
+        <AcfunVerification publicationId={pub.publication_id} busy={busy} run={run} />}
       {pub.status === "uploading_media" && progress?.percent != null && <p className="help">{pub.platform === "acfun" ? "AcFun" : "平台"}上传：{progress.percent.toFixed(1)}%</p>}
       {pub.platform === "douyin" && (
         <label className="field">
@@ -215,13 +216,14 @@ function PublicationCard({
         </label>
       )}
       {pub.platform === "acfun" && <div>
-        <p className="help">AcFun 转载投稿：请填写平台分区 ID，并核对标题、简介与标签。来源链接使用原 YouTube URL。</p>
+        <p className="help">AcFun 标题单独翻译，最多 50 字；简介和标签与本任务的 Bilibili 投稿一致。投稿类型为转载，来源链接使用原 YouTube URL。</p>
         <label className="field">AcFun 标题<input value={title} maxLength={50} disabled={busy || pub.status !== "ready"} onChange={(e) => setTitle(e.target.value)} /></label>
-        <label className="field">AcFun 简介<textarea value={description} maxLength={1000} disabled={busy || pub.status !== "ready"} onChange={(e) => setDescription(e.target.value)} /></label>
-        <label className="field">分区 ID<input type="number" min={1} value={channelId} disabled={busy || pub.status !== "ready"} onChange={(e) => setChannelId(e.target.value)} /></label>
-        <label className="field">标签（用顿号分隔，最多 6 个）<input value={tags} disabled={busy || pub.status !== "ready"} onChange={(e) => setTags(e.target.value)} /></label>
-        {pub.status === "ready" && <button disabled={busy || !title.trim() || !Number.isInteger(Number(channelId)) || Number(channelId) <= 0}
-          onClick={() => void call("publications.update_metadata", { revision: pub.revision, title, description, channel_id: Number(channelId), tags: tags.split(/[、,，]/).map((x: string) => x.trim()).filter(Boolean) })}>保存 AcFun 投稿信息</button>}
+        {title !== (acfun.title || "") && <p className="help">当前输入 {title.length} 字，已保存标题 {String(acfun.title || "").length} 字。请先保存 AcFun 投稿信息，输入框中的修改才会用于投稿。</p>}
+        <p className="help">共用简介：{String(acfun.description || "").length} 字 · 共用标签：{(acfun.tags || []).join("、")}</p>
+        <AcfunChannelSelect value={Number(channelId)} disabled={busy || pub.status !== "ready"} onChange={(value) => setChannelId(value ? String(value) : "")} />
+        {!channelId && <p className="help">可以先保存标题草稿；确认投稿前仍需填写分区 ID。</p>}
+        {pub.status === "ready" && <button disabled={busy || !title.trim() || !Number.isInteger(Number(channelId)) || Number(channelId) < 0}
+          onClick={() => void call("publications.update_metadata", { revision: pub.revision, title, channel_id: Number(channelId) })}>保存 AcFun 投稿信息</button>}
       </div>}
       <div className="modal-actions">
         {["failed", "cancelled", "interrupted", "blocked_validation"].includes(

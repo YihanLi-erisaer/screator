@@ -12,6 +12,7 @@
       "allow": [
         { "url": "https://www.bilibili.com/*" },
         { "url": "https://member.bilibili.com/*" },
+        { "url": "https://member.acfun.cn/*" },
         { "url": "https://stardazz-com.vercel.app/*" }
       ]
     }

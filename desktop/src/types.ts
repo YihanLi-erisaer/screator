@@ -50,6 +50,7 @@ export interface Task {
 export interface Config {
   work_dir: string;
   bili_tid: number;
+  acfun_channel_id: number;
   bili_tags: string;
   bili_line: string;
   upload_gap_seconds: number;

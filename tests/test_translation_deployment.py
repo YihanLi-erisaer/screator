@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch, Mock
 
 from yt2bili.translation.config import DEFAULTS
-from yt2bili.translation.deployment import download_runtime
+from yt2bili.translation.deployment import download_runtime, uninstall_model
 from yt2bili.translation.runtime import local_session, runtime_path, sha256
 from yt2bili.translation.jobs import TranslationJobs
 from yt2bili.translation.types import TranslationError
@@ -68,3 +68,43 @@ class DeploymentTests(unittest.TestCase):
         self.addCleanup(jobs.close)
         self.assertEqual(jobs.get('one')['state'],'interrupted')
         self.assertFalse(jobs.active())
+
+    def test_uninstall_removes_managed_model_but_preserves_runtime_and_download(self):
+        models = self.root / "models/blobs"
+        models.mkdir(parents=True)
+        (models / "sha256-fixture").write_bytes(b"model")
+        (self.root / "deployment.json").write_text("{}")
+        (self.root / "runtime").mkdir()
+        (self.root / "runtime/ollama.exe").write_bytes(b"runtime")
+        (self.root / "downloads/runtime.zip").write_bytes(b"archive")
+        result = uninstall_model(DEFAULTS, self.root)
+        self.assertTrue(result["uninstalled"])
+        self.assertFalse((self.root / "models").exists())
+        self.assertFalse((self.root / "deployment.json").exists())
+        self.assertTrue((self.root / "runtime/ollama.exe").exists())
+        self.assertTrue((self.root / "downloads/runtime.zip").exists())
+        self.assertTrue(uninstall_model(DEFAULTS, self.root)["uninstalled"])
+
+    def test_uninstall_rejects_external_mode_without_touching_model(self):
+        models = self.root / "models"
+        models.mkdir()
+        (models / "keep").write_bytes(b"model")
+        with self.assertRaises(TranslationError) as raised:
+            uninstall_model({**DEFAULTS, "local_llm_mode": "external"}, self.root)
+        self.assertEqual(raised.exception.code, "INPUT_INVALID")
+        self.assertTrue((models / "keep").exists())
+
+    def test_uninstall_rejects_link_outside_managed_directory(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "keep").write_bytes(b"model")
+        with tempfile.TemporaryDirectory() as other:
+            link = Path(other) / "models"
+            try:
+                link.symlink_to(outside, target_is_directory=True)
+            except OSError:
+                self.skipTest("Creating directory links is unavailable")
+            with self.assertRaises(TranslationError) as raised:
+                uninstall_model(DEFAULTS, Path(other))
+            self.assertEqual(raised.exception.code, "UNINSTALL_FAILED")
+            self.assertTrue((outside / "keep").exists())

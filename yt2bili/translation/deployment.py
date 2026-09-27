@@ -172,6 +172,26 @@ def install(config, root, *, offline_path=None):
         return {"installed": True, **installed, "message": "组件安装完成，请试译验证本机推理。"}
 
 
+def uninstall_model(config, root):
+    """Remove only the model store owned by this application's managed runtime."""
+    if config["local_llm_mode"] != "managed":
+        raise TranslationError("INPUT_INVALID", "外部模式的模型由外部 Ollama 管理，不能在此卸载。")
+    root = Path(root)
+    with execution_slot(root):
+        events.check_cancelled()
+        events.progress("model_uninstall", force=True)
+        models = root / "models"
+        if models.is_symlink() or models.resolve() != root.resolve() / "models":
+            raise TranslationError("UNINSTALL_FAILED", "模型目录指向应用数据目录之外，已停止卸载。")
+        try:
+            if models.exists():
+                shutil.rmtree(models)
+            (root / "deployment.json").unlink(missing_ok=True)
+        except OSError as exc:
+            raise TranslationError("UNINSTALL_FAILED", "模型卸载未完成，请检查文件占用或权限后重试。") from exc
+    return {"uninstalled": True, "message": "本地大语言模型已卸载；运行时和已有译文已保留。"}
+
+
 def export_bundle(root, destination):
     root, destination = Path(root), Path(destination)
     with execution_slot(root):

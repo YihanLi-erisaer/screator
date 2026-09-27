@@ -123,7 +123,7 @@ def translate(settings, title, description, source_lang, title_limit, desc_body_
             events.check_cancelled()
             events.progress("translation_fallback" if index else "translating", force=True,
                             provider=provider, fallback_reason=errors[0].code if errors else None)
-            payload = {"provider": provider, "config": config, "root": str(root),
+            payload = {"provider": provider, "config": config, "root": str(root), "title_limit": title_limit,
                        "source": {"title": title, "description": description, "source_lang": source_lang}}
             if config.get("model_digest"):
                 payload["expected_digest"] = config["model_digest"]

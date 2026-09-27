@@ -61,7 +61,7 @@ export async function saveLog() {
 }
 export async function external(url: string) {
   if (
-    !/^https:\/\/(www\.bilibili\.com|member\.bilibili\.com|stardazz-com\.vercel\.app)\//.test(
+    !/^https:\/\/(www\.bilibili\.com|member\.bilibili\.com|member\.acfun\.cn|stardazz-com\.vercel\.app)\//.test(
       url,
     )
   )

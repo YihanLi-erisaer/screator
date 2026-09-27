@@ -22,6 +22,7 @@ const phase: Record<string, string> = {
   runtime_download: "下载运行时",
   model_download: "下载模型",
   model_verify: "校验模型",
+  model_uninstall: "正在卸载模型",
   translation_wait: "等待翻译服务",
   translating: "正在试译",
   translation_fallback: "切换服务",
@@ -313,6 +314,20 @@ export default function TranslationPanel({
               >
                 导入离线组件包
               </button>
+              <button
+                className="secondary danger"
+                disabled={blocked}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "卸载应用管理的本地大语言模型？运行时和已有译文会保留，之后需要重新安装模型才能继续本地翻译。",
+                    )
+                  )
+                    void start("translation.uninstall");
+                }}
+              >
+                卸载大语言模型
+              </button>
             </>
           )}
           <button
@@ -428,7 +443,7 @@ export default function TranslationPanel({
                 耗时 {((job.result.elapsed_ms || 0) / 1000).toFixed(1)} 秒
               </p>
             )}
-            {running(job) && (
+            {running(job) && job.kind !== "uninstall" && (
               <button
                 className="secondary"
                 disabled={job.state === "cancel_requested"}

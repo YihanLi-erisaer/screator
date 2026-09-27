@@ -133,7 +133,8 @@ class DesktopService:
             "system.health": self.health, "system.diagnostics": self.diagnostics,
             "settings.get": lambda: self.config.public(), "settings.update": self.update_settings,
             "translation.status": self.translation_status, "translation.test": self.translation_test,
-            "translation.install": self.translation_install, "translation.jobs.get": self.translation_jobs.get,
+            "translation.install": self.translation_install, "translation.uninstall": self.translation_uninstall,
+            "translation.jobs.get": self.translation_jobs.get,
             "translation.jobs.cancel": self.translation_jobs.cancel, "tasks.retranslate": self.retranslate,
             "credentials.set": self.set_key, "credentials.test": self.test_key,
             "tasks.create": self.create, "tasks.list": self.list_tasks, "tasks.get": self.get_task,
@@ -160,6 +161,10 @@ class DesktopService:
             "acfun.auth.poll": self.acfun.poll, "acfun.auth.cancel": self.acfun.cancel,
             "acfun.auth.clear": self.acfun.clear, "acfun.accounts.archive": self.acfun.archive,
             "acfun.accounts.resume_uploads": self.acfun.resume,
+            "acfun.channels": self.acfun.channels,
+            "acfun.verification": self.acfun.verification,
+            "acfun.verification.complete": self.complete_acfun_verification,
+            "acfun.verification.refresh": self.refresh_acfun_verification,
             "publications.update_metadata": self.update_publication,
             "publications.retry": self.retry_publication, "publications.abandon": self.abandon_publication,
             "publications.resolve": self.resolve_publication, "publications.cancel": self.cancel_publication,
@@ -198,6 +203,18 @@ class DesktopService:
             config = dict(self.config.values)
             return self.translation_jobs.start("install", operation_id,
                 lambda: install(config, self.paths.root / "translation", offline_path=offline_path))
+
+    def translation_uninstall(self, operation_id):
+        from yt2bili.translation.deployment import uninstall_model
+
+        with self.mutation:
+            if self.scheduler.snapshot()["active"]:
+                raise Yt2BiliError("请等待视频任务结束后卸载模型。")
+            config = dict(self.config.values)
+            if config["local_llm_mode"] != "managed":
+                raise Yt2BiliError("外部模式的模型请在外部 Ollama 中管理。")
+            return self.translation_jobs.start("uninstall", operation_id,
+                lambda: uninstall_model(config, self.paths.root / "translation"))
 
     def translation_test(self, provider, operation_id):
         if provider not in ("local_llm", "deepl"):
@@ -301,17 +318,24 @@ class DesktopService:
         if type(sync_douyin) is not bool: raise Yt2BiliError("同步抖音必须为开关值。")
         if type(sync_acfun) is not bool: raise Yt2BiliError("同步 AcFun 必须为开关值。")
         dy_account = ac_account = None
+        ac_tags = None
         video_id, canonical = parse_single_video_url(url)
         if mode not in ("preview", "auto"):
             raise Yt2BiliError("任务模式无效。")
         if not account_id or not isinstance(account_id, str):
             raise Yt2BiliError("请选择本次投稿的 Bilibili 账号。")
         def preflight():
-            nonlocal dy_account, ac_account
+            nonlocal dy_account, ac_account, ac_tags
             if sync_douyin:
                 dy_account = self.douyin.check(douyin_account_id, douyin_binding_revision, auto=mode == "auto")
             if sync_acfun:
+                from yt2bili.acfun import tags_from_bilibili
                 ac_account = self.acfun.check(acfun_account_id, acfun_binding_revision, auto=mode == "auto")
+                ac_tags = tags_from_bilibili(self.config.values["bili_tags"])
+                if mode == "auto" and not self.config.values["acfun_channel_id"]:
+                    raise Yt2BiliError("自动投稿 AcFun 前，请在投稿默认值中填写 AcFun 分区 ID。")
+                if self.config.values["acfun_channel_id"]:
+                    self.acfun.validate_channel(self.config.values["acfun_channel_id"])
             account = self.store.account(account_id)
             if self.translation_jobs.active():
                 raise Yt2BiliError("请等待翻译组件操作结束后创建任务。")
@@ -348,7 +372,8 @@ class DesktopService:
                 self.store._conn.execute("INSERT INTO task_publications(publication_id,task_id,platform,account_id,source_video_id) VALUES(?,?,'acfun',?,?)", (str(uuid.uuid4()), task.task_id, ac_account["account_id"], video_id))
                 ac = publications.for_platform(self.store, task.task_id, "acfun")
                 publications.change(self.store, ac["publication_id"], snapshot=json.dumps({"user_id": ac_account["user_id"], "nickname": ac_account["nickname"],
-                    "binding_revision": ac_account["binding_revision"], "adapter_version": ac_account["adapter_version"], "channel_id": 0, "tags": ["转载"]}, ensure_ascii=False))
+                    "binding_revision": ac_account["binding_revision"], "adapter_version": ac_account["adapter_version"],
+                    "channel_id": self.config.values["acfun_channel_id"], "tags": ac_tags}, ensure_ascii=False))
             self.scheduler.add(task, mode)
             return {"task_id": task.task_id, "account_id": account_id, "created": True, "status": task.status}
         params = {"url": canonical, "account_id": account_id, "mode": mode}
@@ -434,6 +459,7 @@ class DesktopService:
                 if p["platform"] == "acfun":
                     self.acfun.check(p["account_id"])
                     self.acfun.validate_assets(type("TaskRef", (), {"task_id": task_id})(), json.loads(p["snapshot"]))
+                    self.acfun.validate_channel(json.loads(p["snapshot"])["channel_id"])
             publications.freeze(self.store, task_id, [p["publication_id"] for p in selected])
             self.scheduler.add(task, "submit", saved.get("settings"), stage="validate", targets=[p["publication_id"] for p in selected])
             return {"queued": True}
@@ -457,15 +483,50 @@ class DesktopService:
                 publications.change(self.store, publication_id, text=text.strip())
             elif p["platform"] == "acfun":
                 if not isinstance(title, str) or not 1 <= len(title.strip()) <= 50: raise Yt2BiliError("AcFun 标题须为 1～50 字。")
-                if not isinstance(description, str) or len(description) > 1000: raise Yt2BiliError("AcFun 简介不能超过 1000 字。")
-                if type(channel_id) is not int or channel_id <= 0: raise Yt2BiliError("请选择有效 AcFun 分区 ID。")
-                if not isinstance(tags, list) or len(tags) > 6 or any(not isinstance(t, str) or not t.strip() or len(t) > 30 for t in tags):
-                    raise Yt2BiliError("AcFun 标签最多 6 个，每个不超过 30 字。")
+                # Allow an incomplete draft so a corrected title can be saved before
+                # the user has chosen a channel. Submission still requires channel_id > 0.
+                if type(channel_id) is not int or channel_id < 0: raise Yt2BiliError("AcFun 分区 ID 无效。")
+                if channel_id: self.acfun.validate_channel(channel_id)
+                from yt2bili.acfun import tags_from_bilibili
+                task = self.store.require(p["task_id"])
+                saved = self.store.get_job(p["task_id"]) or {}
+                shared_tags = tags_from_bilibili(saved.get("settings", {}).get("bili_tags", self.config.values["bili_tags"]))
                 snapshot = json.loads(p["snapshot"])
-                snapshot.update(title=title.strip(), description=description, channel_id=channel_id, tags=[t.strip() for t in tags])
+                snapshot.update(title=title.strip(), title_source="manual", description=task.desc_zh,
+                                channel_id=channel_id, tags=shared_tags)
                 publications.change(self.store, publication_id, snapshot=json.dumps(snapshot, ensure_ascii=False))
             else: raise Yt2BiliError("此平台不支持编辑投稿目标。")
             return publications.get(self.store, publication_id)
+
+    def complete_acfun_verification(self, publication_id, challenge_id, verification_type, token):
+        with self.mutation, self.scheduler.guard:
+            p = publications.get(self.store, publication_id)
+            self.ensure_inactive(p["task_id"])
+            return self.acfun.complete_verification(publication_id, challenge_id, verification_type, token)
+
+    def refresh_acfun_verification(self, publication_id, operation_id):
+        """Explicit user retry of one rejected target; never upload other platforms."""
+        def action():
+            p = publications.get(self.store, publication_id)
+            self.ensure_inactive(p["task_id"])
+            if p["platform"] != "acfun" or p["status"] != "failed":
+                raise Yt2BiliError("只有被 AcFun 拒绝、等待安全验证的目标可以重新获取入口。")
+            attempt = self.store._conn.execute("SELECT phase,error FROM acfun_attempts WHERE publication_id=? ORDER BY started_at DESC LIMIT 1", (publication_id,)).fetchone()
+            if not attempt or attempt["phase"] != "rejected" or not re.search(r"安全验证|(?:40\d{4}|410\d{3})", attempt["error"]):
+                raise Yt2BiliError("未找到明确的安全验证拒绝记录，不能自动重发。")
+            if self.store._conn.execute("SELECT 1 FROM acfun_attempts WHERE publication_id=? AND create_intent_at!='' AND phase NOT IN ('rejected','resolved_not_submitted')", (publication_id,)).fetchone():
+                raise Yt2BiliError("此目标存在待核对的投稿，请先核对，禁止重发。")
+            task = self.task(p["task_id"])
+            self.acfun.check(p["account_id"])
+            snapshot = json.loads(p["snapshot"])
+            self.acfun.validate_assets(task, snapshot)
+            self.acfun.validate_channel(snapshot["channel_id"])
+            saved = self.store.get_job(task.task_id) or {}
+            publications.change(self.store, publication_id, status="ready", error="")
+            publications.freeze(self.store, task.task_id, [publication_id])
+            self.scheduler.add(task, "submit", saved.get("settings"), stage="validate", targets=[publication_id])
+            return {"queued": True}
+        return self.operation(operation_id, "acfun.verification.refresh", action, {"publication_id": publication_id})
 
     def retry_publication(self, publication_id, operation_id):
         def action():
@@ -473,7 +534,7 @@ class DesktopService:
             self.ensure_inactive(p["task_id"])
             if p["status"] not in ("failed", "cancelled", "interrupted", "blocked_validation"):
                 raise Yt2BiliError("只能继续已失败、取消或中断的目标；结果待核对时禁止重投。")
-            if p["platform"] == "acfun" and self.store._conn.execute("SELECT 1 FROM acfun_attempts WHERE publication_id=? AND create_intent_at!='' AND phase!='resolved_not_submitted'", (publication_id,)).fetchone():
+            if p["platform"] == "acfun" and self.store._conn.execute("SELECT 1 FROM acfun_attempts WHERE publication_id=? AND create_intent_at!='' AND phase NOT IN ('resolved_not_submitted','rejected')", (publication_id,)).fetchone():
                 raise Yt2BiliError("AcFun 已记录创建作品意图，须先核对；禁止重投。")
             task = self.task(p["task_id"])
             if not task.video_path or not Path(task.video_path).is_file(): raise Yt2BiliError("本地素材缺失，请先恢复素材；不会自动重发已成功目标。")
@@ -549,17 +610,23 @@ class DesktopService:
                 raise Yt2BiliError("素材准备完成后才可编辑。")
             if not isinstance(title, str) or not 1 <= len(title.strip()) <= 80:
                 raise Yt2BiliError("标题须为 1～80 字。")
-            if not isinstance(description, str) or len(description) > 2000:
-                raise Yt2BiliError("简介不能超过 2000 字。")
+            ac = publications.for_platform(self.store, task.task_id, "acfun")
+            desc_limit = 1000 if ac and ac["status"] == "ready" else 2000
+            if not isinstance(description, str) or len(description) > desc_limit:
+                raise Yt2BiliError(f"简介不能超过 {desc_limit} 字。")
             task.metadata_revision += 1
             task.title_zh = title.strip().replace("\n", " ")
             body = description.split("\n\n————————\n原标题：")[0]
-            task.desc_zh = translate.build_description(body, task.title_orig, task.uploader, task.url, 2000)
+            task.desc_zh = translate.build_description(body, task.title_orig, task.uploader, task.url, desc_limit)
             record = self.store.translation(task_id) or {}
             record.update(state="edited", user_edited=True, description=body)
             self.store.save_translation(task, record)
             p = publications.for_platform(self.store, task.task_id, "bilibili")
             if p: publications.change(self.store, p["publication_id"], text=task.title_zh)
+            if ac and ac["status"] == "ready":
+                ac_snapshot = json.loads(ac["snapshot"])
+                ac_snapshot["description"] = task.desc_zh
+                publications.change(self.store, ac["publication_id"], snapshot=json.dumps(ac_snapshot, ensure_ascii=False))
             for name, content in (("title.txt", task.title_zh), ("desc.txt", task.desc_zh)):
                 (Path(task.work_dir) / name).write_text(content, encoding="utf-8")
             return asdict(task)

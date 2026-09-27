@@ -316,6 +316,22 @@ class DesktopTests(unittest.TestCase):
             while self.service.translation_jobs.active() and time.monotonic()<until:time.sleep(.01)
             self.assertEqual(self.service.translation_jobs.get(first["job_id"])["state"],"cancelled")
 
+    def test_translation_uninstall_uses_background_job_and_updates_status(self):
+        root = self.paths.root / "translation"
+        models = root / "models"
+        models.mkdir(parents=True)
+        (models / "fixture").write_bytes(b"model")
+        (root / "deployment.json").write_text("{}")
+        job = self.service.dispatch("translation.uninstall", {"operation_id": "uninstall-model-1"})
+        self.wait_until(lambda: not self.service.translation_jobs.active(), "model uninstall")
+        self.assertEqual(self.service.translation_jobs.get(job["job_id"])["state"], "complete")
+        self.assertEqual(self.service.translation_status()["local"]["state"], "missing")
+        self.assertFalse(models.exists())
+        self.assertEqual(job, self.service.translation_uninstall("uninstall-model-1"))
+        self.service.config.values["local_llm_mode"] = "external"
+        with self.assertRaises(Yt2BiliError):
+            self.service.translation_uninstall("uninstall-model-2")
+
     def test_configuration_and_edit_are_blocked_for_active_task(self):
         started, release = threading.Event(), threading.Event()
         def download(*args, **kwargs):

@@ -31,7 +31,7 @@ class DesktopSettings:
         self.vault = vault
         self.vault_service = "StarDazz.yt2bili:" + str(paths.root)
         self.translation_upgrade_notice = False
-        self.values = dict(work_dir=str(paths.root / "work"), bili_tid=171, bili_tags="转载",
+        self.values = dict(work_dir=str(paths.root / "work"), bili_tid=171, bili_tags="转载", acfun_channel_id=0,
                            bili_line="tx", upload_gap_seconds=20, theme="system",
                            hwaccel="auto", validation_cache=True, douyin_broker_url="",
                            acfun_experimental_enabled=False, **DEFAULTS)
@@ -85,7 +85,7 @@ class DesktopSettings:
             if url.scheme != "https" or not url.hostname or url.username or url.password or url.path not in ("", "/") or url.query or url.fragment:
                 raise Yt2BiliError("抖音服务地址必须为 HTTPS 源地址，不能携带凭据、路径或查询参数。")
         merged.update(validate_translation(merged))
-        for name, lo, hi in (("bili_tid", 1, 65535), ("upload_gap_seconds", 0, 600)):
+        for name, lo, hi in (("bili_tid", 1, 65535), ("acfun_channel_id", 0, 65535), ("upload_gap_seconds", 0, 600)):
             if type(merged[name]) is not int or not lo <= merged[name] <= hi:
                 raise Yt2BiliError(f"{name} 必须在 {lo}～{hi} 之间。")
         if merged["theme"] not in ("system", "dark", "light") or merged["hwaccel"] not in ("auto", "cpu"):

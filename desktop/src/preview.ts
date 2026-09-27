@@ -4,6 +4,7 @@ const config = {
   work_dir: "D:\\yt2bili-work",
   bili_tid: 171,
   bili_tags: "转载",
+  acfun_channel_id: 90,
   bili_line: "tx",
   upload_gap_seconds: 20,
   theme: "dark",
@@ -91,7 +92,35 @@ if (new URLSearchParams(location.search).has("samevideo") && tasks.length)
     account_uid_snapshot: a.uid,
     account_name_snapshot: a.nickname,
   }));
+const verificationPreview = new URLSearchParams(location.search).has("acfunVerification");
+let verificationMissing = new URLSearchParams(location.search).has("acfunVerificationMissing");
+if (verificationPreview && tasks.length) {
+  tasks[0].status = "partial_success";
+  tasks[0].publications = [{
+    publication_id: "acfun-verification-preview", platform: "acfun", account_id: "acfun-preview",
+    status: "failed", revision: 1, text: "", remote_id: "",
+    error: "AcFun 需要安全验证（代码 400011）。",
+    snapshot: JSON.stringify({ title: "验证测试", channel_id: 86, description: "共用简介", tags: ["转载"] }),
+  }];
+}
 export async function request(method: string, params: any): Promise<any> {
+  if (verificationPreview && method === "acfun.verification") return verificationMissing ? {
+    status: "refresh_required", reason: "missing", message: "本次验证入口未保存或来自旧版后台。",
+  } : {
+    status: "ready", challenge_id: "preview-challenge", url: new URLSearchParams(location.search).has("acfunMobileVerification")
+      ? "https://app.m.kuaishou.com/account/verify?preview=1" : "https://passport.kuaishou.com/pc/identity/qrcode?preview=1",
+  };
+  if (verificationPreview && method === "acfun.verification.refresh") {
+    verificationMissing = false;
+    return { queued: true };
+  }
+  if (verificationPreview && method === "acfun.verification.complete") {
+    if (params.challenge_id !== "preview-challenge" || params.token !== "preview-proof" || params.verification_type !== "captcha")
+      throw new Error("预览验证结果不匹配");
+    tasks[0].publications![0].status = "ready";
+    tasks[0].publications![0].error = "";
+    return { ready: true };
+  }
   if (method === "system.health") return { protocol_version: 2 };
   if (method === "translation.status")
     return {
@@ -108,23 +137,22 @@ export async function request(method: string, params: any): Promise<any> {
         ? translationJobs.find((j) => j.job_id === params.job_id)
         : { items: translationJobs },
     );
-  if (method === "translation.install" || method === "translation.test") {
+  if (method === "translation.install" || method === "translation.test" || method === "translation.uninstall") {
     const job: any = {
       job_id: crypto.randomUUID(),
-      kind: method.endsWith("test") ? "test:" + params.provider : "install",
+      kind: method.endsWith("test") ? "test:" + params.provider : method.endsWith("uninstall") ? "uninstall" : "install",
       state: "running",
     };
     translationJobs.push(job);
     setTimeout(() => {
       if (job.state === "running") {
         job.state = "complete";
-        job.result = {
-          title: "更好的工作流",
-          description: "构建实用工具。保留版本 2.0。",
-          elapsed_ms: 800,
-        };
+        job.result = job.kind === "uninstall"
+          ? { message: "本地大语言模型已卸载；运行时和已有译文已保留。" }
+          : { title: "更好的工作流", description: "构建实用工具。保留版本 2.0。", elapsed_ms: 800 };
         if (job.kind === "install") localInstalled = true;
-        config.translation_ready = true;
+        if (job.kind === "uninstall") localInstalled = false;
+        config.translation_ready = localInstalled || config.has_deepl_key;
       }
     }, 1000);
     return { job_id: job.job_id };
@@ -166,10 +194,15 @@ export async function request(method: string, params: any): Promise<any> {
         : null,
     };
   }
+  if (method === "acfun.channels") return { items: [
+    { channel_id: 90, name: "科技 / 科技制造" },
+    { channel_id: 196, name: "影视 / 纪录片·短片" },
+    { channel_id: 86, name: "生活 / 生活日常" },
+  ] };
   if (method === "acfun.auth.status") {
     const enabled = new URLSearchParams(location.search).get("acfun") === "1";
     return {
-      enabled, can_sync: enabled, capabilities: { auto_publish: false, experimental: true },
+      enabled, can_sync: enabled, capabilities: { auto_publish: true, experimental: true },
       account: enabled ? { account_id: "acfun-preview", binding_revision: 1, user_id: "12345", nickname: "AcFun 预览账号", auth_state: "valid" } : null,
       error: enabled ? "" : "AcFun 实验性接入尚未启用。",
     };

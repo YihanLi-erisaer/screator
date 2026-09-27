@@ -20,6 +20,20 @@ test("local-first translation settings and fallback can be changed", async ({
   await expect(page.getByLabel("翻译流程总超时（秒）")).toHaveValue("360");
 });
 
+test("managed translation model can be uninstalled from settings", async ({ page }) => {
+  await page.goto("/?preview");
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "安装 / 重试下载" }).click();
+  await expect(page.getByText("开发预览 · 本地组件已就绪")).toBeVisible();
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "卸载大语言模型" }).click();
+  await expect(page.getByText("开发预览 · 本地组件已就绪")).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "卸载大语言模型" }).click();
+  await expect(page.getByText("本地大语言模型已卸载；运行时和已有译文已保留。")).toBeVisible();
+  await expect(page.getByText("开发预览 · 尚未安装本地组件")).toBeVisible();
+});
+
 test("first-run accepts local test without a DeepL key", async ({ page }) => {
   await page.goto("/?preview");
   await page.getByRole("button", { name: "开始配置" }).click();

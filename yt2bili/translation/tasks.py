@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
-from yt2bili import events, translate
+from yt2bili import events, publications, translate
 from .config import snapshot
 from .service import translate as translate_group, source_hash
 from .types import TranslationError
@@ -18,6 +18,7 @@ def sync_files(task, folder):
 
 def prepare(settings, store, task, meta, folder, *, force=False):
     record = store.translation(task.task_id) or {}
+    has_acfun = publications.for_platform(store, task.task_id, "acfun") is not None
     if not force and (record.get("state") in ("complete", "edited", "legacy_preserved", "skipped") or task.title_zh):
         if not record.get("state"):
             record.update(state="legacy_preserved", provider="unknown", user_edited=False)
@@ -29,10 +30,13 @@ def prepare(settings, store, task, meta, folder, *, force=False):
     if not force:
         record["config_snapshot"] = config
         store.save_translation(task, record)
+    description_limit = min(settings.desc_limit, 1000) if has_acfun else settings.desc_limit
     reserve = 80 + len(meta.title) + len(meta.uploader) + len(meta.webpage_url)
     try:
         result = translate_group(settings, meta.title, meta.description, meta.language,
-                                 settings.title_limit, max(200, settings.desc_limit-reserve), config=config)
+                                 settings.title_limit, max(200, description_limit-reserve), config=config)
+        acfun_result = (translate_group(settings, meta.title, "", meta.language, 50, 200, config=config)
+                        if has_acfun else None)
     except TranslationError as exc:
         store.translation_attempt(task.task_id, getattr(exc, "attempts", [{"code": exc.code}]))
         raise
@@ -41,9 +45,13 @@ def prepare(settings, store, task, meta, folder, *, force=False):
                   "config_snapshot": {**config, **({"model_digest": result.model_digest} if result.model_digest else {})},
                   "source_hash": source_hash(meta.title, meta.description, meta.language),
                   "postprocess_version": 1, "user_edited": False, "revision": record.get("revision", 0) + 1}
+    if acfun_result:
+        new_record["acfun_title"] = acfun_result.title
+        new_record["acfun_title_provider"] = acfun_result.provider
+        new_record["acfun_title_attempts"] = acfun_result.attempts
     title_before, desc_before = task.title_zh, task.desc_zh
     task.title_zh = result.title
-    task.desc_zh = translate.build_description(result.description, meta.title, meta.uploader, meta.webpage_url, settings.desc_limit)
+    task.desc_zh = translate.build_description(result.description, meta.title, meta.uploader, meta.webpage_url, description_limit)
     try:
         store.save_translation(task, new_record)
     except Exception:

@@ -64,7 +64,7 @@ import {
 import SetupWizard from "./SetupWizard";
 import { AccountsPanel, AccountSelector, QueueOverview } from "./Accounts";
 import { DouyinAccountPanel, PublicationDetails } from "./Douyin";
-import { AcfunAccountPanel } from "./Acfun";
+import { AcfunAccountPanel, AcfunChannelSelect } from "./Acfun";
 import { accountLabel, type BiliAccount } from "./types";
 import TranslationPanel from "./TranslationPanel";
 
@@ -930,6 +930,7 @@ export default function App() {
         {newTask && (
           <NewTask
             accounts={auth.accounts || []}
+            config={config}
             busy={busy}
             action={action}
             close={() => {
@@ -1001,12 +1002,14 @@ export default function App() {
 type Action = (work: () => Promise<unknown>, success?: string) => Promise<void>;
 function NewTask({
   accounts,
+  config,
   busy,
   action,
   close,
   done,
 }: {
   accounts: BiliAccount[];
+  config: Config | null;
   busy: boolean;
   action: Action;
   close: () => void;
@@ -1087,7 +1090,6 @@ function NewTask({
             checked={mode === "auto"}
             onChange={() => {
               setMode("auto");
-              setSyncAcfun(false);
               op.current = operationId();
             }}
           />
@@ -1125,13 +1127,13 @@ function NewTask({
         </p>
       )}
       <label className="checkbox">
-        <input type="checkbox" checked={syncAcfun} disabled={!acfun?.can_sync || mode === "auto"}
+        <input type="checkbox" checked={syncAcfun} disabled={!acfun?.can_sync}
           onChange={(e) => { setSyncAcfun(e.target.checked); op.current = operationId(); }} />
         同步上传 AcFun{acfun?.account ? ` · ${acfun.account.nickname}` : ""}
       </label>
       {!acfun?.can_sync && <p className="help">请先在“账号与连接”扫码并启用 AcFun 实验性接入。{acfun?.error}</p>}
-      {mode === "auto" && acfun?.can_sync && <p className="help">AcFun 网页投稿仅支持准备素材并预览。</p>}
-      {syncAcfun && <p className="help">AcFun 使用独立队列；准备好素材后填写分区和投稿信息，再确认上传。</p>}
+      {syncAcfun && <p className="help">AcFun 使用独立队列，并共用本任务的标签与简介；标题单独翻译且最多 50 字。{mode === "auto" ? "素材准备好后自动投稿。" : "预览后确认投稿。"}</p>}
+      {syncAcfun && mode === "auto" && !config?.acfun_channel_id && <p className="inline-error">请先在设置中填写 AcFun 默认分区 ID，再创建自动投稿任务。</p>}
       <label className="checkbox">
         <input
           type="checkbox"
@@ -1154,7 +1156,7 @@ function NewTask({
             (syncDouyin &&
               mode === "auto" &&
               !douyin?.capabilities?.auto_publish) ||
-            (syncAcfun && mode === "auto")
+            (syncAcfun && mode === "auto" && (!acfun?.capabilities?.auto_publish || !config?.acfun_channel_id))
           }
           onClick={() =>
             action(async () => {
@@ -1218,6 +1220,7 @@ function TaskDetail({
   const [confirm, setConfirm] = useState("");
   const [bv, setBv] = useState("");
   const [douyinDirty, setDouyinDirty] = useState(false);
+  const descriptionLimit = task.publications?.some((p) => p.platform === "acfun" && p.status === "ready") ? 1000 : 2000;
   const op = useRef(operationId());
   useEffect(() => {
     setTitle(task.title_zh);
@@ -1427,11 +1430,11 @@ function TaskDetail({
             />
           </label>
           <label className="field">
-            简介 <span>{description.length} / 2000</span>
+            简介 <span>{description.length} / {descriptionLimit}</span>
             <textarea
               rows={7}
               value={description}
-              maxLength={2000}
+              maxLength={descriptionLimit}
               readOnly={!editable(task)}
               onChange={(e) => setDescription(e.target.value)}
             />
@@ -1443,7 +1446,7 @@ function TaskDetail({
           {editable(task) && (
             <button
               className="secondary"
-              disabled={busy}
+              disabled={busy || description.length > descriptionLimit}
               onClick={() =>
                 action(async () => {
                   await request("tasks.update_metadata", {
@@ -1853,6 +1856,9 @@ function Settings({
               onChange={(e) => update("bili_tid", Number(e.target.value))}
             />
           </label>
+          <AcfunChannelSelect label="AcFun 默认分区（自动投稿必填）"
+            value={form.acfun_channel_id} disabled={busy}
+            onChange={(value) => update("acfun_channel_id", value)} />
           <label className="field">
             上传线路
             <select
@@ -1952,6 +1958,7 @@ function Settings({
               const {
                 work_dir,
                 bili_tid,
+                acfun_channel_id,
                 bili_tags,
                 bili_line,
                 upload_gap_seconds,
@@ -1963,6 +1970,7 @@ function Settings({
                 values: {
                   work_dir,
                   bili_tid,
+                  acfun_channel_id,
                   bili_tags,
                   bili_line,
                   upload_gap_seconds,

@@ -185,7 +185,7 @@ def _build_parser():
     run.add_argument("url")
     run.add_argument("--account", required=True)
     run.add_argument("--sync-douyin", action="store_true", help="同步到已绑定的抖音账号；需预先配置官方授权服务")
-    run.add_argument("--sync-acfun", action="store_true", help="同步到已绑定的 AcFun 账号；实验性网页接入，仅预览模式")
+    run.add_argument("--sync-acfun", action="store_true", help="同步到已绑定的 AcFun 账号；实验性网页接入，自动模式需配置 AcFun 默认分区 ID")
     mode = run.add_mutually_exclusive_group()
     mode.add_argument("--auto", action="store_true", help="素材准备好后自动投稿")
     mode.add_argument("--dry-run", action="store_true", help="准备素材等待确认（默认）")

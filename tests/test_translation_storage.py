@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from yt2bili.db import Task, TaskStore
+from yt2bili import publications
 from yt2bili.desktop_settings import DesktopSettings
 from yt2bili.paths import AppPaths
 from yt2bili.translation import tasks
@@ -48,6 +49,29 @@ class StorageTests(unittest.TestCase):
         record=self.store.translation(self.task.video_id)
         self.assertEqual(record['config_snapshot']['model_digest'],'digest')
         self.assertEqual(record['state'],'complete')
+
+    def test_acfun_title_translated_separately_with_shared_description(self):
+        with self.store.transaction() as db:
+            db.execute("INSERT INTO task_publications(publication_id,task_id,platform,source_video_id,snapshot) VALUES('ac-pub',?,'acfun',?,'{\"channel_id\":90,\"tags\":[\"转载\"]}')", (self.task.task_id, self.task.video_id))
+        outputs = [TranslationResult('B' * 70, '正文', 'local_llm'), TranslationResult('A' * 45, '', 'local_llm')]
+        with patch.object(tasks, 'translate_group', side_effect=outputs) as translated:
+            tasks.prepare(self.settings, self.store, self.task, self.meta, self.root, force=True)
+        self.assertEqual([call.args[4] for call in translated.call_args_list], [80, 50])
+        self.assertEqual(translated.call_args_list[1].args[2], '')
+        self.assertEqual(self.store.translation(self.task.task_id)['acfun_title'], 'A' * 45)
+        publications.prepare(self.store, self.task.task_id)
+        snapshot = json.loads(publications.for_platform(self.store, self.task.task_id, 'acfun')['snapshot'])
+        self.assertEqual(snapshot['title'], 'A' * 45)
+        self.assertEqual(snapshot['description'], self.task.desc_zh)
+        self.assertLessEqual(len(self.task.desc_zh), 1000)
+
+    def test_acfun_title_translation_failure_preserves_existing_pair(self):
+        with self.store.transaction() as db:
+            db.execute("INSERT INTO task_publications(publication_id,task_id,platform,source_video_id) VALUES('ac-pub',?,'acfun',?)", (self.task.task_id, self.task.video_id))
+        with patch.object(tasks, 'translate_group', side_effect=[TranslationResult('新标题','新正文','local_llm'), TranslationError('FAIL','failure')]), self.assertRaises(TranslationError):
+            tasks.prepare(self.settings, self.store, self.task, self.meta, self.root, force=True)
+        restored = self.store.require(self.task.task_id)
+        self.assertEqual((restored.title_zh, restored.desc_zh), ('用户标题', '用户简介'))
 
     def test_sql_failure_rolls_back_both_fields(self):
         self.store._conn.execute("CREATE TRIGGER deny_translation BEFORE INSERT ON task_translation BEGIN SELECT RAISE(ABORT,'test'); END")

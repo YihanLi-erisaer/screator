@@ -167,9 +167,13 @@ def prepare(store, task_id):
         if p["status"] in TERMINAL | {"submission_unknown"}: continue
         values = {"status": "ready", "error": "", "text": p["text"] or task.title_zh}
         if p["platform"] == "acfun":
+            from yt2bili.translate import clamp_title
             snapshot = json.loads(p["snapshot"])
-            snapshot.setdefault("title", task.title_zh)
-            snapshot.setdefault("description", task.desc_zh)
+            generated = (store.translation(task_id) or {}).get("acfun_title") or clamp_title(task.title_zh, 50)
+            if not snapshot.get("title") or snapshot.get("title_source") == "generated":
+                snapshot["title"] = generated
+                snapshot["title_source"] = "generated"
+            snapshot["description"] = task.desc_zh
             values["snapshot"] = json.dumps(snapshot, ensure_ascii=False)
         change(store, p["publication_id"], **values)
 
@@ -184,6 +188,6 @@ def freeze(store, task_id, targets=None):
             existing = json.loads(p["snapshot"])
             change(store, p["publication_id"], status="queued", snapshot=json.dumps({**existing,
                 "title": existing.get("title", task.title_zh) if p["platform"] == "acfun" else task.title_zh,
-                "description": existing.get("description", task.desc_zh) if p["platform"] == "acfun" else task.desc_zh, "text": p["text"],
+                "description": task.desc_zh, "text": p["text"],
                 "account_id": p["account_id"], "metadata_revision": task.metadata_revision,
                 "revision": p["revision"]}, ensure_ascii=False))

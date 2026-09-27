@@ -57,7 +57,8 @@ class TranslationJobs:
                 try:
                     with events.task_context(job_id, cancel, progress):
                         result = action()
-                        events.check_cancelled()
+                        if kind != "uninstall":
+                            events.check_cancelled()
                     update = {"state": "complete", "result": result}
                 except events.Cancelled:
                     update = {"state": "cancelled", "message": "操作已取消；可重试复用已下载资源。"}
@@ -86,6 +87,8 @@ class TranslationJobs:
         with self.lock:
             self.get(job_id)
             if job_id in self.running:
+                if self.records[job_id]["kind"] == "uninstall":
+                    raise Yt2BiliError("模型卸载开始后不能取消，请等待完成。")
                 self.running[job_id][0].set()
                 self.records[job_id]["state"] = "cancel_requested"
                 self.persist()
