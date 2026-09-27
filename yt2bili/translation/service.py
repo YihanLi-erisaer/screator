@@ -127,7 +127,10 @@ def translate(settings, title, description, source_lang, title_limit, desc_body_
                        "source": {"title": title, "description": description, "source_lang": source_lang}}
             if config.get("model_digest"):
                 payload["expected_digest"] = config["model_digest"]
-            deadline = min(total_deadline, time.monotonic() + (config["local_llm_timeout_seconds"] if provider == "local_llm" else 90))
+            # The local HTTP request applies local_llm_timeout_seconds only when
+            # /api/chat begins. The parent process still enforces the total flow
+            # deadline, without charging model startup to the inference budget.
+            deadline = total_deadline if provider == "local_llm" else min(total_deadline, time.monotonic() + 90)
             for attempt in range(2):
                 tick = time.monotonic()
                 try:

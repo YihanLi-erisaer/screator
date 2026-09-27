@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch, Mock
 
 from yt2bili.translation.config import DEFAULTS
@@ -61,6 +62,26 @@ class DeploymentTests(unittest.TestCase):
                 with local_session(DEFAULTS,self.root):pass
         self.assertEqual(raised.exception.code,'PORT_IN_USE')
         launch.assert_not_called()
+
+    def test_slow_runtime_start_is_reported_separately_from_inference_timeout(self):
+        binary = runtime_path(self.root)
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"fixture")
+        (binary.parent / "installed.json").write_text(json.dumps({"binary_sha256": sha256(binary)}))
+        process = Mock()
+        process.poll.side_effect = [None, 1]
+        clock = SimpleNamespace(monotonic=Mock(side_effect=[0, 0, 61]), sleep=Mock())
+        with patch("yt2bili.translation.runtime.sys.platform", "win32"), \
+             patch("yt2bili.translation.runtime.platform.machine", return_value="AMD64"), \
+             patch("yt2bili.translation.runtime.request_json", side_effect=TranslationError("LOCAL_UNAVAILABLE", "not ready")), \
+             patch("yt2bili.translation.runtime.subprocess.Popen", return_value=process), \
+             patch("yt2bili.translation.runtime.ProcessTree"), \
+             patch("yt2bili.translation.runtime.time", clock):
+            with self.assertRaises(TranslationError) as raised:
+                with local_session(DEFAULTS, self.root):
+                    self.fail("runtime must not be ready")
+        self.assertEqual(raised.exception.code, "STARTUP_TIMEOUT")
+        self.assertIn("尚未开始大模型翻译", str(raised.exception))
 
     def test_jobs_restore_as_interrupted_instead_of_success(self):
         (self.root/'jobs.json').write_text(json.dumps({'one':{'job_id':'one','operation_id':'operation','kind':'install','state':'running'}}))

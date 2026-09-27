@@ -279,7 +279,7 @@ export default function TranslationPanel({
         </div>
         <div className="button-row">
           <p className="help">
-            推理超时为单次本地模型请求上限；流程总超时涵盖重试和备用服务切换，且必须更长。新设置只影响新任务。
+            推理超时从本地模型请求开始计算，等待翻译服务和启动运行时不计入；流程总超时涵盖启动、重试和备用服务切换，且必须更长。新设置只影响新任务。
           </p>
           <button
             className="secondary"

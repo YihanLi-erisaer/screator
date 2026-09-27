@@ -103,7 +103,9 @@ def local_session(config, root, *, installing=False):
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **creation_options())
     tree = ProcessTree(process)
     try:
-        deadline = time.monotonic() + 20
+        # Startup is separate from the model inference timeout. Under load the
+        # managed runtime may take longer to become ready between queued jobs.
+        deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             events.check_cancelled()
             if process.poll() is not None:
@@ -118,7 +120,7 @@ def local_session(config, root, *, installing=False):
                     raise
                 time.sleep(.1)
         else:
-            raise TranslationError("TIMEOUT", "启动本地运行时超时。")
+            raise TranslationError("STARTUP_TIMEOUT", "本地运行时启动超过 60 秒，尚未开始大模型翻译，请检查资源占用后重试。")
         yield address
     finally:
         tree.close()

@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 from yt2bili import events
 from yt2bili.translation.config import DEFAULTS, validate, from_env
-from yt2bili.translation.service import translate, isolated_request
+from yt2bili.translation.service import translate, isolated_request, execution_slot
 from yt2bili.translation.types import TranslationError
 from yt2bili.translation.runtime import manifest
 from yt2bili.translation import deepl_provider
@@ -38,6 +38,35 @@ class TranslationTests(unittest.TestCase):
         self.assertEqual(result.provider, "local_llm")
         self.assertEqual(calls.call_count, 1)
         self.settings.deepl_key_provider.assert_not_called()
+
+    def test_queue_wait_does_not_consume_translation_budget(self):
+        # Direct config keeps this regression fast while retaining production's
+        # distinction between the local request and total flow deadlines.
+        config = {**DEFAULTS, "local_llm_timeout_seconds": 1,
+                  "translation_total_timeout_seconds": 2,
+                  "translation_fallback_enabled": False}
+        seen = {}
+        attempting = threading.Event()
+        def request(payload, deadline):
+            seen["remaining"] = deadline - time.monotonic()
+            return self.successful(payload, deadline)
+        def queued():
+            try:
+                attempting.set()
+                seen["result"] = self.translate(request, config=config)
+            except Exception as exc:
+                seen["error"] = exc
+        with execution_slot(self.settings.translation_root):
+            thread = threading.Thread(target=queued)
+            thread.start()
+            self.assertTrue(attempting.wait(1))
+            time.sleep(1.2)
+            self.assertNotIn("remaining", seen)
+        thread.join(3)
+        self.assertFalse(thread.is_alive())
+        self.assertNotIn("error", seen)
+        self.assertEqual(seen["result"].provider, "local_llm")
+        self.assertGreater(seen["remaining"], 1.5)
 
     def test_both_fallback_directions_are_bounded(self):
         for primary in ("local_llm", "deepl"):
@@ -178,6 +207,7 @@ class LocalHttpTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.delay = 0
+        self.ready_delay = 0
         self.content = json.dumps({"title": "译文", "description": "正文"})
         self.done_reason = "stop"
         self.last_body = None
@@ -190,6 +220,8 @@ class LocalHttpTests(unittest.TestCase):
                     self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError): pass
             def do_GET(self):
+                if self.path == "/api/version":
+                    time.sleep(owner.ready_delay)
                 self.respond({"version": "test"} if self.path == "/api/version" else {"models": [{"name": "qwen3:8b", "digest": manifest()["model"]["digest"]}]})
             def do_POST(self):
                 owner.last_body=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -207,6 +239,17 @@ class LocalHttpTests(unittest.TestCase):
         self.assertFalse(self.last_body["think"])
         self.assertFalse(self.last_body["stream"])
         self.assertEqual(self.last_body["format"]["required"],["title","description"])
+
+    def test_local_timeout_starts_after_service_is_ready(self):
+        self.ready_delay = 1.4
+        self.delay = .6
+        settings = SimpleNamespace(**DEFAULTS, translation_root=Path(self.temp.name), deepl_auth_key="")
+        config = {**self.config, "local_llm_timeout_seconds": 1,
+                  "translation_total_timeout_seconds": 6,
+                  "translation_fallback_enabled": False}
+        result = translate(settings, "Title", "Body", "en", 80, 1000, config=config)
+        self.assertEqual(result.provider, "local_llm")
+        self.assertEqual(result.attempts[0]["code"], "OK")
 
     def test_invalid_json_extra_fields_and_truncation_rejected(self):
         for content in ("```json\n{}\n```", '{}', '{"title":"","description":"a"}', '{"title":"a","description":"b","extra":"c"}'):
