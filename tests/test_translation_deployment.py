@@ -10,8 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import patch, Mock
 
 from yt2bili.translation.config import DEFAULTS
-from yt2bili.translation.deployment import download_runtime, uninstall_model
-from yt2bili.translation.runtime import local_session, runtime_path, sha256
+from yt2bili.translation.deployment import download_runtime, install, uninstall_model
+from yt2bili.translation.runtime import local_session, model_manifest_path, runtime_path, sha256
 from yt2bili.translation.jobs import TranslationJobs
 from yt2bili.translation.types import TranslationError
 
@@ -40,6 +40,13 @@ class DeploymentTests(unittest.TestCase):
             path = download_runtime(self.root)
         self.assertEqual(path.read_bytes(), self.payload)
         self.assertEqual(request.call_args.args[0].headers["Range"], "bytes=4-")
+
+    def test_managed_install_only_uses_the_current_pinned_model(self):
+        self.assertEqual(model_manifest_path(self.root).relative_to(self.root).as_posix(),
+                         "models/manifests/registry.ollama.ai/library/qwen3.5/4b")
+        with self.assertRaises(TranslationError) as raised:
+            install({**DEFAULTS, "local_llm_model": "qwen3:8b"}, self.root)
+        self.assertEqual(raised.exception.code, "INPUT_INVALID")
 
     def test_ignored_range_restarts_download_without_appending(self):
         (self.root / "downloads/runtime.part").write_bytes(b"stale")

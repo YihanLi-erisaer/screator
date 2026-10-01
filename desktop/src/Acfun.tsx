@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { external, operationId, request } from "./bridge";
+import { StyledSelect } from "./StyledSelect";
 
 export function AcfunVerification({ publicationId, busy, run }: {
   publicationId: string;
@@ -93,13 +94,21 @@ export function AcfunChannelSelect({ value, onChange, disabled = false, label = 
   }, [reload]);
   const invalid = value > 0 && !loading && !error && !items.some((item) => item.channel_id === value);
   return <div>
-    <label className="field">{label}
-      <select value={value} disabled={disabled || loading || !items.length} onChange={(e) => onChange(Number(e.target.value))}>
-        <option value={0}>{loading ? "正在读取 AcFun 分区…" : "请选择具体分区"}</option>
-        {value > 0 && !items.some((item) => item.channel_id === value) && <option value={value} disabled>未匹配到可投稿分区（ID {value}）</option>}
-        {items.map((item) => <option key={item.channel_id} value={item.channel_id}>{item.name}（{item.channel_id}）</option>)}
-      </select>
-    </label>
+    <div className="field">{label}
+      <StyledSelect
+        label={label}
+        value={String(value)}
+        disabled={disabled || loading || !items.length}
+        onChange={(selected) => onChange(Number(selected))}
+        options={[
+          { value: "0", label: loading ? "正在读取 AcFun 分区…" : "请选择具体分区" },
+          ...(value > 0 && !items.some((item) => item.channel_id === value)
+            ? [{ value: String(value), label: `未匹配到可投稿分区（ID ${value}）`, disabled: true }]
+            : []),
+          ...items.map((item) => ({ value: String(item.channel_id), label: `${item.name}（${item.channel_id}）` })),
+        ]}
+      />
+    </div>
     {invalid && <p className="inline-error">该 ID 不是可投稿的视频子分区，请重新选择。</p>}
     {error && <p className="help">{error} <button type="button" disabled={disabled || loading} onClick={() => setReload((n) => n + 1)}>重试读取分区</button></p>}
   </div>;

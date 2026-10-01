@@ -138,6 +138,7 @@ class MultiAccountTests(unittest.TestCase):
                     self.assertEqual(len(calls), 5)
                 status = self.service.prepare_shutdown()
                 self.assertFalse(status["ready"])
+                self.assertEqual(len(status["inflight_task_ids"]), 5)
             finally: release.set()
             self.wait_idle()
             self.assertEqual(peak, {a["uid"]: 1 for a in accounts})

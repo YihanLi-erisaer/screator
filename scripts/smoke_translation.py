@@ -33,7 +33,7 @@ def main():
             self.wfile.write(body)
         def do_GET(self):
             self.send_json({"version":"test"} if self.path=="/api/version" else
-                           {"models":[{"name":"qwen3:8b","digest":manifest()["model"]["digest"]}]})
+                           {"models":[{"name":manifest()["model"]["name"],"digest":manifest()["model"]["digest"]}]})
         def do_POST(self):
             requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))));
             self.send_json({"done":True,"done_reason":"stop","message":{"content":json.dumps({"title":"工作流","description":"测试正文"})}})

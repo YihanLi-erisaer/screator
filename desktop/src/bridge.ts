@@ -42,6 +42,7 @@ export async function onClose(callback: () => void) {
   return isTauri() ? listen("app-close-requested", callback) : () => {};
 }
 export const closeApp = () => invoke("finish_close");
+export const forceCloseApp = () => invoke("force_close");
 export async function chooseFile(extensions = ["txt"]) {
   if (!isTauri()) throw new Error("文件选择需要在桌面应用中使用。");
   return open({

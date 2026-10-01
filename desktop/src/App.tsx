@@ -49,6 +49,7 @@ import {
   operationId,
   onClose,
   closeApp,
+  forceCloseApp,
 } from "./bridge";
 import {
   active,
@@ -67,9 +68,15 @@ import { DouyinAccountPanel, PublicationDetails } from "./Douyin";
 import { AcfunAccountPanel, AcfunChannelSelect } from "./Acfun";
 import { accountLabel, type BiliAccount } from "./types";
 import TranslationPanel from "./TranslationPanel";
+import { StyledSelect } from "./StyledSelect";
 
 type Page = "tasks" | "history" | "account" | "settings";
 type Notice = { kind: "success" | "error"; text: string };
+type ShutdownStatus = {
+  ready: boolean;
+  pending_task_ids: string[];
+  inflight_task_ids: string[];
+};
 const NoticeContext = createContext<Notice | null>(null);
 const titles = {
   tasks: "任务中心",
@@ -164,6 +171,7 @@ export default function App() {
   const [accountFilter, setAccountFilter] = useState("");
   const [accountOptions, setAccountOptions] = useState<BiliAccount[]>([]);
   const [shutdownStarted, setShutdownStarted] = useState(false);
+  const [shutdownStatus, setShutdownStatus] = useState<ShutdownStatus | null>(null);
   const taskRequest = useRef(0);
   const latestTasks = useRef<Record<string, Task>>({});
   const [queueActive, setQueueActive] = useState<any[]>([]);
@@ -413,7 +421,8 @@ export default function App() {
     let stop = false;
     const tick = async () => {
       try {
-        const state = await request("system.shutdown_status");
+        const state = (await request("system.shutdown_status")) as ShutdownStatus;
+        if (!stop) setShutdownStatus(state);
         if (state.ready && !stop) {
           await closeApp();
           return;
@@ -652,24 +661,18 @@ export default function App() {
                   </div>
                 )}
                 <QueueOverview queue={queue} accounts={auth.accounts || []} />
-                <label className="field">
+                <div className="field">
                   按账号筛选
-                  <select
-                    aria-label="按账号筛选"
+                  <StyledSelect
+                    label="按账号筛选"
                     value={accountFilter}
-                    onChange={(e) => {
-                      setAccountFilter(e.target.value);
+                    onChange={(value) => {
+                      setAccountFilter(value);
                       setOffset(0);
                     }}
-                  >
-                    <option value="">全部账号</option>
-                    {accountOptions.map((a) => (
-                      <option key={a.account_id} value={a.account_id}>
-                        {accountLabel(a)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    options={[{ value: "", label: "全部账号" }, ...accountOptions.map((a) => ({ value: a.account_id, label: accountLabel(a) }))]}
+                  />
+                </div>
                 <div className="task-panel">
                   <div className="panel-toolbar">
                     <div className="tabs">
@@ -968,23 +971,36 @@ export default function App() {
           >
             <p className="modal-copy">
               {shutdownStarted
-                ? "正在停止未投稿任务并保留素材；等待所有在途投稿结束后退出。"
+                ? `已停止未投稿任务并保留素材。仍有 ${shutdownStatus?.inflight_task_ids.length ?? 0} 个在途投稿、${shutdownStatus?.pending_task_ids.length ?? 0} 个任务待收尾；投稿结束后自动退出。`
                 : "退出会取消未投稿任务，并等待正在投稿的账号完成。"}
             </p>
+            {shutdownStarted && (
+              <p className="help">
+                如需立即退出，可停止在途投稿。素材会保留；投稿请求可能已到达平台，重启后请核对结果，再决定是否重试。
+              </p>
+            )}
             <div className="modal-actions">
-              <button
-                disabled={shutdownStarted}
-                className="secondary"
-                onClick={() => setClosing(false)}
-              >
-                继续使用
-              </button>
+              {!shutdownStarted && (
+                <button className="secondary" onClick={() => setClosing(false)}>
+                  继续使用
+                </button>
+              )}
+              {shutdownStarted && (
+                <button
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => action(async () => { await forceCloseApp(); })}
+                >
+                  停止投稿并退出
+                </button>
+              )}
               <button
                 disabled={shutdownStarted || busy}
                 className="primary"
                 onClick={() =>
                   action(async () => {
-                    await request("system.prepare_shutdown");
+                    const state = (await request("system.prepare_shutdown")) as ShutdownStatus;
+                    setShutdownStatus(state);
                     setShutdownStarted(true);
                   })
                 }
@@ -1377,7 +1393,10 @@ function TaskDetail({
           </button>
         </div>
       )}
-      {task.translation && (
+      {task.translation?.state === "queued" && (
+        <p className="help">旧译文已清空，{task.status === "translating" ? "正在重新翻译。" : "等待重新翻译。"}</p>
+      )}
+      {task.translation && !["queued", "failed", "cancelled"].includes(task.translation.state || "") && (
         <p className="help">
           翻译来源：
           {
@@ -1444,23 +1463,32 @@ function TaskDetail({
             号后，任务素材将自动清理。
           </p>
           {editable(task) && (
-            <button
-              className="secondary"
-              disabled={busy || description.length > descriptionLimit}
-              onClick={() =>
-                action(async () => {
-                  await request("tasks.update_metadata", {
-                    task_id: task.task_id,
-                    title,
-                    description,
-                  });
-                  await refresh();
-                }, "投稿信息已保存。")
-              }
-            >
-              <Check size={15} />
-              保存修改
-            </button>
+            <div className="inline-controls">
+              <button
+                className="secondary"
+                disabled={busy || description.length > descriptionLimit}
+                onClick={() =>
+                  action(async () => {
+                    await request("tasks.update_metadata", {
+                      task_id: task.task_id,
+                      title,
+                      description,
+                    });
+                    await refresh();
+                  }, "投稿信息已保存。")
+                }
+              >
+                <Check size={15} />
+                保存修改
+              </button>
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => setConfirm("retranslate")}
+              >
+                重新翻译
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -1533,15 +1561,6 @@ function TaskDetail({
             </button>
           </div>
         )}
-      {editable(task) && (
-        <button
-          className="text-button"
-          disabled={busy}
-          onClick={() => setConfirm("retranslate")}
-        >
-          按当前设置重新翻译
-        </button>
-      )}
       {retryable(task) && (
         <button
           className="text-button"
@@ -1564,7 +1583,7 @@ function TaskDetail({
         <div className="confirm-box">
           <strong>
             {confirm === "retranslate"
-              ? "重新翻译将替换当前标题与简介（含人工修改），完成后需重新预览。确定继续？"
+              ? "将立即清空当前中文标题和简介（含人工修改），按当前设置重新进入翻译队列。若翻译失败，旧译文不会恢复；完成后需重新预览。确定继续？"
               : confirm === "submit"
                 ? `确认投稿到 ${task.account_name_snapshot} · UID ${task.account_uid_snapshot}${task.publications?.some((p) => p.platform === "douyin") ? "，并同步到抖音" : ""}${task.publications?.some((p) => p.platform === "acfun") ? "，并同步到 AcFun" : ""}？`
                 : confirm === "repair"
@@ -1588,7 +1607,7 @@ function TaskDetail({
                       });
                       setConfirm("");
                       await refresh();
-                    }, "已开始重新翻译，完成后等待预览。")
+                    }, "旧译文已清空，任务已进入翻译队列。")
                   : confirm === "submit"
                     ? command("tasks.submit", "已进入投稿队列。")
                     : confirm === "repair"
@@ -1739,15 +1758,12 @@ function Account({
               <Upload size={15} />
               导入 Cookie 文件
             </button>
-            <select
-              aria-label="浏览器"
+            <StyledSelect
+              label="浏览器"
               value={browser}
-              onChange={(e) => setBrowser(e.target.value)}
-            >
-              <option value="edge">Edge</option>
-              <option value="chrome">Chrome</option>
-              <option value="firefox">Firefox</option>
-            </select>
+              onChange={setBrowser}
+              options={[{ value: "edge", label: "Edge" }, { value: "chrome", label: "Chrome" }, { value: "firefox", label: "Firefox" }]}
+            />
             <button
               className="text-button"
               disabled={busy}
@@ -1859,17 +1875,15 @@ function Settings({
           <AcfunChannelSelect label="AcFun 默认分区（自动投稿必填）"
             value={form.acfun_channel_id} disabled={busy}
             onChange={(value) => update("acfun_channel_id", value)} />
-          <label className="field">
+          <div className="field">
             上传线路
-            <select
+            <StyledSelect
+              label="上传线路"
               value={form.bili_line}
-              onChange={(e) => update("bili_line", e.target.value)}
-            >
-              {["tx", "bda2", "qn", "ws", "txa"].map((line) => (
-                <option key={line}>{line}</option>
-              ))}
-            </select>
-          </label>
+              onChange={(value) => update("bili_line", value)}
+              options={["tx", "bda2", "qn", "ws", "txa"].map((line) => ({ value: line, label: line }))}
+            />
+          </div>
           <label className="field">
             标签
             <input
@@ -1927,13 +1941,12 @@ function Settings({
               <strong>完整校验</strong>
               <p>自动尝试硬件解码，不可用时回退 CPU。</p>
             </div>
-            <select
+            <StyledSelect
+              label="完整校验"
               value={form.hwaccel}
-              onChange={(e) => update("hwaccel", e.target.value)}
-            >
-              <option value="auto">自动选择</option>
-              <option value="cpu">仅 CPU</option>
-            </select>
+              onChange={(value) => update("hwaccel", value)}
+              options={[{ value: "auto", label: "自动选择" }, { value: "cpu", label: "仅 CPU" }]}
+            />
           </div>
           <label className="setting-row">
             <div>

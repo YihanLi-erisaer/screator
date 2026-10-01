@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { request, operationId, chooseFile } from "./bridge";
 import type { Config } from "./types";
+import { StyledSelect } from "./StyledSelect";
 
 type Action = (work: () => Promise<unknown>, message?: string) => Promise<void>;
 type Job = {
@@ -54,6 +55,7 @@ export default function TranslationPanel({
   );
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const blocked = busy || running(job);
   const readStatus = async () =>
     setLocal((await request("translation.status")).local);
@@ -62,6 +64,7 @@ export default function TranslationPanel({
     setLocalTimeout(String(config.local_llm_timeout_seconds));
     setTotalTimeout(String(config.translation_total_timeout_seconds));
     onReady?.(false);
+    setLocal(null);
     void readStatus().catch((e) => setError(String(e)));
   }, [
     config.local_llm_mode,
@@ -94,15 +97,6 @@ export default function TranslationPanel({
           setJob(value);
           if (!running(value)) {
             clearInterval(timer);
-            await refresh();
-            await readStatus();
-            if (value.state === "complete" && value.kind.startsWith("test:")) {
-              const provider = value.kind.slice(5);
-              onReady?.(
-                provider === config.translation_primary ||
-                  config.translation_fallback_enabled,
-              );
-            }
           }
         })
         .catch((e) => {
@@ -113,6 +107,23 @@ export default function TranslationPanel({
       alive = false;
       clearInterval(timer);
     };
+  }, [job?.job_id, job?.state]);
+  useEffect(() => {
+    if (!job || running(job)) return;
+    void (async () => {
+      if (job.state === "complete" && job.kind === "uninstall") {
+        setSuccess(job.result?.message || "本地大语言模型已卸载。");
+      }
+      await refresh();
+      await readStatus();
+      if (job.state === "complete" && job.kind.startsWith("test:")) {
+        const provider = job.kind.slice(5);
+        onReady?.(
+          provider === config.translation_primary ||
+            config.translation_fallback_enabled,
+        );
+      }
+    })().catch((e) => setError(String(e)));
   }, [job?.job_id, job?.state]);
   const save = (values: Record<string, unknown>) =>
     action(async () => {
@@ -152,6 +163,7 @@ export default function TranslationPanel({
   const start = (method: string, params: Record<string, unknown> = {}) =>
     action(async () => {
       setError("");
+      setSuccess("");
       onReady?.(false);
       const value = await request(method, {
         ...params,
@@ -174,18 +186,16 @@ export default function TranslationPanel({
             DeepL。旧任务保留原策略，保存设置后关闭此提示。
           </p>
         )}
-        <label className="field">
+        <div className="field">
           首选翻译服务
-          <select
-            aria-label="首选翻译服务"
+          <StyledSelect
+            label="首选翻译服务"
             value={config.translation_primary}
             disabled={blocked}
-            onChange={(e) => void save({ translation_primary: e.target.value })}
-          >
-            <option value="local_llm">本地大模型（默认）</option>
-            <option value="deepl">DeepL</option>
-          </select>
-        </label>
+            onChange={(value) => void save({ translation_primary: value })}
+            options={[{ value: "local_llm", label: "本地大模型（默认）" }, { value: "deepl", label: "DeepL" }]}
+          />
+        </div>
         <label className="translation-toggle">
           <input
             type="checkbox"
@@ -205,27 +215,25 @@ export default function TranslationPanel({
           。 使用 DeepL 时，标题和简介会发送至
           DeepL。仅本地使用时请关闭自动切换。
         </p>
-        <h3>本地大模型 · Qwen3 8B</h3>
-        <label className="field">
+        <h3>本地大模型 · Qwen3.5 4B</h3>
+        <div className="field">
           本地运行方式
-          <select
-            aria-label="本地运行方式"
+          <StyledSelect
+            label="本地运行方式"
             value={config.local_llm_mode}
             disabled={blocked}
-            onChange={(e) =>
+            onChange={(value) =>
               void save({
-                local_llm_mode: e.target.value,
+                local_llm_mode: value,
                 local_llm_base_url:
-                  e.target.value === "managed"
+                  value === "managed"
                     ? "http://127.0.0.1:11435"
                     : "http://127.0.0.1:11434",
               })
             }
-          >
-            <option value="managed">应用管理（Windows x64）</option>
-            <option value="external">连接已有本机 Ollama</option>
-          </select>
-        </label>
+            options={[{ value: "managed", label: "应用管理（Windows x64）" }, { value: "external", label: "连接已有本机 Ollama" }]}
+          />
+        </div>
         {config.local_llm_mode === "external" && (
           <div className="inline-controls">
             <input
@@ -245,8 +253,7 @@ export default function TranslationPanel({
         )}
         <p role="status">{local?.message || "正在检测组件…"}</p>
         <p className="help">
-          首次下载约 6.7 GB；安装时需预留约 12 GB 空间。推荐 16 GB
-          以上内存，实际速度取决于硬件。安装后可断网翻译，首次请试译验证。
+          首次下载约 4.9 GB；安装时需预留约 10 GB 空间。实际内存占用和速度取决于硬件及上下文长度。安装后可断网翻译，首次请试译验证。
         </p>
         <h3>翻译超时</h3>
         <div className="form-grid">
@@ -316,7 +323,7 @@ export default function TranslationPanel({
               </button>
               <button
                 className="secondary danger"
-                disabled={blocked}
+                disabled={blocked || local?.state !== "ready"}
                 onClick={() => {
                   if (
                     window.confirm(
@@ -347,6 +354,7 @@ export default function TranslationPanel({
             重新检测
           </button>
         </div>
+        {success && <p className="notice success" role="status">{success}</p>}
         <h3>DeepL · 可选</h3>
         <label className="field">
           DeepL API 密钥

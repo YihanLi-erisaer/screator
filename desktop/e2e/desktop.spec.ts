@@ -5,9 +5,11 @@ test("local-first translation settings and fallback can be changed", async ({
 }) => {
   await page.goto("/?preview");
   await page.getByRole("button", { name: "设置", exact: true }).click();
-  await expect(page.getByLabel("首选翻译服务")).toHaveValue("local_llm");
-  await page.getByLabel("首选翻译服务").selectOption("deepl");
-  await expect(page.getByLabel("首选翻译服务")).toHaveValue("deepl");
+  await expect(page.getByText("本地大模型 · Qwen3.5 4B")).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "首选翻译服务" })).toContainText("本地大模型（默认）");
+  await page.getByRole("combobox", { name: "首选翻译服务" }).click();
+  await page.getByRole("option", { name: "DeepL" }).click();
+  await expect(page.getByRole("combobox", { name: "首选翻译服务" })).toContainText("DeepL");
   await page.getByLabel("首选失败时使用另一服务").uncheck();
   await expect(page.getByLabel("首选失败时使用另一服务")).not.toBeChecked();
   await expect(page.getByText(/不自动切换/)).toBeVisible();
@@ -23,15 +25,19 @@ test("local-first translation settings and fallback can be changed", async ({
 test("managed translation model can be uninstalled from settings", async ({ page }) => {
   await page.goto("/?preview");
   await page.getByRole("button", { name: "设置", exact: true }).click();
+  const uninstall = page.getByRole("button", { name: "卸载大语言模型" });
+  await expect(uninstall).toBeDisabled();
   await page.getByRole("button", { name: "安装 / 重试下载" }).click();
   await expect(page.getByText("开发预览 · 本地组件已就绪")).toBeVisible();
+  await expect(uninstall).toBeEnabled();
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page.getByRole("button", { name: "卸载大语言模型" }).click();
+  await uninstall.click();
   await expect(page.getByText("开发预览 · 本地组件已就绪")).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "卸载大语言模型" }).click();
-  await expect(page.getByText("本地大语言模型已卸载；运行时和已有译文已保留。")).toBeVisible();
+  await uninstall.click();
+  await expect(page.locator(".translation-panel .notice.success")).toHaveText("本地大语言模型已卸载；运行时和已有译文已保留。");
   await expect(page.getByText("开发预览 · 尚未安装本地组件")).toBeVisible();
+  await expect(uninstall).toBeDisabled();
 });
 
 test("first-run accepts local test without a DeepL key", async ({ page }) => {
@@ -49,16 +55,18 @@ test("first-run accepts local test without a DeepL key", async ({ page }) => {
   await expect(dialog.getByLabel("DeepL API 密钥")).toHaveValue("");
 });
 
-test("retranslation requires explicit replacement confirmation", async ({
+test("retranslation clears the old text and enters the queue after confirmation", async ({
   page,
 }) => {
   await page.goto("/?preview&populated");
   await page.getByRole("button", { name: /用更少的工具/ }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("button", { name: "按当前设置重新翻译" }).click();
-  await expect(dialog).toContainText("含人工修改");
+  await dialog.getByRole("button", { name: "重新翻译", exact: true }).click();
+  await expect(dialog).toContainText("旧译文不会恢复");
   await dialog.getByRole("button", { name: "确认", exact: true }).click();
-  await expect(dialog.getByLabel(/中文标题/)).toHaveValue("重新翻译的标题");
+  await expect(dialog.getByLabel(/中文标题/)).toHaveValue("");
+  await expect(dialog.getByLabel(/简介/)).toHaveValue("");
+  await expect(dialog).toContainText("旧译文已清空，等待重新翻译");
 });
 
 test("first-run guide starts with storage selection", async ({ page }) => {
@@ -84,7 +92,8 @@ test("empty workspace, preview default, and modal keyboard focus", async ({
   await dialog.getByRole("textbox").fill("https://youtu.be/abcdefghijk");
   await dialog.getByRole("checkbox", { name: /我拥有该视频的版权/ }).check();
   await expect(dialog.getByRole("button", { name: "加入队列" })).toBeDisabled();
-  await dialog.getByLabel("目标 Bilibili 账号").selectOption("account-5");
+  await dialog.getByRole("combobox", { name: "目标 Bilibili 账号" }).click();
+  await dialog.getByRole("option", { name: /UID 10005/ }).click();
   await dialog.getByRole("button", { name: "加入队列" }).click();
   await expect(dialog.getByRole("alert")).toContainText("界面预览");
   await page.keyboard.press("Escape");
@@ -167,7 +176,8 @@ test("five copies of one video keep separate edits and fifth-account filter", as
 }) => {
   await page.goto("/?preview&populated&accounts=5&samevideo");
   await expect(page.locator(".task-row")).toHaveCount(5);
-  await page.getByLabel("按账号筛选").selectOption("account-5");
+  await page.getByRole("combobox", { name: "按账号筛选" }).click();
+  await page.getByRole("option", { name: /UID 10005/ }).click();
   await expect(page.locator(".task-row")).toHaveCount(1);
   await page.locator(".task-row").click();
   const dialog = page.getByRole("dialog");
@@ -175,6 +185,22 @@ test("five copies of one video keep separate edits and fifth-account filter", as
   await dialog.getByLabel(/中文标题/).fill("仅第五账号的标题");
   await dialog.getByRole("button", { name: "保存修改" }).click();
   await page.getByRole("button", { name: "关闭对话框" }).click();
-  await page.getByLabel("按账号筛选").selectOption("account-1");
+  await page.getByRole("combobox", { name: "按账号筛选" }).click();
+  await page.getByRole("option", { name: /UID 10001/ }).click();
   await expect(page.locator(".task-row")).toContainText("用更少的工具");
+});
+
+test("account dropdown supports keyboard selection and dismissal", async ({ page }) => {
+  await page.goto("/?preview&populated&accounts=5&samevideo");
+  const filter = page.getByRole("combobox", { name: "按账号筛选" });
+  await filter.focus();
+  await filter.press("ArrowDown");
+  await expect(filter).toHaveAttribute("aria-expanded", "true");
+  await filter.press("Escape");
+  await expect(filter).toHaveAttribute("aria-expanded", "false");
+  await expect(filter).toContainText("全部账号");
+  await filter.press("ArrowDown");
+  await filter.press("Enter");
+  await expect(filter).toContainText("UID 10001");
+  await expect(page.locator(".task-row")).toHaveCount(1);
 });

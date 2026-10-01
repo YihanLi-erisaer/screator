@@ -63,12 +63,13 @@ test("AcFun opt-in supports preview and automatic submission", async ({ page }) 
 test("AcFun settings select real video subchannels by name", async ({ page }) => {
   await page.goto("/?preview&accounts=1&acfun=1");
   await page.getByRole("button", { name: "设置", exact: true }).click();
-  const channel = page.getByLabel("AcFun 默认分区（自动投稿必填）");
+  const channel = page.getByRole("combobox", { name: "AcFun 默认分区（自动投稿必填）" });
   await expect(channel).toBeEnabled();
-  await expect(channel.locator('option[value="1"]')).toHaveCount(0);
-  await expect(channel.locator('option[value="196"]')).toHaveText("影视 / 纪录片·短片（196）");
-  await channel.selectOption("196");
+  await channel.click();
+  await expect(page.getByRole("option", { name: /（1）$/ })).toHaveCount(0);
+  await expect(page.getByRole("option", { name: "影视 / 纪录片·短片（196）" })).toBeVisible();
+  await page.getByRole("option", { name: "影视 / 纪录片·短片（196）" }).click();
   await page.getByRole("button", { name: "保存设置", exact: true }).click();
   await expect(page.getByText("设置已保存。", { exact: true })).toBeVisible();
-  await expect(channel).toHaveValue("196");
+  await expect(channel).toContainText("影视 / 纪录片·短片（196）");
 });

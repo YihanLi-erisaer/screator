@@ -425,6 +425,23 @@ class AcfunTests(unittest.TestCase):
         self.assertEqual(acfun["description"], task.desc_zh)
         self.assertIn("两平台共用的新简介", acfun["description"])
 
+    def test_retranslation_clears_generated_acfun_copy_but_keeps_manual_title(self):
+        from yt2bili.translation.types import TranslationError
+        self.bind()
+        with self.mocks(), patch.object(self.service.acfun, "check", return_value=self.service.acfun.account()):
+            generated_id = self.create()
+            manual_id = self.create("lmnopqrstuv")
+            self.wait_idle()
+        self.ready(manual_id)
+        with patch("yt2bili.translation.tasks.translate_group", side_effect=TranslationError("FAIL", "模拟翻译失败")):
+            self.service.retranslate(generated_id, "retranslate-acfun-generated")
+            self.service.retranslate(manual_id, "retranslate-acfun-manual")
+            self.wait_idle()
+        generated = json.loads(publications.for_platform(self.service.store, generated_id, "acfun")["snapshot"])
+        manual = json.loads(publications.for_platform(self.service.store, manual_id, "acfun")["snapshot"])
+        self.assertEqual((generated.get("title"), generated["description"]), ("", ""))
+        self.assertEqual((manual["title"], manual["description"]), ("转载测试", ""))
+
     def test_fragment_failure_never_creates_work(self):
         self.bind()
         fake = FakeWeb("fragment")

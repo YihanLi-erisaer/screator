@@ -116,6 +116,17 @@ async fn finish_close(app: tauri::AppHandle, worker: State<'_, Worker>) -> Resul
 }
 
 #[tauri::command]
+async fn force_close(app: tauri::AppHandle, worker: State<'_, Worker>) -> Result<(), String> {
+    log_shell("forced shutdown: stopping worker process tree; in-flight submissions need review");
+    let process = take_worker_process(&worker);
+    tauri::async_runtime::spawn_blocking(move || force_stop_worker(process)).await
+        .map_err(|_| "无法停止后台进程，请重试。".to_string())?;
+    EXPECTED_EXIT.store(true, Ordering::Release);
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 fn frontend_ready(app: tauri::AppHandle, health: Value) {
     if smoke_enabled() {
         if let Some(report) = std::env::var_os("YT2BILI_NATIVE_SMOKE_REPORT") {
@@ -243,7 +254,7 @@ fn main() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![backend_request, finish_close, frontend_ready])
+        .invoke_handler(tauri::generate_handler![backend_request, finish_close, force_close, frontend_ready])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 log_shell("window close requested");

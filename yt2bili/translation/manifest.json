@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "verified_metadata_date": "2026-09-23",
+  "verified_metadata_date": "2026-09-27",
   "runtime": {
     "version": "0.34.3",
     "platform": "win32",
@@ -11,10 +11,13 @@
     "license_url": "https://github.com/ollama/ollama/blob/v0.34.3/LICENSE"
   },
   "model": {
-    "name": "qwen3:8b",
-    "digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
-    "size": 5225388164,
+    "name": "qwen3.5:4b",
+    "digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+    "size": 3389983735,
     "license": "Apache-2.0",
-    "source": "https://ollama.com/library/qwen3:8b"
+    "source": "https://ollama.com/library/qwen3.5:4b"
+  },
+  "compatible_models": {
+    "qwen3:8b": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
   }
 }

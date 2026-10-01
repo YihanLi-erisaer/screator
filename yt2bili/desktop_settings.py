@@ -39,6 +39,8 @@ class DesktopSettings:
             try:
                 saved = json.loads(self.path.read_text(encoding="utf-8"))
                 self.translation_upgrade_notice = "translation_primary" not in saved
+                if isinstance(saved, dict) and saved.get("local_llm_model") == "qwen3:8b":
+                    saved["local_llm_model"] = DEFAULTS["local_llm_model"]
                 self.values.update(self.validate(saved))
             except (ValueError, TypeError, Yt2BiliError) as exc:
                 raise Yt2BiliError("设置文件无效，请从备份恢复 settings.json。") from exc

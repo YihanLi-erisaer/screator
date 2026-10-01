@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { chooseFile, request } from "./bridge";
 import { accountLabel, type BiliAccount } from "./types";
+import { StyledSelect } from "./StyledSelect";
 
 export function AccountSelector({
   accounts,
@@ -14,24 +15,21 @@ export function AccountSelector({
   archived?: boolean;
 }) {
   return (
-    <label className="field">
+    <div className="field">
       目标 Bilibili 账号
-      <select
-        aria-label="目标 Bilibili 账号"
+      <StyledSelect
+        label="目标 Bilibili 账号"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">请选择一个账号</option>
-        {accounts
-          .filter((a) => archived || a.lifecycle === "active")
-          .map((a) => (
-            <option key={a.account_id} value={a.account_id}>
-              {accountLabel(a)}
-              {a.lifecycle === "archived" ? "（已归档）" : ""}
-            </option>
-          ))}
-      </select>
-    </label>
+        onChange={onChange}
+        options={[
+          { value: "", label: "请选择一个账号" },
+          ...accounts.filter((a) => archived || a.lifecycle === "active").map((a) => ({
+            value: a.account_id,
+            label: `${accountLabel(a)}${a.lifecycle === "archived" ? "（已归档）" : ""}`,
+          })),
+        ]}
+      />
+    </div>
   );
 }
 

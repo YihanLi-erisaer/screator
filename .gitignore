@@ -24,5 +24,7 @@ packaging/staging/
 work/
 data/
 bin/
+/translation/
+/execution.lock
 secrets/*
 !secrets/.gitkeep

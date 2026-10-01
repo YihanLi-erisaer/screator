@@ -211,6 +211,8 @@ class LocalHttpTests(unittest.TestCase):
         self.content = json.dumps({"title": "译文", "description": "正文"})
         self.done_reason = "stop"
         self.last_body = None
+        self.model_name = manifest()["model"]["name"]
+        self.model_digest = manifest()["model"]["digest"]
         owner = self
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args): pass
@@ -222,7 +224,7 @@ class LocalHttpTests(unittest.TestCase):
             def do_GET(self):
                 if self.path == "/api/version":
                     time.sleep(owner.ready_delay)
-                self.respond({"version": "test"} if self.path == "/api/version" else {"models": [{"name": "qwen3:8b", "digest": manifest()["model"]["digest"]}]})
+                self.respond({"version": "test"} if self.path == "/api/version" else {"models": [{"name": owner.model_name, "digest": owner.model_digest}]})
             def do_POST(self):
                 owner.last_body=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 time.sleep(owner.delay)
@@ -239,6 +241,13 @@ class LocalHttpTests(unittest.TestCase):
         self.assertFalse(self.last_body["think"])
         self.assertFalse(self.last_body["stream"])
         self.assertEqual(self.last_body["format"]["required"],["title","description"])
+
+    def test_legacy_model_snapshot_keeps_its_original_digest(self):
+        self.model_name = "qwen3:8b"
+        self.model_digest = manifest()["compatible_models"][self.model_name]
+        self.config["local_llm_model"] = self.model_name
+        self.payload["expected_digest"] = self.model_digest
+        self.assertEqual(isolated_request(self.payload, time.monotonic() + 10)["model_digest"], self.model_digest)
 
     def test_local_timeout_starts_after_service_is_ready(self):
         self.ready_delay = 1.4

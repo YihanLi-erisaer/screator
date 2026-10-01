@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from yt2bili import events
 from yt2bili.desktop_settings import atomic_json
 from .http import open_local
-from .runtime import manifest, runtime_path, sha256, local_session, model_status
+from .runtime import manifest, model_manifest_path, runtime_path, sha256, local_session, model_status
 from .service import execution_slot
 from .types import TranslationError
 
@@ -105,7 +105,7 @@ def install_runtime(root, archive):
 
 
 def verify_models(root):
-    model_file = root / "models/manifests/registry.ollama.ai/library/qwen3/8b"
+    model_file = model_manifest_path(root)
     if sha256(model_file) != manifest()["model"]["digest"]:
         raise TranslationError("MODEL_DIGEST_MISMATCH", "下载模型已与固定清单不同，未启用该模型。")
     description = json.loads(model_file.read_text(encoding="utf-8"))
@@ -123,6 +123,8 @@ def install(config, root, *, offline_path=None):
     root = Path(root)
     if config["local_llm_mode"] != "managed":
         raise TranslationError("INPUT_INVALID", "外部模式不修改用户已有模型；请切回应用管理模式安装。")
+    if config["local_llm_model"] != manifest()["model"]["name"]:
+        raise TranslationError("INPUT_INVALID", "应用管理模式只能安装当前固定的 Qwen3.5 4B 模型。")
     if sys.platform != "win32" or platform.machine().upper() not in ("AMD64", "X86_64"):
         raise TranslationError("UNSUPPORTED_PLATFORM", "自动安装仅支持 Windows x64。")
     root.mkdir(parents=True, exist_ok=True)
@@ -205,7 +207,7 @@ def export_bundle(root, destination):
         try:
             with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_STORED) as bundle:
                 bundle.write(runtime, "runtime.zip")
-                model_file = root / "models/manifests/registry.ollama.ai/library/qwen3/8b"
+                model_file = model_manifest_path(root)
                 bundle.write(model_file, model_file.relative_to(root).as_posix())
                 value = json.loads(model_file.read_text())
                 for layer in [value["config"], *value["layers"]]:

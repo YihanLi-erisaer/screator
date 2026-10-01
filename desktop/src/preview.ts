@@ -17,7 +17,7 @@ const config = {
   translation_ready: false,
   local_llm_mode: "managed",
   local_llm_base_url: "http://127.0.0.1:11435",
-  local_llm_model: "qwen3:8b",
+  local_llm_model: "qwen3.5:4b",
   local_llm_timeout_seconds: 300,
   translation_total_timeout_seconds: 420,
   data_dir: "本地应用数据目录",
@@ -163,7 +163,10 @@ export async function request(method: string, params: any): Promise<any> {
   }
   if (method === "tasks.retranslate") {
     const task = tasks.find((t) => t.task_id === params.task_id)!;
-    task.title_zh = "重新翻译的标题";
+    task.title_zh = "";
+    task.desc_zh = "";
+    task.status = "queued_upload";
+    task.translation = { state: "queued" };
     return { queued: true };
   }
 

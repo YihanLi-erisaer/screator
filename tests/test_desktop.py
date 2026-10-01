@@ -13,7 +13,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from yt2bili import events, media, pipeline, youtube, bili_upload, desktop_auth
+from yt2bili import events, media, pipeline, publications, youtube, bili_upload, desktop_auth
 from yt2bili.db import Task, TaskStore
 from yt2bili.desktop_auth import LoginSession, validate_login
 from yt2bili.desktop_service import DesktopService, parse_urls
@@ -274,6 +274,15 @@ class DesktopTests(unittest.TestCase):
                 "translation_total_timeout_seconds": 300,
             })
 
+    def test_saved_qwen3_settings_upgrade_to_qwen35_without_changing_task_snapshots(self):
+        saved = self.service.config.snapshot()
+        saved["local_llm_model"] = "qwen3:8b"
+        (self.paths.root / "settings.json").write_text(json.dumps(saved), encoding="utf-8")
+        reloaded = DesktopSettings(self.paths, MemoryVault())
+        self.assertEqual(reloaded.values["local_llm_model"], "qwen3.5:4b")
+        from yt2bili.translation.config import legacy_snapshot
+        self.assertEqual(legacy_snapshot(saved)["local_llm_model"], "qwen3:8b")
+
     def test_local_task_creation_does_not_require_deepl_vault(self):
         self.service.config.set_key("")
         with self.mocks(), patch.object(self.service.config, "key", side_effect=AssertionError("must not read key")):
@@ -281,23 +290,50 @@ class DesktopTests(unittest.TestCase):
             self.wait_idle()
         self.assertEqual(self.service.task("abcdefghijk").status, "ready")
 
-    def test_retranslation_requires_confirmation_preserves_on_error_and_never_uploads(self):
-        from yt2bili.translation.types import TranslationError, TranslationResult
+    def test_retranslation_clears_old_text_before_queue_and_never_uploads(self):
+        from yt2bili.translation.types import TranslationResult
         with self.mocks():
             self.create(); self.wait_idle()
         self.service.update_metadata("abcdefghijk", "用户编辑", "用户正文")
         with self.assertRaises(Yt2BiliError):
             self.service.retranslate("abcdefghijk", "retranslate-no-confirm")
-        with patch("yt2bili.translation.tasks.translate_group", side_effect=TranslationError("FAIL", "模拟翻译失败")):
-            self.service.retranslate("abcdefghijk", "retranslate-fail", replace_edited=True)
-            self.wait_idle()
-        self.assertEqual(self.service.task("abcdefghijk").title_zh, "用户编辑")
-        self.assertEqual(self.service.task("abcdefghijk").status, "ready")
-        with patch("yt2bili.translation.tasks.translate_group", return_value=TranslationResult("新翻译", "新正文", "local_llm")):
+        started, release = threading.Event(), threading.Event()
+        def slow_translation(*args, **kwargs):
+            started.set()
+            release.wait(ASYNC_TIMEOUT)
+            return TranslationResult("新翻译", "新正文", "local_llm")
+        with patch("yt2bili.translation.tasks.translate_group", side_effect=slow_translation):
             self.service.retranslate("abcdefghijk", "retranslate-success", replace_edited=True)
+            try:
+                self.assertTrue(started.wait(ASYNC_TIMEOUT))
+                queued = self.service.get_task("abcdefghijk")
+                self.assertEqual((queued["title_zh"], queued["desc_zh"]), ("", ""))
+                self.assertEqual(queued["translation"]["state"], "queued")
+                self.assertEqual(queued["snapshot"]["mode"], "retranslate")
+                self.assertEqual((Path(queued["work_dir"]) / "title.txt").read_text(encoding="utf-8"), "")
+                self.assertEqual((Path(queued["work_dir"]) / "desc.txt").read_text(encoding="utf-8"), "")
+                self.assertEqual(publications.for_platform(self.service.store, queued["task_id"], "bilibili")["text"], "")
+            finally:
+                release.set()
             self.wait_idle()
         self.assertEqual(self.service.task("abcdefghijk").title_zh, "新翻译")
         self.assertEqual(self.service.task("abcdefghijk").status, "ready")
+        self.assertEqual(self.service.store.translation("abcdefghijk")["state"], "complete")
+        self.assertEqual(publications.for_platform(self.service.store, queued["task_id"], "bilibili")["text"], "新翻译")
+        self.assertFalse(self.uploads)
+
+    def test_failed_retranslation_keeps_text_cleared_and_task_retryable(self):
+        from yt2bili.translation.types import TranslationError
+        with self.mocks():
+            self.create(); self.wait_idle()
+        self.service.update_metadata("abcdefghijk", "用户编辑", "用户正文")
+        with patch("yt2bili.translation.tasks.translate_group", side_effect=TranslationError("FAIL", "模拟翻译失败")):
+            self.service.retranslate("abcdefghijk", "retranslate-fail", replace_edited=True)
+            self.wait_idle()
+        task = self.service.get_task("abcdefghijk")
+        self.assertEqual((task["title_zh"], task["desc_zh"]), ("", ""))
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(task["translation"]["state"], "failed")
         self.assertFalse(self.uploads)
 
     def test_translation_job_returns_immediately_and_is_idempotent(self):
@@ -412,11 +448,21 @@ class ContractTests(unittest.TestCase):
             store = TaskStore(paths.root / "data/tasks.sqlite")
             store.upsert(Task("abcdefghijk", "url", "uploading"))
             store.upsert(Task("12345678901", "url", "downloading"))
+            store.upsert(Task("cancelled01", "url", "cancel_requested"))
+            for video_id, state in (("abcdefghijk", "uploading_media"), ("cancelled01", "queued")):
+                task = store.require(video_id)
+                publications.ensure_bili(store, task)
+                pub = publications.for_platform(store, task.task_id, "bilibili")
+                publications.change(store, pub["publication_id"], status=state)
+            store.update("cancelled01", cancel_requested=1)
             store.close()
             service = DesktopService(paths, lambda *args: None, MemoryVault())
             try:
                 self.assertEqual(service.task("abcdefghijk").status, "submission_unknown")
                 self.assertEqual(service.task("12345678901").status, "interrupted")
+                self.assertEqual(service.task("cancelled01").status, "cancelled")
+                self.assertEqual(publications.for_platform(service.store, service.task("abcdefghijk").task_id, "bilibili")["status"], "submission_unknown")
+                self.assertEqual(publications.for_platform(service.store, service.task("cancelled01").task_id, "bilibili")["status"], "cancelled")
                 self.assertFalse(service.scheduler.snapshot()["active"])
             finally: service.close()
 

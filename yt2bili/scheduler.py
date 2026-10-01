@@ -179,9 +179,15 @@ class Scheduler:
                     self.store.save_job(task.task_id, saved)
                 continue
             saved = self.store.get_job(task.task_id) or {}
+            bili = publications.for_platform(self.store, task.task_id, "bilibili")
             if task.status in ("uploading", "submission_unknown") or task.status == "submitted" and not task.bv_id:
+                if bili and bili["status"] in publications.INFLIGHT:
+                    publications.change(self.store, bili["publication_id"], status="submission_unknown",
+                                        error="上次投稿结果待核对，不会自动重投。")
                 self.store.update(task.task_id, status="submission_unknown", error="请核对该账号创作中心；不会自动重复投稿。")
             elif task.cancel_requested and task.status not in ("submitted", "failed", "cancelled"):
+                if bili and bili["status"] not in publications.TERMINAL | {"submission_unknown"}:
+                    publications.change(self.store, bili["publication_id"], status="cancelled", error="上次取消已保留素材。")
                 self.store.update(task.task_id, status="cancelled", error="上次取消已保留素材，请手动继续。")
             elif task.status not in ("submitted", "ready", "failed", "cancelled", "interrupted"):
                 self.store.update(task.task_id, status=saved.get("original_status") or "interrupted",
@@ -254,6 +260,9 @@ class Scheduler:
                     task = self.store.require(task.task_id)
                     if self.closing or task.cancel_requested:
                         self.store.update(task.task_id, status="cancelled", wait_reason="")
+                        if saved.get("mode") == "retranslate":
+                            record = self.store.translation(task.task_id) or {}
+                            self.store.save_translation(self.store.require(task.task_id), {**record, "state": "cancelled"})
                         saved["execution_state"] = "finished"
                         self.store.save_job(task.task_id, saved)
                         continue
@@ -279,6 +288,9 @@ class Scheduler:
                         saved["execution_state"] = "finished"
                         self.store.save_job(task.task_id, saved)
                         self.store.update(task.task_id, status="failed", error=str(exc))
+                        if saved.get("mode") == "retranslate":
+                            record = self.store.translation(task.task_id) or {}
+                            self.store.save_translation(self.store.require(task.task_id), {**record, "state": "failed"})
             self.emit("queue.changed", self.snapshot())
 
     def _put(self, item):
@@ -339,6 +351,9 @@ class Scheduler:
                 for child in item.children.values(): child.cancel.set()
             else:
                 self.store.update(task.task_id, status="cancelled", wait_reason="")
+                if saved.get("mode") == "retranslate":
+                    record = self.store.translation(task.task_id) or {}
+                    self.store.save_translation(self.store.require(task.task_id), {**record, "state": "cancelled"})
                 for p in publications.items(self.store, task.task_id):
                     if p["status"] not in publications.TERMINAL | {"submission_unknown"}:
                         publications.change(self.store, p["publication_id"], status="cancelled", error="用户取消，素材保留。")
@@ -374,6 +389,8 @@ class Scheduler:
                         with pipeline._job_context(item.job):
                             if item.mode == "retranslate":
                                 from yt2bili.translation.tasks import prepare
+                                task.status = "translating"
+                                self.store.upsert(task)
                                 prepare(item.settings, self.store, task, item.job.meta, item.job.work_dir, force=True)
                             else:
                                 pipeline._prepare_assets(item.settings, self.store, task, item.job.meta, item.job.work_dir, Path(task.video_path))
@@ -427,11 +444,14 @@ class Scheduler:
             publications.project(self.store, item.task_id)
             return
         current = self.store.require(item.task_id)
-        status = item.payload["original_status"] if item.mode in ("repair", "retranslate") else (
+        status = item.payload["original_status"] if item.mode == "repair" else (
             current.status if current.status in ("submitted", "submission_unknown") else
             "submission_unknown" if current.status == "uploading" else
             "cancelled" if item.cancel.is_set() else "failed")
         self.store.update(item.task_id, status=status, error=str(exc), wait_reason="")
+        if item.mode == "retranslate" and not current.title_zh:
+            record = self.store.translation(item.task_id) or {}
+            self.store.save_translation(self.store.require(item.task_id), {**record, "state": status})
         if item.mode not in ("repair", "retranslate"):
             for p in publications.items(self.store, item.task_id):
                 if p["status"] not in publications.TERMINAL | {"submission_unknown"}:
@@ -531,8 +551,11 @@ class Scheduler:
         pending = [t.task_id for t in self.store.list_all()
                    if (self.store.get_job(t.task_id) or {}).get("owner_session_id") == self.session_id
                    and (self.store.get_job(t.task_id) or {}).get("execution_state") in ("queued", "running", "waiting")]
+        inflight = [task_id for task_id in pending
+                    if self.store.require(task_id).status == "uploading"
+                    or any(p["status"] in publications.INFLIGHT for p in publications.items(self.store, task_id))]
         return {"closing": self.closing, "ready": self.closing and not pending and not self.active,
-                "pending_task_ids": pending}
+                "pending_task_ids": pending, "inflight_task_ids": inflight}
 
     def close(self):
         self.prepare_shutdown()

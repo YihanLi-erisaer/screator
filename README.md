@@ -41,7 +41,7 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-默认本地优先，执行 `python -m yt2bili translation setup` 安装固定版本的 Ollama 和 Qwen3 8B，再用 `python -m yt2bili translation test` 试译。首次下载约 6.7 GB；安装会检查空间。
+默认本地优先，执行 `python -m yt2bili translation setup` 安装固定版本的 Ollama 和 Qwen3.5 4B，再用 `python -m yt2bili translation test` 试译。首次下载约 4.9 GB；安装会检查空间。
 
 如需 DeepL，在 `.env` 填入可选的 `DEEPL_AUTH_KEY`，设置 `TRANSLATION_PRIMARY=deepl` 可优先使用它。`TRANSLATION_FALLBACK_ENABLED=false` 关闭自动切换。密钥不要提交到 Git。详细部署、离线导入与验收边界见[本地翻译实现说明](docs/本地翻译实现与验证.md)。
 

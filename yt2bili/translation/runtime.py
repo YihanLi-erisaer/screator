@@ -22,6 +22,10 @@ def manifest():
     return json.loads(files("yt2bili.translation").joinpath("manifest.json").read_text(encoding="utf-8"))
 
 
+def model_manifest_path(root):
+    return Path(root) / "models/manifests/registry.ollama.ai/library" / manifest()["model"]["name"].replace(":", "/")
+
+
 def sha256(path):
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -36,6 +40,11 @@ def runtime_path(root):
 
 
 def model_status(address, model):
+    spec = manifest()
+    expected = (spec["model"]["digest"] if model == spec["model"]["name"] else
+                spec.get("compatible_models", {}).get(model))
+    if expected is None:
+        raise TranslationError("MODEL_UNSUPPORTED", "当前不支持此本地模型。")
     version = request_json(address, "/api/version").get("version", "")
     models = request_json(address, "/api/tags", limit=1048576).get("models", [])
     for item in models:
@@ -43,7 +52,7 @@ def model_status(address, model):
             if item.get("remote_model") or item.get("remote_host"):
                 return {"state": "error", "code": "MODEL_NOT_LOCAL", "message": "此服务指向云模型，请安装本机模型。"}
             digest = str(item.get("digest", "")).removeprefix("sha256:")
-            if digest != manifest()["model"]["digest"]:
+            if digest != expected:
                 return {"state": "error", "code": "MODEL_DIGEST_MISMATCH", "message": "模型摘要与支持清单不一致，请安装固定版本。"}
             return {"state": "ready", "digest": digest, "runtime_version": version, "message": "模型已安装，可进行试译。"}
     return {"state": "missing", "code": "MODEL_MISSING", "message": "本地模型未安装，请先安装翻译组件。"}
@@ -62,7 +71,7 @@ def status(config, root):
         if (not runtime_path(root).is_file() or installed["model_digest"] != manifest()["model"]["digest"]
                 or installed["runtime_version"] != manifest()["runtime"]["version"]):
             raise ValueError()
-        model_file = root / "models/manifests/registry.ollama.ai/library/qwen3/8b"
+        model_file = model_manifest_path(root)
         if sha256(model_file) != installed["model_digest"]:
             raise ValueError()
         return {"state": "ready", "message": "本地组件已安装，将按需启动；可试译检测。", **installed}

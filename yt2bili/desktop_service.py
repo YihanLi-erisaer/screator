@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 
 from PIL import Image
 
-from yt2bili import bili_upload, youtube, translate, publications
+from yt2bili import bili_upload, youtube, translate, publications, history_transfer
 from yt2bili.db import Task, TaskStore
 from yt2bili.desktop_auth import LoginSession, account_status, validate_login
 from yt2bili.desktop_settings import DesktopSettings, atomic_json
@@ -50,6 +50,7 @@ class DesktopService:
         self.owner_lock.__enter__()
         try:
             self.store = TaskStore(paths.root / "data/tasks.sqlite", self.emit)
+            history_transfer.initialize(self.store)
             self.accounts = AccountService(paths.root, self.store, self.emit)
             from yt2bili.douyin import DouyinService
             from yt2bili.acfun import AcfunService
@@ -138,6 +139,7 @@ class DesktopService:
             "translation.jobs.cancel": self.translation_jobs.cancel, "tasks.retranslate": self.retranslate,
             "credentials.set": self.set_key, "credentials.test": self.test_key,
             "tasks.create": self.create, "tasks.list": self.list_tasks, "tasks.get": self.get_task,
+            "history.export": self.export_history, "history.import": self.import_history,
             "tasks.retry": self.retry, "tasks.cancel": self.cancel, "tasks.submit": self.submit,
             "tasks.repair": self.repair, "tasks.update_metadata": self.update_metadata,
             "tasks.resolve": self.resolve, "tasks.cover": self.cover,
@@ -193,8 +195,8 @@ class DesktopService:
                 "fallback_enabled": self.config.values["translation_fallback_enabled"],
                 "model": manifest()["model"], "runtime": manifest()["runtime"]}
 
-    def translation_install(self, operation_id, model_id="qwen3:8b", offline_path=None):
-        if model_id != "qwen3:8b":
+    def translation_install(self, operation_id, model_id="qwen3.5:4b", offline_path=None):
+        if model_id != "qwen3.5:4b":
             raise Yt2BiliError("不支持的模型。")
         from yt2bili.translation.deployment import install
         with self.mutation:
@@ -239,8 +241,40 @@ class DesktopService:
                 raise Yt2BiliError("重新翻译将替换已编辑内容，请确认后继续。")
             saved = (self.store.get_job(task_id) or {}).get("settings", self.config.snapshot())
             from yt2bili.translation.config import DEFAULTS
+            from yt2bili.translation.tasks import sync_files
             saved = {**saved, **{k: self.config.values[k] for k in DEFAULTS}}
+            old_title, old_description = task.title_zh, task.desc_zh
+            task.title_zh = task.desc_zh = ""
+            task.metadata_revision += 1
+            self.store.save_translation(task, {
+                "state": "queued", "user_edited": False,
+                "revision": record.get("revision", 0),
+                "config_snapshot": {k: saved[k] for k in DEFAULTS},
+            })
+            for publication in publications.items(self.store, task.task_id):
+                if publication["status"] != "ready":
+                    continue
+                if publication["platform"] == "bilibili":
+                    publications.change(self.store, publication["publication_id"], text="")
+                elif publication["platform"] == "douyin" and publication["text"] == old_title:
+                    publications.change(self.store, publication["publication_id"], text="")
+                elif publication["platform"] == "acfun":
+                    preview = json.loads(publication["snapshot"])
+                    preview["description"] = ""
+                    if preview.get("title_source") == "generated":
+                        preview["title"] = ""
+                    publications.change(self.store, publication["publication_id"],
+                                        snapshot=json.dumps(preview, ensure_ascii=False))
             self.scheduler.add(task, "retranslate", saved, stage="upload")
+            try:
+                sync_files(task, task.work_dir)
+            except OSError:
+                task.title_zh, task.desc_zh = old_title, old_description
+                try:
+                    sync_files(task, task.work_dir)
+                except OSError:
+                    pass
+                raise
             return {"queued": True}
         return self.operation(operation_id, "tasks.retranslate", action, {"task_id": task_id, "replace_edited": replace_edited})
 
@@ -402,15 +436,29 @@ class DesktopService:
         tasks = self.store.list_all()
         tasks = [item for item in tasks if (not search or search.lower() in (item.title_zh + item.title_orig + item.video_id).lower())
                  and (not account_id or item.account_id == account_id) and (not status or item.status == status)
-                 and (not history or item.status in ("submitted", "submission_unknown", "partial_success", "completed_with_abandon"))]
+                 and (not history or item.status in history_transfer.HISTORY_STATUSES)]
         all_tasks = self.store.list_all()
-        return {"items": [{**{key: value for key, value in asdict(item).items() if key not in ("desc_orig", "desc_zh")},
-                           "publications": publications.items(self.store, item.task_id),
-                           "run_id": (self.store.get_job(item.task_id) or {}).get("run_id")} for item in tasks[offset:offset + limit]], "total": len(tasks),
+        items = [{**{key: value for key, value in asdict(item).items() if key not in ("desc_orig", "desc_zh")},
+                  "publications": publications.items(self.store, item.task_id),
+                  "run_id": (self.store.get_job(item.task_id) or {}).get("run_id")} for item in tasks]
+        history_total = 0
+        if history:
+            imported = history_transfer.list_imported(self.store)
+            account_uid = next((a["uid"] for a in self.store.accounts(True) if a["account_id"] == account_id), "") if account_id else ""
+            items.extend(item for item in imported
+                         if (not search or search.lower() in (item["title_zh"] + item["title_orig"] + item["video_id"]).lower())
+                         and (not account_id or item["account_uid_snapshot"] == account_uid)
+                         and (not status or item["status"] == status))
+            items.sort(key=lambda item: (item["updated_at"], item["task_id"]), reverse=True)
+            history_total = sum(t.status in history_transfer.HISTORY_STATUSES for t in all_tasks) + len(imported)
+        return {"items": items[offset:offset + limit], "total": len(items),
                 "counts": {name: sum(t.status == name for t in all_tasks) for name in ("downloading", "validating", "uploading", "ready", "submitted", "failed")},
-                "queue": self.scheduler.snapshot(), "all_total": len(all_tasks)}
+                "queue": self.scheduler.snapshot(), "all_total": history_total if history else len(all_tasks)}
 
     def get_task(self, task_id):
+        imported = history_transfer.get_imported(self.store, task_id)
+        if imported:
+            return imported
         task = self.task(task_id)
         result = asdict(task)
         result["publications"] = publications.items(self.store, task_id)
@@ -418,6 +466,16 @@ class DesktopService:
         result["snapshot"] = self.store.get_job(task_id)
         result["run_id"] = (result["snapshot"] or {}).get("run_id")
         result["file_exists"] = bool(task.video_path and Path(task.video_path).is_file())
+        return result
+
+    def export_history(self, path):
+        return history_transfer.export_file(self.store, path)
+
+    def import_history(self, path):
+        with self.mutation:
+            result = history_transfer.import_file(self.store, path)
+        if result["imported"]:
+            self.emit("history.changed", {"imported": result["imported"]})
         return result
 
     def retry(self, task_id, operation_id, use_current_translation_settings=False):
