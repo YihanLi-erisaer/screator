@@ -52,6 +52,16 @@ class MediaSafetyTests(unittest.TestCase):
     def test_valid_h264_aac_passes(self):
         self.assertEqual(media.validate_media(self.good, 3)["vcodec"], "h264")
 
+    def test_video_decode_preserves_input_timestamps(self):
+        with patch.object(media.subprocess, "Popen", wraps=media.subprocess.Popen) as popen:
+            media._decode_track(self.good, "v:0", 3, [])
+            video_cmd = popen.call_args.args[0]
+            media._decode_track(self.good, "a:0", 3, [])
+            audio_cmd = popen.call_args.args[0]
+        self.assertEqual(video_cmd[video_cmd.index("-fps_mode") + 1], "passthrough")
+        self.assertEqual(video_cmd[video_cmd.index("-enc_time_base") + 1], "demux")
+        self.assertNotIn("-fps_mode", audio_cmd)
+
     def test_mp4_upload_uses_original_bytes_without_transcoding(self):
         for source in (self.good, self.av1):
             with self.subTest(source=source.name):

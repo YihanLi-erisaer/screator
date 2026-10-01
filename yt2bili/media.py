@@ -208,10 +208,14 @@ def _decode_track(path: Path, stream: str, expected, acceleration: list[str]) ->
         logger.info("校验进度 [%s] %s %s %s：%.1f / %s 秒（%s%s）",
                     path.parent.name, path.name, stream, backend, actual, expected or "?", percent, speed_text)
 
+    # VFR sources can contain frames closer together than the nominal frame rate.
+    # Keep their timestamps and input time base so the null muxer does not round
+    # distinct frames to the same DTS and report a false decode failure.
+    video_timing = ["-fps_mode", "passthrough", "-enc_time_base", "demux"] if stream == "v:0" else []
     cmd = [
         ffmpeg_tool("ffmpeg"), "-nostdin", "-hide_banner", "-v", "error", "-xerror",
         "-err_detect", "explode", *acceleration, "-i", str(path), "-map", f"0:{stream}",
-        "-progress", "pipe:1", "-stats_period", "1", "-nostats", "-f", "null", "-",
+        *video_timing, "-progress", "pipe:1", "-stats_period", "1", "-nostats", "-f", "null", "-",
     ]
     with tempfile.TemporaryFile() as errors:
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errors, text=True, encoding="utf-8", errors="replace", **process_manager.creation_options())
