@@ -152,8 +152,12 @@ def project(store, task_id):
         elif "interrupted" in states: status = "interrupted"
         elif "cancelled" in states: status = "cancelled"
         else: return
-        store._conn.execute("UPDATE tasks SET cancel_requested=0 WHERE task_id=?", (store.require(task_id).task_id,))
-        store.update(task_id, status=status, error="；".join(p["platform"] + ": " + p["error"] for p in pubs if p["error"]))
+        task = store.require(task_id)
+        error = "；".join(p["platform"] + ": " + p["error"] for p in pubs if p["error"])
+        if task.status == status and task.error == error and not task.cancel_requested:
+            return
+        store._conn.execute("UPDATE tasks SET cancel_requested=0 WHERE task_id=?", (task.task_id,))
+        store.update(task_id, status=status, error=error)
 
 
 def can_cleanup(store, task_id):

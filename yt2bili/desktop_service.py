@@ -140,6 +140,7 @@ class DesktopService:
             "credentials.set": self.set_key, "credentials.test": self.test_key,
             "tasks.create": self.create, "tasks.list": self.list_tasks, "tasks.get": self.get_task,
             "history.export": self.export_history, "history.import": self.import_history,
+            "history.delete": self.delete_history,
             "tasks.retry": self.retry, "tasks.cancel": self.cancel, "tasks.submit": self.submit,
             "tasks.repair": self.repair, "tasks.update_metadata": self.update_metadata,
             "tasks.resolve": self.resolve, "tasks.cover": self.cover,
@@ -476,6 +477,18 @@ class DesktopService:
             result = history_transfer.import_file(self.store, path)
         if result["imported"]:
             self.emit("history.changed", {"imported": result["imported"]})
+        return result
+
+    def delete_history(self, task_id, expected_revision, confirmed=False):
+        if confirmed is not True:
+            raise Yt2BiliError("请先在任务详情中确认删除投稿记录。")
+        with self.mutation, self.scheduler.guard:
+            if self.scheduler.closing:
+                raise Yt2BiliError("应用正在退出，不能删除投稿记录。")
+            if task_id in self.scheduler.active:
+                raise Yt2BiliError("任务仍在执行，不能删除投稿记录。")
+            result = history_transfer.delete_record(self.store, task_id, expected_revision)
+        self.emit("history.changed", {"deleted_task_id": task_id})
         return result
 
     def retry(self, task_id, operation_id, use_current_translation_settings=False):

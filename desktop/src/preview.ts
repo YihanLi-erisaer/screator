@@ -41,6 +41,7 @@ const accounts = Array.from({ length: number }, (_, i) => ({
   auth_state: "valid",
 }));
 let localInstalled = false;
+let delayMetadataRefresh = false;
 const translationJobs: any[] = [];
 let tasks: Task[] = [];
 if (new URLSearchParams(location.search).has("populated"))
@@ -262,8 +263,20 @@ export async function request(method: string, params: any): Promise<any> {
       },
     };
   }
-  if (method === "tasks.get")
+  if (method === "tasks.get") {
+    if (delayMetadataRefresh && new URLSearchParams(location.search).has("slowTaskRefresh")) {
+      delayMetadataRefresh = false;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
     return tasks.find((t) => t.task_id === params.task_id);
+  }
+  if (method === "history.delete") {
+    const index = tasks.findIndex((t) => t.task_id === params.task_id);
+    if (!params.confirmed || index < 0 || tasks[index].revision !== params.expected_revision)
+      throw new Error("投稿记录已变化，请刷新后重试。");
+    tasks.splice(index, 1);
+    return { deleted: true };
+  }
   if (method === "tasks.cover") return { image: null };
   if (method === "logs.tail") return { items: [] };
   if (method === "tasks.update_metadata") {
@@ -271,6 +284,7 @@ export async function request(method: string, params: any): Promise<any> {
     task.revision += 1;
     task.title_zh = params.title;
     task.desc_zh = params.description;
+    delayMetadataRefresh = true;
     return task;
   }
   if (method === "tasks.create")

@@ -119,6 +119,19 @@ test("task preview preserves unsaved edits and gates submission", async ({
   ).toBeEnabled();
 });
 
+test("closing task detail during a save refresh keeps it closed", async ({ page }) => {
+  await page.goto("/?preview&populated&accounts=1&slowTaskRefresh");
+  await page.getByRole("button", { name: /用更少的工具/ }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel(/中文标题/).fill("快速关闭后的标题");
+  await dialog.getByRole("button", { name: "保存修改" }).click();
+  await dialog.getByRole("button", { name: "关闭对话框" }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.waitForTimeout(700);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /快速关闭后的标题/ })).toBeVisible();
+});
+
 test("settings theme and 1024px layout", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 680 });
   await page.goto("/?preview");
@@ -221,5 +234,33 @@ test("imported publishing history opens as read-only detail", async ({ page }) =
   await expect(dialog).toContainText("只读历史记录");
   await expect(dialog).toContainText("AcFun 稿件");
   await expect(dialog).toContainText("待核对");
-  await expect(dialog.getByRole("button", { name: /投稿|重试|登记|确认历史账号/ })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /确认投稿|继续任务|重试|登记已提交稿件|确认历史账号/ })).toHaveCount(0);
+});
+
+test("task detail deletes one local publishing record after confirmation", async ({ page }) => {
+  await page.goto("/?preview&populated");
+  await page.getByRole("button", { name: "投稿记录", exact: true }).click();
+  await page.getByRole("button", { name: /让创作回归简单/ }).click();
+  const dialog = page.getByRole("dialog", { name: "任务详情" });
+  await dialog.getByRole("button", { name: "删除投稿记录" }).click();
+  await expect(dialog).toContainText("不会删除平台上的稿件");
+  await dialog.getByRole("button", { name: "返回" }).click();
+  await expect(dialog.getByRole("button", { name: "确认删除记录" })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "删除投稿记录" }).click();
+  await dialog.getByRole("button", { name: "确认删除记录" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /让创作回归简单/ })).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText("本机投稿记录已删除");
+});
+
+test("imported history detail can remove its local copy", async ({ page }) => {
+  await page.goto("/?preview&importedHistory");
+  await page.getByRole("button", { name: "投稿记录", exact: true }).click();
+  await page.getByRole("button", { name: /迁移的投稿记录/ }).click();
+  const dialog = page.getByRole("dialog", { name: "导入的投稿记录" });
+  await dialog.getByRole("button", { name: "删除投稿记录" }).click();
+  await expect(dialog).toContainText("重新导入原文件可以恢复");
+  await dialog.getByRole("button", { name: "确认删除记录" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /迁移的投稿记录/ })).toHaveCount(0);
 });

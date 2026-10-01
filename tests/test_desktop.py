@@ -466,6 +466,50 @@ class ContractTests(unittest.TestCase):
                 self.assertFalse(service.scheduler.snapshot()["active"])
             finally: service.close()
 
+    def test_restart_preserves_completed_multi_target_order(self):
+        with tempfile.TemporaryDirectory() as folder:
+            paths = AppPaths.default(folder, folder)
+            store = TaskStore(paths.root / "data/tasks.sqlite")
+            cases = (
+                ("abcdefghijk", "failed", "partial_success", "2026-01-01T00:00:00.000+00:00"),
+                ("lmnopqrstuv", "abandoned", "completed_with_abandon", "2026-01-02T00:00:00.000+00:00"),
+            )
+            for video_id, target_status, parent_status, _ in cases:
+                store.upsert(Task(video_id, "https://youtu.be/" + video_id, "ready"))
+                task = store.require(video_id)
+                publications.ensure_bili(store, task)
+                bili = publications.for_platform(store, task.task_id, "bilibili")
+                publications.change(store, bili["publication_id"], status="submitted")
+                with store.transaction() as db:
+                    db.execute("""INSERT INTO task_publications
+                        (publication_id,task_id,platform,source_video_id,status,error)
+                        VALUES(?,?,'douyin',?,?,?)""",
+                        ("douyin-" + video_id, task.task_id, video_id, target_status, "旧错误"))
+                publications.project(store, task.task_id)
+                self.assertEqual(store.require(task.task_id).status, parent_status)
+            store.upsert(Task("wxyz1234567", "https://youtu.be/wxyz1234567", "submitted"))
+            timestamps = {video_id: updated_at for video_id, _, _, updated_at in cases}
+            timestamps["wxyz1234567"] = "2026-01-03T00:00:00.000+00:00"
+            with store.transaction() as db:
+                for video_id, updated_at in timestamps.items():
+                    db.execute("UPDATE tasks SET updated_at=? WHERE video_id=?", (updated_at, video_id))
+            revisions = {task.video_id: task.revision for task in store.list_all()}
+            store.close()
+
+            for _ in range(2):
+                service = DesktopService(paths, lambda *args: None, MemoryVault())
+                try:
+                    listed = service.list_tasks()["items"]
+                    self.assertEqual([task["video_id"] for task in listed],
+                                     ["wxyz1234567", "lmnopqrstuv", "abcdefghijk"])
+                    for video_id, _, parent_status, _ in cases:
+                        task = service.task(video_id)
+                        self.assertEqual(task.status, parent_status)
+                        self.assertEqual(task.updated_at, timestamps[video_id])
+                        self.assertEqual(task.revision, revisions[video_id])
+                finally:
+                    service.close()
+
     def test_file_lock_rejects_second_owner_and_releases(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "task.lock"

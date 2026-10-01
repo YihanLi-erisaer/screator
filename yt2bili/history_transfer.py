@@ -173,3 +173,41 @@ def import_file(store, path):
             receipts.update(_receipts(record))
             imported += 1
     return {"imported": imported, "skipped": skipped, "total": len(records)}
+
+
+def delete_record(store, task_id, expected_revision):
+    """Remove one local or imported history entry without touching remote posts or assets."""
+    if not isinstance(task_id, str) or not task_id or type(expected_revision) is not int or expected_revision < 1:
+        raise Yt2BiliError("投稿记录删除参数无效。")
+    with store.transaction() as db:
+        imported = db.execute("SELECT 1 FROM imported_publishing_history WHERE task_id=?", (task_id,)).fetchone()
+        if imported:
+            if expected_revision != 1:
+                raise Yt2BiliError("投稿记录已变化，请刷新后重试。")
+            db.execute("DELETE FROM imported_publishing_history WHERE task_id=?", (task_id,))
+            return {"deleted": True, "kind": "imported"}
+        task = db.execute("SELECT status,revision FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+        if not task:
+            raise Yt2BiliError("投稿记录不存在，请刷新列表。")
+        if task["status"] not in HISTORY_STATUSES:
+            raise Yt2BiliError("只有投稿记录页中的已提交或待核对任务可以删除。")
+        if task["revision"] != expected_revision:
+            raise Yt2BiliError("投稿记录已变化，请刷新后重试。")
+        job = db.execute("SELECT payload FROM desktop_jobs WHERE task_id=?", (task_id,)).fetchone()
+        if job and json.loads(job[0]).get("execution_state") in {"queued", "running", "waiting"}:
+            raise Yt2BiliError("任务仍在队列中，不能删除投稿记录。")
+        if db.execute("SELECT 1 FROM task_publications WHERE task_id=? AND status IN ('queued','waiting','uploading_media','creating')", (task_id,)).fetchone():
+            raise Yt2BiliError("仍有平台投稿正在等待或执行，不能删除记录。")
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "acfun_attempts" in tables:
+            db.execute("DELETE FROM acfun_attempts WHERE publication_id IN (SELECT publication_id FROM task_publications WHERE task_id=?)", (task_id,))
+        db.execute("DELETE FROM task_publications WHERE task_id=?", (task_id,))
+        for table in ("desktop_jobs", "task_translation", "translation_attempts", "upload_attempts", "legacy_task_map"):
+            if table in tables:
+                db.execute(f"DELETE FROM {table} WHERE task_id=?", (task_id,))
+        if "import_conflicts" in tables:
+            db.execute("DELETE FROM import_conflicts WHERE existing_task_id=?", (task_id,))
+        db.execute("DELETE FROM tasks WHERE task_id=?", (task_id,))
+        if db.execute("PRAGMA foreign_key_check").fetchone():
+            raise Yt2BiliError("投稿记录引用检查失败，删除已回滚。")
+    return {"deleted": True, "kind": "local"}

@@ -86,6 +86,7 @@ const titles = {
   account: "账号与连接",
   settings: "设置",
 };
+const historyStatuses = new Set(["submitted", "submission_unknown", "partial_success", "completed_with_abandon"]);
 const progressSpeed = (progress?: Progress) => {
   if (progress?.speed != null) return transferRate(progress.speed);
   if (progress?.speed_ratio != null)
@@ -460,6 +461,17 @@ export default function App() {
       const path = await saveLog();
       if (path) await request("logs.export", { path });
     }, "诊断日志已导出。");
+  const deleteHistory = (task: Task) =>
+    action(async () => {
+      await request("history.delete", {
+        task_id: task.task_id,
+        expected_revision: task.revision,
+        confirmed: true,
+      });
+      delete latestTasks.current[task.task_id];
+      await loadTasks();
+      setSelected(null);
+    }, "本机投稿记录已删除。");
   const nav = [
     { id: "tasks", icon: ListVideo },
     { id: "history", icon: History },
@@ -698,7 +710,7 @@ export default function App() {
                   </div>
                 )}
                 <QueueOverview queue={queue} accounts={auth.accounts || []} />
-                <div className="field">
+                <div className="field account-filter">
                   按账号筛选
                   <StyledSelect
                     label="按账号筛选"
@@ -984,10 +996,11 @@ export default function App() {
           />
         )}
         {selected && (selected.imported_history ? (
-          <ImportedHistoryDetail task={selected} close={() => setSelected(null)} />
+          <ImportedHistoryDetail task={selected} busy={busy} onDelete={deleteHistory} close={() => setSelected(null)} />
         ) : (
           <TaskDetail
             task={selected}
+            onDelete={deleteHistory}
             accounts={accountOptions}
             progress={progress[selected.task_id]}
             progressMap={progress}
@@ -995,9 +1008,11 @@ export default function App() {
             action={action}
             close={() => setSelected(null)}
             refresh={async () => {
+              const taskId = selected.task_id;
               await loadTasks();
-              setSelected(
-                await request("tasks.get", { task_id: selected.task_id }),
+              const updated = await request<Task>("tasks.get", { task_id: taskId });
+              setSelected((current) =>
+                current?.task_id === taskId ? updated : current,
               );
             }}
           />
@@ -1248,7 +1263,13 @@ function NewTask({
   );
 }
 
-function ImportedHistoryDetail({ task, close }: { task: Task; close: () => void }) {
+function ImportedHistoryDetail({ task, busy, onDelete, close }: {
+  task: Task;
+  busy: boolean;
+  onDelete: (task: Task) => Promise<void>;
+  close: () => void;
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const platforms = { bilibili: "Bilibili", douyin: "抖音", acfun: "AcFun" };
   return (
     <Modal title="导入的投稿记录" close={close} wide>
@@ -1270,8 +1291,18 @@ function ImportedHistoryDetail({ task, close }: { task: Task; close: () => void 
         ))}
         {task.desc_zh && <div><strong>中文简介</strong><pre>{task.desc_zh}</pre></div>}
         {task.desc_orig && <div><strong>原始简介</strong><pre>{task.desc_orig}</pre></div>}
+        {confirmDelete && <div className="confirm-box">
+          <strong>确定从本机删除这条导入记录？不会删除平台上的稿件；重新导入原文件可以恢复。</strong>
+          <div>
+            <button className="secondary" onClick={() => setConfirmDelete(false)}>返回</button>
+            <button className="secondary danger" disabled={busy} onClick={() => void onDelete(task)}>确认删除记录</button>
+          </div>
+        </div>}
       </div>
-      <div className="modal-actions"><button className="secondary" onClick={close}>关闭</button></div>
+      <div className="modal-actions">
+        <button className="secondary danger" disabled={busy} onClick={() => setConfirmDelete(true)}>删除投稿记录</button>
+        <button className="secondary" onClick={close}>关闭</button>
+      </div>
     </Modal>
   );
 }
@@ -1279,6 +1310,7 @@ function ImportedHistoryDetail({ task, close }: { task: Task; close: () => void 
 function TaskDetail({
   accounts,
   task,
+  onDelete,
   progress,
   progressMap,
   busy,
@@ -1288,6 +1320,7 @@ function TaskDetail({
 }: {
   accounts: BiliAccount[];
   task: Task;
+  onDelete: (task: Task) => Promise<void>;
   progress?: Progress;
   progressMap: Record<string, Progress>;
   busy: boolean;
@@ -1656,6 +1689,8 @@ function TaskDetail({
                 ? `确认投稿到 ${task.account_name_snapshot} · UID ${task.account_uid_snapshot}${task.publications?.some((p) => p.platform === "douyin") ? "，并同步到抖音" : ""}${task.publications?.some((p) => p.platform === "acfun") ? "，并同步到 AcFun" : ""}？`
                 : confirm === "repair"
                   ? "准备原稿件的替换视频？此操作不会投稿。"
+                  : confirm === "delete_history"
+                    ? "确定从本机删除这条任务及其所有平台投稿记录？不会删除平台上的稿件，也不会清理本机视频素材。删除后只能从备份或先前导出的记录中恢复。"
                   : "确认创作中心没有这条稿件？"}
           </strong>
           <div>
@@ -1663,10 +1698,12 @@ function TaskDetail({
               返回
             </button>
             <button
-              className="primary"
+              className={confirm === "delete_history" ? "secondary danger" : "primary"}
               disabled={busy}
               onClick={() =>
-                confirm === "retranslate"
+                confirm === "delete_history"
+                  ? void onDelete(task)
+                  : confirm === "retranslate"
                   ? action(async () => {
                       await request("tasks.retranslate", {
                         task_id: task.task_id,
@@ -1690,13 +1727,18 @@ function TaskDetail({
                         }, "已标记为可继续处理。")
               }
             >
-              确认
+              {confirm === "delete_history" ? "确认删除记录" : "确认"}
             </button>
           </div>
         </div>
       )}
       <div className="modal-actions">
         <span className="help">已提交 ≠ 已过审</span>
+        {historyStatuses.has(task.status) && (
+          <button className="secondary danger" disabled={busy} onClick={() => setConfirm("delete_history")}>
+            删除投稿记录
+          </button>
+        )}
         <button className="secondary" onClick={close}>
           关闭
         </button>
