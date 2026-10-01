@@ -1,6 +1,4 @@
 import {
-  createContext,
-  useContext,
   useCallback,
   useEffect,
   useId,
@@ -72,15 +70,15 @@ import { accountLabel, type BiliAccount } from "./types";
 import TranslationPanel from "./TranslationPanel";
 import { StyledSelect } from "./StyledSelect";
 import { StatusBadge } from "./StatusBadge";
+import { ToastViewport, ReportError, useToast } from "./Toast";
 
 type Page = "tasks" | "history" | "account" | "settings";
-type Notice = { kind: "success" | "error"; text: string };
+const PAGE_SIZE = 20;
 type ShutdownStatus = {
   ready: boolean;
   pending_task_ids: string[];
   inflight_task_ids: string[];
 };
-const NoticeContext = createContext<Notice | null>(null);
 const titles = {
   tasks: "任务中心",
   history: "投稿记录",
@@ -108,7 +106,6 @@ function Modal({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-  const notice = useContext(NoticeContext);
   useEffect(() => {
     ref.current?.showModal();
     return () => ref.current?.close();
@@ -129,12 +126,8 @@ function Modal({
           <X size={19} />
         </button>
       </div>
-      {notice?.kind === "error" && (
-        <div className="inline-error" role="alert">
-          {notice.text}
-        </div>
-      )}
       {children}
+      <ToastViewport />
     </dialog>
   );
 }
@@ -149,6 +142,7 @@ function Status({ status }: { status: string }) {
 }
 
 export default function App() {
+  const { showError, showSuccess } = useToast();
   const [page, setPage] = useState<Page>("tasks");
   const [config, setConfig] = useState<Config | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -158,7 +152,6 @@ export default function App() {
   const [progress, setProgress] = useState<Record<string, Progress>>({});
   const [connected, setConnected] = useState(false);
   const [connectionError, setConnectionError] = useState("");
-  const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [newTask, setNewTask] = useState(false);
@@ -186,21 +179,17 @@ export default function App() {
       if (busyRef.current) return;
       busyRef.current = true;
       setBusy(true);
-      setNotice(null);
       try {
         await work();
-        if (success) setNotice({ kind: "success", text: success });
+        if (success) showSuccess(success);
       } catch (error) {
-        setNotice({
-          kind: "error",
-          text: String(error instanceof Error ? error.message : error),
-        });
+        showError(String(error instanceof Error ? error.message : error));
       } finally {
         busyRef.current = false;
         setBusy(false);
       }
     },
-    [],
+    [showError, showSuccess],
   );
   const loadConfig = useCallback(
     async () => setConfig(await request("settings.get")),
@@ -213,7 +202,7 @@ export default function App() {
       search: query,
       status: filter,
       offset,
-      limit: 50,
+      limit: PAGE_SIZE,
       history: page === "history",
     });
     if (generation !== taskRequest.current) return;
@@ -337,17 +326,11 @@ export default function App() {
         }));
         if (event.payload.status === "success") {
           void refreshAccount();
-          setNotice({
-            kind: "success",
-            text: "B 站登录成功，凭据已保存在本机。",
-          });
+          showSuccess("B 站登录成功，凭据已保存在本机。");
         }
       }
       if (event.event === "task.repaired")
-        setNotice({
-          kind: "success",
-          text: "替换素材已准备好，请在创作中心替换原稿件的视频。",
-        });
+        showSuccess("替换素材已准备好，请在创作中心替换原稿件的视频。");
       if (event.event === "disconnected") {
         setConnected(false);
         setConnectionError(
@@ -367,7 +350,7 @@ export default function App() {
       stop();
       stopClose();
     };
-  }, [loadConfig, refreshAccount]);
+  }, [loadConfig, refreshAccount, showSuccess]);
 
   useEffect(() => {
     if (!connected) return;
@@ -407,11 +390,6 @@ export default function App() {
     return () => media.removeEventListener("change", apply);
   }, [config?.theme]);
   useEffect(() => {
-    if (!notice || notice.kind === "error") return;
-    const t = setTimeout(() => setNotice(null), 5000);
-    return () => clearTimeout(t);
-  }, [notice]);
-  useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
@@ -434,7 +412,7 @@ export default function App() {
           return;
         }
       } catch (e) {
-        setNotice({ kind: "error", text: String(e) });
+        showError(String(e));
       }
       if (!stop) timer = setTimeout(tick, 500);
     };
@@ -443,7 +421,13 @@ export default function App() {
       stop = true;
       clearTimeout(timer);
     };
-  }, [shutdownStarted]);
+  }, [shutdownStarted, showError]);
+  useEffect(() => {
+    if (connectionError) showError(`未连接到后台：${connectionError}`, {
+      label: "重新连接",
+      onClick: () => location.reload(),
+    });
+  }, [connectionError, showError]);
 
   const navigate = (next: Page) => {
     setPage(next);
@@ -460,8 +444,11 @@ export default function App() {
   const exportLogs = () =>
     action(async () => {
       const path = await saveLog();
-      if (path) await request("logs.export", { path });
-    }, "诊断日志已导出。");
+      if (path) {
+        await request("logs.export", { path });
+        showSuccess("诊断日志已导出。");
+      }
+    });
   const deleteHistory = (task: Task) =>
     action(async () => {
       await request("history.delete", {
@@ -481,7 +468,6 @@ export default function App() {
   ] as const;
 
   return (
-    <NoticeContext.Provider value={notice}>
       <div className="app-shell">
         <aside className="sidebar">
           <a
@@ -601,7 +587,7 @@ export default function App() {
                       setQuery("");
                       setAccountFilter("");
                       setOffset(0);
-                      setNotice({ kind: "success", text: `导入 ${result.imported} 条记录，跳过 ${result.skipped} 条已有记录。` });
+                      showSuccess(`导入 ${result.imported} 条记录，跳过 ${result.skipped} 条已有记录。`);
                     })}
                   >
                     <Upload size={16} /> 导入投稿记录
@@ -613,7 +599,7 @@ export default function App() {
                       const path = await saveHistory();
                       if (!path) return;
                       const result = await request("history.export", { path });
-                      setNotice({ kind: "success", text: `已导出 ${result.exported} 条投稿记录。` });
+                      showSuccess(`已导出 ${result.exported} 条投稿记录。`);
                     })}
                   >
                     <ArrowDownToLine size={16} /> 导出投稿记录
@@ -621,38 +607,6 @@ export default function App() {
                 </div>
               )}
             </div>
-            {connectionError && (
-              <div className="banner error">
-                <CircleAlert size={18} />
-                <div>
-                  <strong>未连接到后台</strong>
-                  <p>{connectionError}</p>
-                </div>
-                <button className="secondary" onClick={() => location.reload()}>
-                  重新连接
-                </button>
-              </div>
-            )}
-            {notice && (
-              <div
-                className={`notice ${notice.kind}`}
-                role={notice.kind === "error" ? "alert" : "status"}
-              >
-                {notice.kind === "error" ? (
-                  <CircleAlert size={18} />
-                ) : (
-                  <CheckCircle2 size={18} />
-                )}
-                <span>{notice.text}</span>
-                <button
-                  aria-label="关闭提示"
-                  className="icon-button"
-                  onClick={() => setNotice(null)}
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            )}
             {(page === "tasks" || page === "history") && (
               <>
                 {page === "tasks" && (
@@ -899,15 +853,15 @@ export default function App() {
                         aria-label="上一页"
                         className="icon-button"
                         disabled={!offset}
-                        onClick={() => setOffset((v) => Math.max(0, v - 50))}
+                        onClick={() => setOffset((v) => Math.max(0, v - PAGE_SIZE))}
                       >
                         <ChevronLeft size={15} />
                       </button>
                       <button
                         aria-label="下一页"
                         className="icon-button"
-                        disabled={offset + 50 >= total}
-                        onClick={() => setOffset((v) => v + 50)}
+                        disabled={offset + PAGE_SIZE >= total}
+                        onClick={() => setOffset((v) => v + PAGE_SIZE)}
                       >
                         <ChevronRight size={15} />
                       </button>
@@ -1067,7 +1021,6 @@ export default function App() {
           </Modal>
         )}
       </div>
-    </NoticeContext.Provider>
   );
 }
 
@@ -1097,7 +1050,10 @@ function NewTask({
   const [syncAcfun, setSyncAcfun] = useState(false);
   useEffect(() => {
     let alive = true;
-    request("douyin.auth.status", { verify: true })
+    request("douyin.auth.status")
+      .then((status) => status.account
+        ? request("douyin.auth.status", { verify: true })
+        : status)
       .then((s) => {
         if (alive) setDouyin(s);
       })
@@ -1171,6 +1127,7 @@ function NewTask({
           </span>
         </label>
       </div>
+      <div className="new-task-choices">
       <label className="checkbox">
         <input
           type="checkbox"
@@ -1185,7 +1142,7 @@ function NewTask({
       </label>
       {!douyin?.can_sync && (
         <p className="help">
-          请先在“账号与连接”登录抖音，登录后才能勾选。{douyin?.error}
+          请先在“账号与连接”登录抖音，登录后才能勾选。
         </p>
       )}
       {syncDouyin && (
@@ -1193,19 +1150,23 @@ function NewTask({
           共用素材，两平台独立排队。预览模式一起确认；自动模式分别自动投稿。
         </p>
       )}
-      {syncDouyin && mode === "auto" && !douyin?.capabilities?.auto_publish && (
-        <p className="inline-error">
-          当前抖音服务未启用官方批准的自动发布能力，请选择预览模式。
-        </p>
-      )}
+      <ReportError message={syncDouyin && mode === "auto" && !douyin?.capabilities?.auto_publish
+        ? "当前抖音服务未启用官方批准的自动发布能力，请选择预览模式。" : null} />
       <label className="checkbox">
         <input type="checkbox" checked={syncAcfun} disabled={!acfun?.can_sync}
           onChange={(e) => { setSyncAcfun(e.target.checked); op.current = operationId(); }} />
         同步上传 AcFun{acfun?.account ? ` · ${acfun.account.nickname}` : ""}
       </label>
-      {!acfun?.can_sync && <p className="help">请先在“账号与连接”扫码并启用 AcFun 实验性接入。{acfun?.error}</p>}
-      {syncAcfun && <p className="help">AcFun 使用独立队列，并共用本任务的标签与简介；标题单独翻译且最多 50 字。{mode === "auto" ? "素材准备好后自动投稿。" : "预览后确认投稿。"}</p>}
-      {syncAcfun && mode === "auto" && !config?.acfun_channel_id && <p className="inline-error">请先在设置中填写 AcFun 默认分区 ID，再创建自动投稿任务。</p>}
+      {!acfun?.can_sync && <p className="help">
+        {acfun?.account?.auth_state === "valid"
+          ? "AcFun 账号已登录，但后台仍使用旧版配置。请使用最新构建，完整退出并重新打开应用后重试。"
+          : acfun?.account
+            ? "AcFun 登录已失效，请在“账号与连接”重新扫码。"
+            : "请先在“账号与连接”扫码登录 AcFun。"}
+      </p>}
+      {acfun?.account?.auth_state === "valid" && <p className="help">AcFun 使用独立队列，并共用本任务的标签与简介；标题单独翻译且最多 50 字。{mode === "auto" ? "素材准备好后自动投稿。" : "预览后确认投稿。"}</p>}
+      <ReportError message={syncAcfun && mode === "auto" && !config?.acfun_channel_id
+        ? "请先在设置中填写 AcFun 默认分区 ID，再创建自动投稿任务。" : null} />
       <label className="checkbox">
         <input
           type="checkbox"
@@ -1214,6 +1175,7 @@ function NewTask({
         />
         我拥有该视频的版权或已获得转载授权。
       </label>
+      </div>
       <div className="modal-actions">
         <button className="secondary" onClick={close} disabled={busy}>
           取消
@@ -1432,7 +1394,7 @@ function TaskDetail({
           )}
         </div>
       </div>
-      {task.error && <div className="inline-error">{task.error}</div>}
+      <ReportError message={task.error} />
       {task.publications?.some((p) => p.platform !== "bilibili") && (
         <PublicationDetails
           task={task}
@@ -1815,6 +1777,7 @@ function Account({
   refresh: () => Promise<void>;
   setAuth: (v: any) => void;
 }) {
+  const { showSuccess } = useToast();
   const [showLogin, setShowLogin] = useState(false);
   const [browser, setBrowser] = useState("edge");
   const login = auth.login || {};
@@ -1824,8 +1787,9 @@ function Account({
       if (path) {
         await request("auth.import", { path, kind });
         await refresh();
+        showSuccess("Cookie 已导入本机。");
       }
-    }, "Cookie 已导入本机。");
+    });
   const loginLabels: Record<string, string> = {
     loading: "正在获取二维码…",
     waiting: "请使用哔哩哔哩 App 扫码并确认",
@@ -1975,6 +1939,34 @@ function Settings({
       <section className="settings-card">
         <div className="section-title">
           <div>
+            <h2>YouTube 下载</h2>
+            <p>选择新任务下载源视频时使用的最高分辨率。</p>
+          </div>
+          <StatusBadge tone={unsaved("youtube_max_height") ? "error" : "success"}>
+            {unsaved("youtube_max_height") ? "待保存" : "已保存"}
+          </StatusBadge>
+        </div>
+        <div className="section-body">
+          <div className="field">
+            最高分辨率
+            <StyledSelect
+              label="YouTube 下载最高分辨率"
+              value={String(form.youtube_max_height)}
+              onChange={(value) => update("youtube_max_height", Number(value))}
+              options={[
+                { value: "0", label: "最佳可用画质" },
+                ...[2160, 1440, 1080, 720, 480, 360].map((height) => ({
+                  value: String(height), label: `${height}p`,
+                })),
+              ]}
+            />
+          </div>
+          <p className="help">视频没有所选档位时会选更低的可用画质；不会下载高于上限的格式。已有任务继续使用创建时的设置。</p>
+        </div>
+      </section>
+      <section className="settings-card">
+        <div className="section-title">
+          <div>
             <h2>投稿默认值</h2>
             <p>新建任务时保存参数快照，修改默认值不影响已有任务。</p>
           </div>
@@ -2098,6 +2090,7 @@ function Settings({
                 acfun_channel_id,
                 bili_tags,
                 bili_line,
+                youtube_max_height,
                 upload_gap_seconds,
                 theme,
                 hwaccel,
@@ -2110,6 +2103,7 @@ function Settings({
                   acfun_channel_id,
                   bili_tags,
                   bili_line,
+                  youtube_max_height,
                   upload_gap_seconds,
                   theme,
                   hwaccel,

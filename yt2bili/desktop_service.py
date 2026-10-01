@@ -181,9 +181,7 @@ class DesktopService:
         return handler(**params)
 
     def health(self):
-        capabilities = ["single_url", "account_lanes", "graceful_shutdown", "local_translation_v1", "douyin_sync_v1"]
-        if self.config.values.get("acfun_experimental_enabled"):
-            capabilities.append("acfun_sync_v1")
+        capabilities = ["single_url", "account_lanes", "graceful_shutdown", "local_translation_v1", "douyin_sync_v1", "acfun_sync_v1"]
         return {"protocol_version": 2, "schema_version": 5, "account_limit": 5,
                 "capabilities": capabilities,
                 "migration_notes": self.migration_notes, "version": __version__, "queue": self.scheduler.snapshot(),
@@ -431,28 +429,30 @@ class DesktopService:
             self.store._conn.execute("UPDATE task_publications SET account_id=? WHERE task_id=? AND platform='bilibili' AND account_id IS NULL", (account_id, task.task_id))
             return asdict(task)
 
-    def list_tasks(self, offset=0, limit=100, search="", status="", history=False, account_id=""):
-        if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 200:
+    def list_tasks(self, offset=0, limit=20, search="", status="", history=False, account_id=""):
+        if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 20:
             raise Yt2BiliError("分页参数无效。")
-        tasks = self.store.list_all()
-        tasks = [item for item in tasks if (not search or search.lower() in (item.title_zh + item.title_orig + item.video_id).lower())
+        all_tasks = self.store.list_all()
+        tasks = [item for item in all_tasks if (not search or search.lower() in (item.title_zh + item.title_orig + item.video_id).lower())
                  and (not account_id or item.account_id == account_id) and (not status or item.status == status)
                  and (not history or item.status in history_transfer.HISTORY_STATUSES)]
-        all_tasks = self.store.list_all()
-        items = [{**{key: value for key, value in asdict(item).items() if key not in ("desc_orig", "desc_zh")},
-                  "publications": publications.items(self.store, item.task_id),
-                  "run_id": (self.store.get_job(item.task_id) or {}).get("run_id")} for item in tasks]
         history_total = 0
         if history:
             imported = history_transfer.list_imported(self.store)
             account_uid = next((a["uid"] for a in self.store.accounts(True) if a["account_id"] == account_id), "") if account_id else ""
-            items.extend(item for item in imported
+            tasks.extend(item for item in imported
                          if (not search or search.lower() in (item["title_zh"] + item["title_orig"] + item["video_id"]).lower())
                          and (not account_id or item["account_uid_snapshot"] == account_uid)
                          and (not status or item["status"] == status))
-            items.sort(key=lambda item: (item["updated_at"], item["task_id"]), reverse=True)
+            tasks.sort(key=lambda item: (item["updated_at"], item["task_id"]) if isinstance(item, dict)
+                       else (item.updated_at, item.task_id), reverse=True)
             history_total = sum(t.status in history_transfer.HISTORY_STATUSES for t in all_tasks) + len(imported)
-        return {"items": items[offset:offset + limit], "total": len(items),
+        page = tasks[offset:offset + limit]
+        items = [item if isinstance(item, dict) else
+                 {**{key: value for key, value in asdict(item).items() if key not in ("desc_orig", "desc_zh")},
+                  "publications": publications.items(self.store, item.task_id),
+                  "run_id": (self.store.get_job(item.task_id) or {}).get("run_id")} for item in page]
+        return {"items": items, "total": len(tasks),
                 "counts": {name: sum(t.status == name for t in all_tasks) for name in ("downloading", "validating", "uploading", "ready", "submitted", "failed")},
                 "queue": self.scheduler.snapshot(), "all_total": history_total if history else len(all_tasks)}
 

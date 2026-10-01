@@ -6,11 +6,11 @@ const config = {
   bili_tags: "转载",
   acfun_channel_id: 90,
   bili_line: "tx",
+  youtube_max_height: 0,
   upload_gap_seconds: 20,
   theme: "dark",
   hwaccel: "auto",
   validation_cache: true,
-  acfun_experimental_enabled: false,
   has_deepl_key: false,
   translation_primary: "local_llm",
   translation_fallback_enabled: true,
@@ -93,6 +93,17 @@ if (new URLSearchParams(location.search).has("samevideo") && tasks.length)
     account_uid_snapshot: a.uid,
     account_name_snapshot: a.nickname,
   }));
+if (new URLSearchParams(location.search).has("manyTasks") && tasks.length) {
+  const submitted = tasks.find((task) => task.status === "submitted") || tasks[0];
+  tasks = Array.from({ length: 45 }, (_, index) => ({
+    ...submitted,
+    task_id: `page-${index + 1}`,
+    video_id: `page-${index + 1}`,
+    title_zh: `分页记录 ${index + 1}`,
+    status: "submitted",
+    updated_at: new Date(Date.now() - index * 1000).toISOString(),
+  }));
+}
 if (new URLSearchParams(location.search).has("importedHistory"))
   tasks.push({
     task_id: "imported-preview", video_id: "abcdefghijk", url: "https://youtu.be/abcdefghijk",
@@ -202,6 +213,7 @@ export async function request(method: string, params: any): Promise<any> {
     };
   if (method === "douyin.auth.status") {
     const enabled = new URLSearchParams(location.search).get("douyin") === "1";
+    const unconfiguredError = new URLSearchParams(location.search).has("douyinUnconfiguredError");
     return {
       configured: enabled,
       can_sync: enabled,
@@ -214,19 +226,28 @@ export async function request(method: string, params: any): Promise<any> {
             auth_state: "valid",
           }
         : null,
+      error: !enabled && unconfiguredError
+        ? "请先配置已部署的 HTTPS 抖音授权服务地址（只填写域名和端口）。"
+        : "",
     };
   }
   if (method === "acfun.channels") return { items: [
     { channel_id: 90, name: "科技 / 科技制造" },
     { channel_id: 196, name: "影视 / 纪录片·短片" },
     { channel_id: 86, name: "生活 / 生活日常" },
+    ...(new URLSearchParams(location.search).has("manyChannels")
+      ? Array.from({ length: 12 }, (_, index) => ({ channel_id: 300 + index, name: `测试分区 ${index + 1}` }))
+      : []),
   ] };
   if (method === "acfun.auth.status") {
-    const enabled = new URLSearchParams(location.search).get("acfun") === "1";
+    const connected = new URLSearchParams(location.search).get("acfun") === "1";
+    const legacyWorker = new URLSearchParams(location.search).has("acfunLegacyWorker");
     return {
-      enabled, can_sync: enabled, capabilities: { auto_publish: true, experimental: true },
-      account: enabled ? { account_id: "acfun-preview", binding_revision: 1, user_id: "12345", nickname: "AcFun 预览账号", auth_state: "valid" } : null,
-      error: enabled ? "" : "AcFun 实验性接入尚未启用。",
+      can_sync: connected && !legacyWorker, capabilities: { auto_publish: true, experimental: true },
+      account: connected ? { account_id: "acfun-preview", binding_revision: 1, user_id: "12345", nickname: "AcFun 预览账号", auth_state: "valid" } : null,
+      error: legacyWorker ? "AcFun 实验性网页投稿尚未启用。"
+        : !connected && new URLSearchParams(location.search).has("acfunNoLoginError")
+          ? "请先登录 AcFun。" : "",
     };
   }
   if (method === "accounts.list") return { items: accounts, limit: 5 };
@@ -250,7 +271,7 @@ export async function request(method: string, params: any): Promise<any> {
         (!params.search || t.title_zh.includes(params.search)),
     );
     return {
-      items,
+      items: items.slice(params.offset ?? 0, (params.offset ?? 0) + (params.limit ?? 20)),
       total: items.length,
       all_total: tasks.length,
       counts: {

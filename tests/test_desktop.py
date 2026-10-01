@@ -255,6 +255,31 @@ class DesktopTests(unittest.TestCase):
         with self.assertRaises(Yt2BiliError): self.service.update_settings({"upload_gap_seconds": -1})
         with self.assertRaises(Yt2BiliError): self.service.update_settings({"deepl_auth_key": "bad"})
 
+    def test_youtube_resolution_setting_persists_and_old_snapshots_use_best(self):
+        self.assertEqual(self.service.config.build().youtube_max_height, 0)
+        old_snapshot = self.service.config.snapshot()
+        old_snapshot.pop("youtube_max_height")
+        result = self.service.update_settings({"youtube_max_height": 720})
+        self.assertEqual(result["youtube_max_height"], 720)
+        self.assertEqual(self.service.config.build().youtube_max_height, 720)
+        self.assertEqual(self.service.config.build(old_snapshot).youtube_max_height, 0)
+        saved = json.loads((self.paths.root / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["youtube_max_height"], 720)
+        reloaded = DesktopSettings(self.paths, MemoryVault())
+        self.assertEqual(reloaded.build().youtube_max_height, 720)
+        for invalid in (True, 999, "720"):
+            with self.subTest(invalid=invalid), self.assertRaises(Yt2BiliError):
+                self.service.update_settings({"youtube_max_height": invalid})
+
+    def test_old_acfun_enable_setting_is_ignored_and_removed_on_next_save(self):
+        saved = self.service.config.snapshot()
+        saved["acfun_experimental_enabled"] = False
+        (self.paths.root / "settings.json").write_text(json.dumps(saved), encoding="utf-8")
+        reloaded = DesktopSettings(self.paths, MemoryVault())
+        self.assertNotIn("acfun_experimental_enabled", reloaded.public())
+        reloaded.update({"theme": "dark"})
+        self.assertNotIn("acfun_experimental_enabled", json.loads((self.paths.root / "settings.json").read_text(encoding="utf-8")))
+
     def test_translation_timeouts_are_persisted_and_public(self):
         result = self.service.update_settings({
             "local_llm_timeout_seconds": 240,
@@ -385,7 +410,19 @@ class DesktopTests(unittest.TestCase):
     def test_unknown_method_and_bad_parameters_fail_closed(self):
         with self.assertRaises(Yt2BiliError): self.service.dispatch("shell.execute", {})
         with self.assertRaises(Yt2BiliError): self.service.dispatch("tasks.list", [])
+        with self.assertRaises(Yt2BiliError): self.service.list_tasks(limit=21)
         with self.assertRaises(Yt2BiliError): self.service.list_tasks(limit=100000)
+
+    def test_task_and_history_pages_advance_by_twenty(self):
+        for index in range(45):
+            video_id = f"page{index:07d}"
+            self.service.store.upsert(Task(video_id, f"https://youtu.be/{video_id}", "submitted"))
+        for history in (False, True):
+            pages = [self.service.list_tasks(offset=offset, history=history) for offset in (0, 20, 40)]
+            self.assertEqual([len(page["items"]) for page in pages], [20, 20, 5])
+            self.assertEqual([page["total"] for page in pages], [45, 45, 45])
+            ids = [item["task_id"] for page in pages for item in page["items"]]
+            self.assertEqual(len(set(ids)), 45)
 
 
 class ContractTests(unittest.TestCase):

@@ -3,6 +3,7 @@ import TranslationPanel from "./TranslationPanel";
 import { ArrowRight, CheckCircle2, FolderOpen, RefreshCw } from "lucide-react";
 import { chooseDirectory, request } from "./bridge";
 import { bytes, type Config } from "./types";
+import { ReportError } from "./Toast";
 
 export default function SetupWizard({
   config,
@@ -119,6 +120,8 @@ export default function SetupWizard({
       )}
       {step === 3 && (
         <>
+          <ReportError message={auth.login?.status === "failed" ? auth.login?.message || "登录失败，请重试。"
+            : auth.login?.status === "expired" ? "二维码已过期，请刷新。" : null} />
           <p className="help">
             使用哔哩哔哩 App
             扫码。也可以稍后在“账号与连接”登录，先使用素材预览功能。
@@ -138,8 +141,8 @@ export default function SetupWizard({
                     loading: "正在获取二维码…",
                     waiting: "请扫码并在手机上确认",
                     scanned: "请在手机上确认",
-                    expired: "二维码已过期，请刷新",
-                    failed: auth.login?.message || "登录失败，请重试",
+                    expired: "二维码待刷新",
+                    failed: "请重新登录",
                   } as Record<string, string>
                 )[auth.login?.status] || "尚未连接账号"}
           </p>

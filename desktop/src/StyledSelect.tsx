@@ -1,10 +1,19 @@
 import { Check, ChevronDown } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 export type SelectOption = {
   value: string;
   label: string;
   disabled?: boolean;
+};
+
+type MenuPlacement = {
+  top?: number;
+  bottom?: number;
+  left: number;
+  width?: number;
+  minWidth: number;
+  maxHeight: number;
 };
 
 export function StyledSelect({
@@ -23,7 +32,7 @@ export function StyledSelect({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [above, setAbove] = useState(false);
+  const [placement, setPlacement] = useState<MenuPlacement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -48,6 +57,49 @@ export function StyledSelect({
     if (disabled) setOpen(false);
   }, [disabled]);
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    const position = () => {
+      const button = trigger.current;
+      const list = menu.current;
+      if (!button || !list) return;
+      const bounds = button.getBoundingClientRect();
+      const dialog = root.current?.closest("dialog")?.getBoundingClientRect();
+      const topLimit = Math.max(8, (dialog?.top ?? 0) + 8);
+      const bottomLimit = Math.min(window.innerHeight - 8, (dialog?.bottom ?? window.innerHeight) - 8);
+      if (bounds.bottom < topLimit || bounds.top > bottomLimit) {
+        setOpen(false);
+        return;
+      }
+      const below = Math.max(0, bottomLimit - bounds.bottom - 5);
+      const aboveSpace = Math.max(0, bounds.top - topLimit - 5);
+      const above = below < Math.min(240, list.scrollHeight) && aboveSpace > below;
+      const compact = !!root.current?.parentElement?.matches(".button-row, .setting-row");
+      const width = compact
+        ? Math.max(bounds.width, list.getBoundingClientRect().width)
+        : Math.min(bounds.width, window.innerWidth - 16);
+      const left = Math.max(8, Math.min(bounds.left, window.innerWidth - width - 8));
+      setPlacement({
+        top: above ? undefined : bounds.bottom + 5,
+        bottom: above ? window.innerHeight - bounds.top + 5 : undefined,
+        left,
+        width: compact ? undefined : width,
+        minWidth: Math.min(bounds.width, window.innerWidth - 16),
+        maxHeight: Math.min(240, above ? aboveSpace : below),
+      });
+    };
+    position();
+    const onScroll = (event: Event) => {
+      if (event.target !== menu.current) position();
+    };
+    document.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", position);
+    return () => {
+      document.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", position);
+    };
+  }, [open, options.length]);
+
   useEffect(() => {
     const list = menu.current;
     const option = optionRefs.current[activeIndex];
@@ -61,12 +113,7 @@ export function StyledSelect({
   useEffect(() => () => window.clearTimeout(searchTimer.current), []);
 
   const show = (initialIndex = selectedIndex >= 0 ? selectedIndex : options.findIndex((option) => !option.disabled)) => {
-    const bounds = root.current?.getBoundingClientRect();
-    const container = root.current?.closest("dialog")?.getBoundingClientRect();
-    const bottom = Math.min(window.innerHeight, container?.bottom ?? window.innerHeight);
-    const top = Math.max(0, container?.top ?? 0);
-    const menuHeight = Math.min(240, options.length * 38 + 12);
-    setAbove(!!bounds && bottom - bounds.bottom < menuHeight && bounds.top - top > bottom - bounds.bottom);
+    setPlacement(null);
     setActiveIndex(initialIndex);
     setOpen(true);
   };
@@ -138,7 +185,17 @@ export function StyledSelect({
         <ChevronDown size={16} aria-hidden="true" />
       </button>
       {open && (
-        <div ref={menu} id={listId} className={`styled-select-menu ${above ? "above" : ""}`} role="listbox" aria-label={label}>
+        <div ref={menu} id={listId} className="styled-select-menu"
+          role="listbox" aria-label={label}
+          style={{
+            top: placement?.top,
+            bottom: placement?.bottom,
+            left: placement?.left,
+            width: placement?.width,
+            minWidth: placement?.minWidth,
+            maxHeight: placement?.maxHeight,
+            visibility: placement ? "visible" : "hidden",
+          } satisfies CSSProperties}>
           {options.map((option, index) => (
             <div
               key={option.value}

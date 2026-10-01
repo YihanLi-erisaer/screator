@@ -299,10 +299,9 @@ class AcfunService:
                 with self.store.transaction() as db:
                     db.execute("UPDATE acfun_accounts SET auth_state='expired' WHERE account_id=?", (account["account_id"],))
                 account = self.account()
-        enabled = self.config.values.get("acfun_experimental_enabled", False)
-        return {"account": account, "can_sync": bool(enabled and account and account["auth_state"] == "valid"),
-                "capabilities": {"auto_publish": True, "experimental": True}, "enabled": enabled,
-                "error": error or ("AcFun 实验性网页投稿尚未启用。" if not enabled else ""), "limit": 1}
+        return {"account": account, "can_sync": bool(account and account["auth_state"] == "valid"),
+                "capabilities": {"auto_publish": True, "experimental": True},
+                "error": error, "limit": 1}
 
     def start(self):
         qr = {"client": self.client_factory(), "created": time.monotonic(), "phase": "scan"}

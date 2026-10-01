@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { external, operationId, request } from "./bridge";
 import { StyledSelect } from "./StyledSelect";
 import { StatusBadge } from "./StatusBadge";
+import { ReportError } from "./Toast";
 
 export function AcfunVerification({ publicationId, busy, run }: {
   publicationId: string;
@@ -41,7 +42,7 @@ export function AcfunVerification({ publicationId, busy, run }: {
   }, [challenge, publicationId, run]);
   return <div>
     <p className="help">AcFun 要求手动安全验证。验证完成后请尽快确认投稿，未改变的视频将复用。</p>
-    {error && <p className="inline-error">{error}</p>}
+    <ReportError message={error} />
     <button disabled={busy || !!challenge} onClick={() => void run(async () => {
       const next = await request("acfun.verification", { publication_id: publicationId });
       if (next.status && next.status !== "ready") {
@@ -83,26 +84,40 @@ export function AcfunChannelSelect({ value, onChange, disabled = false, label = 
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [available, setAvailable] = useState(false);
   useEffect(() => {
     let alive = true;
     setLoading(true);
     setError("");
-    request("acfun.channels").then((result) => {
-      if (alive) setItems(result.items);
-    }).catch((e) => { if (alive) setError(String(e)); })
-      .finally(() => { if (alive) setLoading(false); });
+    void (async () => {
+      try {
+        const status = await request("acfun.auth.status");
+        if (!alive) return;
+        setAvailable(!!status.can_sync);
+        if (!status.can_sync) {
+          setItems([]);
+          return;
+        }
+        const result = await request("acfun.channels");
+        if (alive) setItems(result.items);
+      } catch (e) {
+        if (alive) setError(String(e));
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
     return () => { alive = false; };
   }, [reload]);
-  const invalid = value > 0 && !loading && !error && !items.some((item) => item.channel_id === value);
+  const invalid = available && value > 0 && !loading && !error && !items.some((item) => item.channel_id === value);
   return <div>
     <div className="field">{label}
       <StyledSelect
         label={label}
         value={String(value)}
-        disabled={disabled || loading || !items.length}
+        disabled={disabled || loading || !available || !items.length}
         onChange={(selected) => onChange(Number(selected))}
         options={[
-          { value: "0", label: loading ? "正在读取 AcFun 分区…" : "请选择具体分区" },
+          { value: "0", label: loading ? "正在读取 AcFun 分区…" : !available ? "请先登录 AcFun" : "请选择具体分区" },
           ...(value > 0 && !items.some((item) => item.channel_id === value)
             ? [{ value: String(value), label: `未匹配到可投稿分区（ID ${value}）`, disabled: true }]
             : []),
@@ -110,8 +125,9 @@ export function AcfunChannelSelect({ value, onChange, disabled = false, label = 
         ]}
       />
     </div>
-    {invalid && <p className="inline-error">该 ID 不是可投稿的视频子分区，请重新选择。</p>}
-    {error && <p className="help">{error} <button type="button" disabled={disabled || loading} onClick={() => setReload((n) => n + 1)}>重试读取分区</button></p>}
+    <ReportError message={invalid ? "该 ID 不是可投稿的视频子分区，请重新选择。" : null} />
+    <ReportError message={error} />
+    {error && <button type="button" disabled={disabled || loading} onClick={() => setReload((n) => n + 1)}>重试读取分区</button>}
   </div>;
 }
 
@@ -153,7 +169,7 @@ export function AcfunAccountPanel() {
   };
   const connectionLabel = !status
     ? error ? "检测失败" : "检测中"
-    : status.can_sync ? "已连接" : !status.enabled ? "未启用" : status.account ? "需重新扫码" : "未登录";
+    : status.can_sync ? "已连接" : status.account ? "需重新扫码" : "未登录";
   return <section className="settings-card section-body">
     <div className="status-heading">
       <h3>AcFun 同步投稿 · 单账号</h3>
@@ -161,12 +177,9 @@ export function AcfunAccountPanel() {
         {connectionLabel}
       </StatusBadge>
     </div>
-    <p className="help">实验性网页接入，独立队列。平台接口尚需真实账号验证；启用前请确认你接受网页接口变化的风险。</p>
-    {error && <p className="inline-error">{error}</p>}
-    {status?.error && <p className="help">{status.error}</p>}
+    <p className="help">实验性网页接入，独立队列。平台接口尚需真实账号验证；使用前请确认你接受网页接口变化的风险。</p>
+    <ReportError message={error} />
     <p>{status?.account ? `${status.account.nickname} · UID ${status.account.user_id} · ${status.account.auth_state === "valid" ? "已登录" : "需重新扫码"}` : "尚未绑定 AcFun 账号"}</p>
-    <label className="checkbox"><input type="checkbox" checked={!!status?.enabled} disabled={busy}
-      onChange={(e) => void run(() => request("settings.update", { values: { acfun_experimental_enabled: e.target.checked } }))} />启用 AcFun 实验性接入</label>
     <div className="modal-actions">
       <button disabled={busy} onClick={() => void run(async () => {
         const result = await request("acfun.auth.start");
@@ -183,6 +196,6 @@ export function AcfunAccountPanel() {
       </>}
     </div>
     {qr && <div><img alt="AcFun 登录二维码" width={220} height={220} src={qr.startsWith("data:") ? qr : `data:image/png;base64,${qr}`} /><p className="help">{phase === "scanned" ? "已扫码，请在手机确认。" : "请用 AcFun 扫码并在手机确认。"}</p></div>}
-    {phase === "expired" && <p className="inline-error">二维码已过期，请重新获取。</p>}
+    <ReportError message={phase === "expired" ? "二维码已过期，请重新获取。" : null} />
   </section>;
 }

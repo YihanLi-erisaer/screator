@@ -25,7 +25,7 @@
 
 ## 实施现状（2026-09-26）
 
-代码已接入 `yt2bili/acfun.py`、数据库 v5、`acfun_accounts`/`acfun_attempts`、AcFun lane、桌面 RPC、账号与新建任务界面、CLI 和模拟测试。实验开关默认关闭，扫码 Cookie 留在系统凭据库；最终 `createDouga` 发送前先记录意图，只有有效 `dougaId` 记为已提交。`createVideo` 或最终创建响应不确定时保留素材并转待核对；确认未提交后才允许手动继续。预览和自动模式均可选 AcFun，自动模式创建时要求 AcFun 默认分区 ID。
+代码已接入 `yt2bili/acfun.py`、数据库 v5、`acfun_accounts`/`acfun_attempts`、AcFun lane、桌面 RPC、账号与新建任务界面、CLI 和模拟测试。新建任务的 AcFun 同步选项默认不勾选，扫码 Cookie 留在系统凭据库；最终 `createDouga` 发送前先记录意图，只有有效 `dougaId` 记为已提交。`createVideo` 或最终创建响应不确定时保留素材并转待核对；确认未提交后才允许手动继续。预览和自动模式均可选 AcFun，自动模式创建时要求 AcFun 默认分区 ID。
 
 本次更新：设置新增 `acfun_channel_id`，不沿用 Bilibili 的 `bili_tid`；创建任务时将该值及 Bilibili 标签写入 AcFun 快照。翻译阶段在同一源标题上分别执行 Bilibili 标题/简介翻译与 AcFun 50 字标题翻译，后者记录为 `acfun_title`；共用简介按 1000 字上限生成。预览编辑共用简介时同步更新 AcFun 快照，AcFun 投稿卡只单独编辑标题和分区。自动模式经独立 lane 提交，最终回执仍以 `dougaId` 为准。
 
@@ -39,7 +39,7 @@
 
 现有代码已经具备任务级素材准备、`task_publications` 分平台结果、Bilibili 每账号队列及抖音独立队列，因此增加 AcFun **内部结构上可行**。[Y2A-Auto 的 AcFun 登录与上传源码](https://github.com/fqscfqj/Y2A-Auto/tree/main/modules) 又提供了可研究的网页会话投稿链路：扫码取得 Cookie、向创作中心申请视频上传令牌、分片传输、创建视频素材、上传封面、创建稿件并读取 AC 号。这提高了技术可行性的可信度；它不证明该网页接口对第三方开放、当前稳定或已经过本项目真实账号验证。
 
-首期采用**本机 Web 会话适配器**，不要求部署抖音式 broker。以用户主动扫码建立会话，使用严格限定域名的创作中心接口；界面明确标识实验性接入，功能开关默认关闭，用户主动启用后可在预览或自动模式选择 AcFun。扫码成功只把认证状态变为“已登录”，不自动启用投稿。条款及账号风险核对、真实投稿与故障验证是正式开放门槛。获得 AcFun 正式第三方接口时优先换成正式适配器，不改变任务/队列数据模型。此设计不包含浏览器模拟点击或要求用户交出账号密码。
+首期采用**本机 Web 会话适配器**，不要求部署抖音式 broker。以用户主动扫码建立会话，使用严格限定域名的创作中心接口；界面明确标识实验性接入，登录有效后可在预览或自动模式逐任务选择 AcFun，任务级选项默认不勾选。扫码成功只把认证状态变为“已登录”，不会自动把 AcFun 加入已有或新建任务。条款及账号风险核对、真实投稿与故障验证是正式开放门槛。获得 AcFun 正式第三方接口时优先换成正式适配器，不改变任务/队列数据模型。此设计不包含浏览器模拟点击或要求用户交出账号密码。
 
 ### 1.1 Y2A-Auto 的实际链路与不能照搬的部分
 
@@ -62,7 +62,7 @@
 | `yt2bili/desktop_service.py` | `tasks.create` 仅有 `sync_douyin`；抖音创建/去重路径写死 | 增加 AcFun 目标的前置校验和同一事务创建；保留旧请求兼容 |
 | `yt2bili/douyin.py` / `douyin_broker.py` | 抖音特定 OAuth、接口与单账号服务 | 不复用抖音 OAuth 或 broker；仅借鉴状态和投稿台账边界，AcFun 本机适配独立 |
 | `desktop/src/App.tsx` / `Douyin.tsx` / `types.ts` | 新建弹窗只有抖音开关，Publication 平台联合类型只含两个值 | 增 AcFun 状态、开关、账号卡片、元数据编辑与分平台进度 |
-| `yt2bili/desktop_settings.py`、CLI、`desktop/src/preview.ts` | 抖音设置和模拟状态专用 | 加 AcFun 实验性接入开关、CLI 选项与前端预览模拟 |
+| `yt2bili/desktop_settings.py`、CLI、`desktop/src/preview.ts` | 抖音设置和模拟状态专用 | 加 AcFun 分区设置、CLI 选项与前端预览模拟；旧版全局实验开关在加载设置时忽略 |
 
 当前 `publications.project()` 已依据所有目标状态聚合，不要求固定两个目标；`can_cleanup()` 也按全部目标判断。这两处保留原语义，但需要三目标乱序测试。当前 `scheduler._recover()` 只通过 `dual()` 进入多目标恢复路径，必须改为“目标数 > 1”或统一按 publication 恢复，否则仅选 AcFun 的任务会走旧单平台恢复逻辑。
 
@@ -115,7 +115,7 @@ AcFun 创建作品的尝试需要本地耐久台账：`publication_id`、attempt
 - 从已认证的账号信息响应取得稳定 AcFun 用户 ID，再绑定本地 `account_id`。Y2A-Auto 的 `getMyChannels` 只被用来试登录，不能替代账号身份核验；其对非 JSON HTML 的宽松判定不能沿用。
 - Cookie 是可直接代表用户操作的凭据。仅保存在 Windows 系统凭据库或用户 profile 中受保护的凭据容器；不写入任务快照、SQLite、日志、导出包或普通 JSON 文件。加载时校验 Cookie 域和目标主机，网络客户端只允许已审查的 AcFun/上传域名，不把 Cookie 发给上传 CDN。退出登录清除凭据，绑定身份与历史保留。
 - “已登录”由可解析、账号 ID 一致的认证响应证明；“可投稿”还需当前版本在真实账号上验证创作中心能力、分区列表和投稿流程。不要以 HTTP 200 或返回 HTML 直接认定可投稿。会话变化、403、登录重定向和响应 schema 变化均暂停 AcFun lane。
-- 官方接入资料如可取得，须核对 AcFun 是否允许网页会话自动投稿、自动模式条件、上传限制及作品结果查询能力。缺少许可或真实验证时保持正式发布能力未验收；当前允许用户主动启用实验性预览或自动投稿，产品状态继续标为实验性。网页方案的可用性与抖音官方能力分开表示。
+- 官方接入资料如可取得，须核对 AcFun 是否允许网页会话自动投稿、自动模式条件、上传限制及作品结果查询能力。缺少许可或真实验证时保持正式发布能力未验收；当前允许用户在新建任务时主动选择实验性预览或自动投稿，产品状态继续标为实验性。网页方案的可用性与抖音官方能力分开表示。
 
 ### 5.2 接口边界
 
@@ -131,7 +131,7 @@ create_douga(publication_id, attempt_id, frozen_snapshot, video_id, cover_url) -
 lookup(attempt_id | douga_id) -> submitted | definitely_not_started | unknown
 ```
 
-HTTP 客户端须固定 HTTPS 与允许的精确主机名、保持证书验证、禁止登录跳转把凭据带去其他域、设置连接/读取超时和最大响应体积。上传用流式分块读取，防止一次把整段大视频载入内存。AcFun 会话不进入抖音 broker；如果以后采用正式服务端授权，再在同一接口后增加独立实现。`acfun_sync_v1` 健康能力只在适配器启用且版本匹配时返回。
+HTTP 客户端须固定 HTTPS 与允许的精确主机名、保持证书验证、禁止登录跳转把凭据带去其他域、设置连接/读取超时和最大响应体积。上传用流式分块读取，防止一次把整段大视频载入内存。AcFun 会话不进入抖音 broker；如果以后采用正式服务端授权，再在同一接口后增加独立实现。`acfun_sync_v1` 健康能力表示当前版本支持适配器，实际可选性由账号登录状态决定。
 
 参考实现的端点分布在 `scan.acfun.cn`、`member.acfun.cn` 和 `upload.kuaishouzt.com`；各阶段请求方法、字段、签名及错误码必须通过当前网页流程与测试账号重新核对，不能仅复制旧常量。[登录源码](https://github.com/fqscfqj/Y2A-Auto/blob/main/modules/acfun_auth.py)、[上传源码](https://github.com/fqscfqj/Y2A-Auto/blob/main/modules/acfun_uploader.py)
 
@@ -161,15 +161,15 @@ HTTP 客户端须固定 HTTPS 与允许的精确主机名、保持证书验证�
 - `tasks.create` 接收第 4.3 节新字段，`tasks.get/list` 返回 `platform='acfun'` 的 publication；已有 `publications.update_metadata/retry/cancel/abandon/resolve` 扩展到 AcFun，保留按目标权限和状态检查。
 - `desktop/src/types.ts` 增加 `acfun` 联合类型，替换界面中“抖音否则 Bilibili”的二元标签。新建弹窗分别查询平台能力，默认不勾选；身份变化更新 operation_id。目标不可用时保留用户填写的 URL、账号、模式和其他已选平台。
 - 账号页增加 AcFun 卡片；详情页增加 AcFun 元数据编辑和作品回执；队列卡片新增 AcFun lane。`desktop/src/preview.ts` 和 Playwright 仅模拟服务端资格，不把 mock 成功当作真实发布。
-- CLI 可新增 `run --sync-acfun`，默认关闭；与 `--sync-douyin` 可并用。现有 `--auto` 需检查每个已选目标的自动资格。健康检查增加 `acfun_sync_v1` 能力，前端/worker 版本不匹配时禁用新开关，避免旧 worker 忽略 AcFun 目标。
+- CLI 可新增 `run --sync-acfun`，默认关闭；与 `--sync-douyin` 可并用。现有 `--auto` 需检查每个已选目标的自动资格。健康检查增加 `acfun_sync_v1` 能力，前端/worker 版本不匹配时禁用任务级 AcFun 同步选项，避免旧 worker 忽略 AcFun 目标。
 
 ## 8. 实施顺序、测试与验收
 
-1. **参考链路复核**：以 Y2A-Auto 源码为调查线索，核对当前网页流程、AcFun 条款、账号 ID、扫码/会话、分片、视频素材、封面和 `dougaId`；在本项目测试账号获得真实可核对的回执。没有结果时保持默认关闭、标记实验性，并明确自动模式尚未经真实账号验收。
+1. **参考链路复核**：以 Y2A-Auto 源码为调查线索，核对当前网页流程、AcFun 条款、账号 ID、扫码/会话、分片、视频素材、封面和 `dougaId`；在本项目测试账号获得真实可核对的回执。没有结果时保留实验性标记，并明确自动模式尚未经真实账号验收。
 2. **多目标基础**：v5 迁移、平台注册表、通用路由、AcFun 账号与去重、原子创建；确保旧 Bilibili/抖音路径回归。
 3. **模拟适配器与 UI**：使用可控假服务验证三平台并发、AcFun FIFO、单边失败、账号变更、限流、进程重启、未知结果、素材保留和前端三目标显示。
 4. **本机网页会话适配器**：独立实现扫码和会话保管、媒体/封面上传、作品创建与本地意图台账；使用当前实测字段，严格核验各阶段响应，不直接复制 Y2A-Auto GPL-3.0 源码。若决定复用代码，先评估许可证兼容性。[Y2A-Auto 许可证](https://github.com/fqscfqj/Y2A-Auto/blob/main/LICENSE)
-5. **真实环境验收**：在用户授权和有权发布的素材上验证扫码、普通/大文件、平台元数据、`dougaId`、实际审核可见性、断线恢复、会话过期与发布频率。单列未通过项和网页接口变更处理后，再按实验性功能打开 AcFun 开关。
+5. **真实环境验收**：在用户授权和有权发布的素材上验证扫码、普通/大文件、平台元数据、`dougaId`、实际审核可见性、断线恢复、会话过期与发布频率。单列未通过项和网页接口变更处理结果，决定是否保留或调整实验性提示。
 
 必测断言：三目标仅下载/翻译一次；Bilibili 最多五路、抖音一路、AcFun 一路；AcFun 阻塞时其他平台完成；AcFun 同源同账号并发去重；HTTP 200 的 HTML/错误 JSON 不算登录或投稿成功；分片、合并、`createVideo`、封面任一步失败不进入 `createDouga`；`createDouga` 前后断线不会重复调用创建；三目标结果乱序不提前删素材；v4 库升级后抖音账号和投稿原样保留；未选择 AcFun 的任务完全不触发 AcFun 远程请求。沿用现有 Python 回归、TypeScript 构建和 Playwright，真实平台验收单独记录。
 

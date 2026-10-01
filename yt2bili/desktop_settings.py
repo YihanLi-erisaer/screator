@@ -32,13 +32,15 @@ class DesktopSettings:
         self.vault_service = "StarDazz.yt2bili:" + str(paths.root)
         self.translation_upgrade_notice = False
         self.values = dict(work_dir=str(paths.root / "work"), bili_tid=171, bili_tags="转载", acfun_channel_id=0,
+                           youtube_max_height=0,
                            bili_line="tx", upload_gap_seconds=20, theme="system",
-                           hwaccel="auto", validation_cache=True, douyin_broker_url="",
-                           acfun_experimental_enabled=False, **DEFAULTS)
+                           hwaccel="auto", validation_cache=True, douyin_broker_url="", **DEFAULTS)
         if self.path.exists():
             try:
                 saved = json.loads(self.path.read_text(encoding="utf-8"))
                 self.translation_upgrade_notice = "translation_primary" not in saved
+                if isinstance(saved, dict):
+                    saved.pop("acfun_experimental_enabled", None)
                 if isinstance(saved, dict) and saved.get("local_llm_model") == "qwen3:8b":
                     saved["local_llm_model"] = DEFAULTS["local_llm_model"]
                 self.values.update(self.validate(saved))
@@ -90,6 +92,8 @@ class DesktopSettings:
         for name, lo, hi in (("bili_tid", 1, 65535), ("acfun_channel_id", 0, 65535), ("upload_gap_seconds", 0, 600)):
             if type(merged[name]) is not int or not lo <= merged[name] <= hi:
                 raise Yt2BiliError(f"{name} 必须在 {lo}～{hi} 之间。")
+        if type(merged["youtube_max_height"]) is not int or merged["youtube_max_height"] not in (0, 360, 480, 720, 1080, 1440, 2160):
+            raise Yt2BiliError("请选择支持的 YouTube 下载分辨率。")
         if merged["theme"] not in ("system", "dark", "light") or merged["hwaccel"] not in ("auto", "cpu"):
             raise Yt2BiliError("主题或校验模式无效。")
         if merged["bili_line"] not in ("tx", "bda2", "qn", "ws", "txa"):
@@ -98,8 +102,6 @@ class DesktopSettings:
             raise Yt2BiliError("请填写有效标签（不超过 200 字）。")
         if type(merged["validation_cache"]) is not bool:
             raise Yt2BiliError("校验缓存必须为开关值。")
-        if type(merged["acfun_experimental_enabled"]) is not bool:
-            raise Yt2BiliError("AcFun 实验性接入必须为开关值。")
         if not isinstance(merged["work_dir"], str) or not Path(merged["work_dir"]).is_absolute():
             raise Yt2BiliError("工作目录必须为绝对路径。")
         target = Path(merged["work_dir"]).resolve()
@@ -132,6 +134,7 @@ class DesktopSettings:
                         bili_cookies=root / "secrets/bili_cookies.json", biliup_bin=None,
                         youtube_cookies=cookie if cookie.is_file() else None, youtube_cookies_from_browser=None,
                         bili_tid=value["bili_tid"], bili_tags=value["bili_tags"], bili_line=value["bili_line"],
+                        youtube_max_height=value.get("youtube_max_height", 0),
                         upload_gap_seconds=value["upload_gap_seconds"], work_dir=Path(value["work_dir"]),
                         data_dir=root / "data", bin_dir=self.paths.resources / "bin",
                         translation_root=root / "translation", **validate_translation(value))

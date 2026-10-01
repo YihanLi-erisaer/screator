@@ -142,10 +142,12 @@ def download_video(
         return finished
 
     opts = _base_opts(settings)
+    max_height = getattr(settings, "youtube_max_height", 0)
+    video_format = "bv*+ba/b" if not max_height else f"bv*[height<={max_height}]+ba/b[height<={max_height}]"
     opts.update(
         {
             "outtmpl": str(work_dir / "source.%(ext)s"),
-            "format": "bv*+ba/b",
+            "format": video_format,
             "format_sort": ["res", "fps", "hdr:12", "vcodec:av01", "vcodec:vp9", "br"],
             "format_sort_force": True,
             "merge_output_format": "mp4",

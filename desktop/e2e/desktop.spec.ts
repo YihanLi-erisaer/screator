@@ -52,6 +52,76 @@ test("connection and settings badges follow backend and saved values", async ({ 
   await expect(directory.locator(".section-title .pill.imported")).toHaveText("已保存");
 });
 
+test("YouTube download resolution is saved from settings", async ({ page }) => {
+  await page.goto("/?preview");
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  const card = page.locator(".settings-card").filter({ has: page.getByRole("heading", { name: "YouTube 下载" }) });
+  const select = card.getByRole("combobox", { name: "YouTube 下载最高分辨率" });
+  await expect(select).toContainText("最佳可用画质");
+  await select.click();
+  await page.getByRole("option", { name: "720p" }).click();
+  await expect(card.locator(".section-title .pill.missing")).toHaveText("待保存");
+  await page.getByRole("button", { name: "保存设置" }).click();
+  await expect(select).toContainText("720p");
+  await expect(card.locator(".section-title .pill.imported")).toHaveText("已保存");
+});
+
+test("task center and publishing history show twenty records per page", async ({ page }) => {
+  await page.goto("/?preview&populated&manyTasks&accounts=1");
+  await expect(page.locator(".task-row")).toHaveCount(20);
+  await expect(page.locator(".task-row").first()).toContainText("分页记录 1");
+  await page.getByRole("button", { name: "下一页" }).click();
+  await expect(page.locator(".task-row")).toHaveCount(20);
+  await expect(page.locator(".task-row").first()).toContainText("分页记录 21");
+  await page.getByRole("button", { name: "下一页" }).click();
+  await expect(page.locator(".task-row")).toHaveCount(5);
+  await expect(page.locator(".task-row").first()).toContainText("分页记录 41");
+  await expect(page.getByRole("button", { name: "下一页" })).toBeDisabled();
+  await page.getByRole("button", { name: "投稿记录", exact: true }).click();
+  await expect(page.locator(".task-row")).toHaveCount(20);
+  await expect(page.locator(".task-row").first()).toContainText("分页记录 1");
+  await page.getByRole("button", { name: "下一页" }).click();
+  await expect(page.locator(".task-row").first()).toContainText("分页记录 21");
+});
+
+test("AcFun login enables task selection without an account page switch", async ({ page }) => {
+  await page.goto("/?preview&accounts=1&acfun=1");
+  await page.getByRole("button", { name: "账号与连接", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: "启用 AcFun 实验性接入" })).toHaveCount(0);
+  await expect(page.locator(".status-heading").filter({ hasText: "AcFun 同步投稿" })).toContainText("已连接");
+  await page.getByRole("button", { name: "任务中心", exact: true }).click();
+  await page.getByRole("button", { name: /新建任务/ }).click();
+  await expect(page.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeEnabled();
+});
+
+test("unconnected Douyin and AcFun show status without error toasts", async ({ page }) => {
+  await page.goto("/?preview&accounts=1&douyinUnconfiguredError&acfunNoLoginError");
+  await page.getByRole("button", { name: "账号与连接", exact: true }).click();
+  await expect(page.locator(".status-heading").filter({ hasText: "抖音同步投稿" })).toContainText("未配置");
+  await expect(page.locator(".status-heading").filter({ hasText: "AcFun 同步投稿" })).toContainText("未登录");
+  await expect(page.locator(".error-toast")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "AcFun 默认分区（自动投稿必填）" })).toBeDisabled();
+  await expect(page.locator(".error-toast")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "任务中心", exact: true }).click();
+  await page.getByRole("button", { name: /新建任务/ }).click();
+  const dialog = page.getByRole("dialog", { name: "新建任务" });
+  await expect(dialog.getByRole("checkbox", { name: /同步上传抖音/ })).toBeDisabled();
+  await expect(dialog.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeDisabled();
+  await expect(dialog.locator(".error-toast")).toHaveCount(0);
+});
+
+test("new task explains a stale AcFun backend without showing its obsolete error", async ({ page }) => {
+  await page.goto("/?preview&accounts=1&acfun=1&acfunLegacyWorker");
+  await page.getByRole("button", { name: /新建任务/ }).click();
+  const dialog = page.getByRole("dialog", { name: "新建任务" });
+  await expect(dialog.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeDisabled();
+  await expect(dialog).toContainText("AcFun 账号已登录，但后台仍使用旧版配置。请使用最新构建，完整退出并重新打开应用后重试。");
+  await expect(dialog).not.toContainText("实验性网页投稿尚未启用");
+});
+
 test("managed translation model can be uninstalled from settings", async ({ page }) => {
   await page.goto("/?preview");
   await page.getByRole("button", { name: "设置", exact: true }).click();
@@ -65,7 +135,7 @@ test("managed translation model can be uninstalled from settings", async ({ page
   await expect(page.getByText("开发预览 · 本地组件已就绪")).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
   await uninstall.click();
-  await expect(page.locator(".translation-panel .notice.success")).toHaveText("本地大语言模型已卸载；运行时和已有译文已保留。");
+  await expect(page.locator(".success-toast")).toHaveText(/本地大语言模型已卸载；运行时和已有译文已保留。/);
   await expect(page.getByText("开发预览 · 尚未安装本地组件")).toBeVisible();
   await expect(uninstall).toBeDisabled();
 });
@@ -128,6 +198,55 @@ test("empty workspace, preview default, and modal keyboard focus", async ({
   await expect(dialog.getByRole("alert")).toContainText("界面预览");
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();
+});
+
+test("errors appear as dismissible floating toasts for five seconds", async ({ page }) => {
+  await page.goto("/?preview&accounts=1");
+  await page.clock.install();
+  await page.getByRole("button", { name: /新建任务/ }).click();
+  const dialog = page.getByRole("dialog", { name: "新建任务" });
+  await dialog.getByRole("textbox").fill("https://youtu.be/abcdefghijk");
+  await dialog.getByRole("checkbox", { name: /我拥有该视频的版权/ }).check();
+  await dialog.getByRole("combobox", { name: "目标 Bilibili 账号" }).click();
+  await dialog.getByRole("option", { name: /UID 10001/ }).click();
+  await dialog.getByRole("button", { name: "加入队列" }).click();
+  const toast = dialog.locator(".error-toast");
+  await expect(toast).toContainText("界面预览");
+  await expect(toast).toHaveCSS("animation-name", "toast-slide-in");
+  const bounds = await toast.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThan(200);
+  await toast.getByRole("button", { name: "关闭错误提示" }).click();
+  await expect(toast).toHaveCSS("animation-name", "toast-slide-out");
+  await page.clock.fastForward(281);
+  await expect(toast).toHaveCount(0);
+  await dialog.getByRole("button", { name: "加入队列" }).click();
+  await expect(toast).toContainText("界面预览");
+  await page.clock.fastForward(5001);
+  await expect(toast).toHaveClass(/exiting/);
+  await page.clock.fastForward(281);
+  await expect(toast).toHaveCount(0);
+});
+
+test("success messages appear as dismissible floating toasts for five seconds", async ({ page }) => {
+  await page.goto("/?preview");
+  await page.clock.install();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "保存设置" }).click();
+  const toast = page.locator(".success-toast");
+  await expect(toast).toContainText("设置已保存。");
+  await expect(toast).toHaveCSS("animation-name", "toast-slide-in");
+  await expect(page.locator(".notice.success")).toHaveCount(0);
+  await toast.getByRole("button", { name: "关闭成功提示" }).click();
+  await expect(toast).toHaveCSS("animation-name", "toast-slide-out");
+  await page.clock.fastForward(281);
+  await expect(toast).toHaveCount(0);
+  await page.getByRole("button", { name: "保存设置" }).click();
+  await expect(toast).toContainText("设置已保存。");
+  await page.clock.fastForward(5001);
+  await expect(toast).toHaveClass(/exiting/);
+  await page.clock.fastForward(281);
+  await expect(toast).toHaveCount(0);
 });
 
 test("task preview preserves unsaved edits and gates submission", async ({
@@ -246,6 +365,65 @@ test("account dropdown supports keyboard selection and dismissal", async ({ page
   await filter.press("Enter");
   await expect(filter).toContainText("UID 10001");
   await expect(page.locator(".task-row")).toHaveCount(1);
+});
+
+test("select popups remain visible beyond clipped cards and inside dialogs", async ({ page }) => {
+  await page.goto("/?preview&accounts=5&acfun=1&manyChannels");
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  const select = page.getByRole("combobox", { name: "AcFun 默认分区（自动投稿必填）" });
+  await expect(select).toBeEnabled();
+  await select.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await select.click();
+  const menu = page.getByRole("listbox", { name: "AcFun 默认分区（自动投稿必填）" });
+  await expect(menu).toBeVisible();
+  const visibleBeyondCard = await menu.evaluate((element) => {
+    const card = element.closest(".settings-card")!.getBoundingClientRect();
+    const list = element.getBoundingClientRect();
+    const x = list.left + list.width / 2;
+    const y = Math.min(list.bottom - 8, card.bottom + 8);
+    return list.bottom > card.bottom + 8 && element.contains(document.elementFromPoint(x, y));
+  });
+  expect(visibleBeyondCard).toBe(true);
+  await select.evaluate((element) => element.closest("main")!.scrollBy(0, -30));
+  const alignedAfterScroll = await menu.evaluate((element) => {
+    const button = element.parentElement!.querySelector(".styled-select-trigger")!.getBoundingClientRect();
+    const list = element.getBoundingClientRect();
+    return Math.abs(list.top - button.bottom - 5) < 2 || Math.abs(list.bottom - button.top + 5) < 2;
+  });
+  expect(alignedAfterScroll).toBe(true);
+  await menu.getByRole("option", { name: "测试分区 12（311）" }).click();
+  await expect(select).toContainText("测试分区 12");
+
+  await page.setViewportSize({ width: 1024, height: 680 });
+  await page.getByRole("button", { name: "任务中心", exact: true }).click();
+  await page.getByRole("button", { name: /新建任务/ }).click();
+  const dialog = page.getByRole("dialog", { name: "新建任务" });
+  await dialog.getByRole("combobox", { name: "目标 Bilibili 账号" }).click();
+  const dialogMenu = dialog.getByRole("listbox", { name: "目标 Bilibili 账号" });
+  await expect(dialogMenu).toBeVisible();
+  const [dialogBox, menuBox] = await Promise.all([dialog.boundingBox(), dialogMenu.boundingBox()]);
+  expect(menuBox!.y).toBeGreaterThanOrEqual(dialogBox!.y);
+  expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
+  await dialogMenu.getByRole("option", { name: /UID 10005/ }).click();
+  await expect(dialog.getByRole("combobox", { name: "目标 Bilibili 账号" })).toContainText("UID 10005");
+});
+
+test("compact select popup stays aligned and usable", async ({ page }) => {
+  await page.goto("/?preview");
+  await page.getByRole("button", { name: "账号与连接", exact: true }).click();
+  const browser = page.getByRole("combobox", { name: "浏览器" });
+  await browser.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await browser.click();
+  const menu = page.getByRole("listbox", { name: "浏览器" });
+  await expect(menu).toBeVisible();
+  const aligned = await menu.evaluate((element) => {
+    const button = element.parentElement!.querySelector(".styled-select-trigger")!.getBoundingClientRect();
+    const list = element.getBoundingClientRect();
+    return Math.abs(list.left - button.left) < 2 && list.right <= innerWidth - 8;
+  });
+  expect(aligned).toBe(true);
+  await menu.getByRole("option", { name: "Firefox" }).click();
+  await expect(browser).toContainText("Firefox");
 });
 
 test("publishing history exposes transfer actions only in the desktop app", async ({ page }) => {

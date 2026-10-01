@@ -3,6 +3,7 @@ import { operationId, request } from "./bridge";
 import { labels, type Task, type Publication, type Progress } from "./types";
 import { AcfunChannelSelect, AcfunVerification } from "./Acfun";
 import { StatusBadge } from "./StatusBadge";
+import { ReportError } from "./Toast";
 
 export function DouyinAccountPanel() {
   const [status, setStatus] = useState<any>(null);
@@ -41,8 +42,7 @@ export function DouyinAccountPanel() {
       <p className="help">
         复用同一份视频、封面和翻译结果，抖音独立排队。需部署官方授权服务并取得发布权限。
       </p>
-      {error && <p className="inline-error">{error}</p>}
-      {status?.error && <p className="inline-error">{status.error}</p>}
+      <ReportError message={error} />
       <p>
         {status?.account
           ? `${status.account.nickname} · ${status.account.auth_state === "valid" ? "已登录" : "需重新授权"}`
@@ -72,10 +72,11 @@ export function DouyinAccountPanel() {
             disabled={busy || !url || !key}
             onClick={() =>
               void run(async () => {
-                await request("douyin.auth.configure", {
+                const result = await request("douyin.auth.configure", {
                   url,
                   pairing_key: key,
                 });
+                if (result.error) throw new Error(result.error);
                 setKey("");
               })
             }
@@ -196,7 +197,7 @@ function PublicationCard({
         目标账号：{pub.account_label || pub.account_id}{" "}
         {pub.remote_id && ` · 作品 ID：${pub.remote_id}`}
       </p>
-      {pub.error && <p className="inline-error">{pub.error}</p>}
+      <ReportError message={pub.error} />
       {pub.platform === "acfun" && pub.status === "failed" && /(?:40\d{4}|410\d{3}|安全验证)/.test(pub.error) &&
         <AcfunVerification publicationId={pub.publication_id} busy={busy} run={run} />}
       {pub.status === "uploading_media" && progress?.percent != null && <p className="help">{pub.platform === "acfun" ? "AcFun" : "平台"}上传：{progress.percent.toFixed(1)}%</p>}

@@ -68,11 +68,18 @@ class AcfunTests(unittest.TestCase):
     upload = desktop_tests.DesktopTests.upload
 
     def bind(self):
-        self.service.config.values["acfun_experimental_enabled"] = True
         with self.service.store.transaction() as db:
             db.execute("INSERT INTO acfun_accounts(account_id,user_id,nickname) VALUES('ac-test','12345','测试 AcFun')")
         self.service.acfun.client_factory = lambda cookies=None: FakeWeb()
         return self.service.acfun.account()
+
+    def test_sync_uses_login_status_without_a_global_enable_switch(self):
+        self.assertFalse(self.service.acfun.status()["can_sync"])
+        self.assertIn("acfun_sync_v1", self.service.health()["capabilities"])
+        self.bind()
+        status = self.service.acfun.status()
+        self.assertTrue(status["can_sync"])
+        self.assertNotIn("enabled", status)
 
     def test_qr_login_binds_verified_id_and_keeps_cookies_in_vault(self):
         class QrClient:

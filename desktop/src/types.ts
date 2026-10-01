@@ -54,6 +54,7 @@ export interface Config {
   acfun_channel_id: number;
   bili_tags: string;
   bili_line: string;
+  youtube_max_height: number;
   upload_gap_seconds: number;
   theme: "system" | "dark" | "light";
   hwaccel: string;

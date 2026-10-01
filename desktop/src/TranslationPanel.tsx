@@ -3,6 +3,7 @@ import { request, operationId, chooseFile } from "./bridge";
 import type { Config } from "./types";
 import { StyledSelect } from "./StyledSelect";
 import { StatusBadge } from "./StatusBadge";
+import { ReportError, useToast } from "./Toast";
 
 type Action = (work: () => Promise<unknown>, message?: string) => Promise<void>;
 type Job = {
@@ -43,6 +44,7 @@ export default function TranslationPanel({
   refresh: () => Promise<void>;
   onReady?: (ready: boolean) => void;
 }) {
+  const { showSuccess } = useToast();
   const [key, setKey] = useState("");
   const [address, setAddress] = useState(config.local_llm_base_url);
   const [localTimeout, setLocalTimeout] = useState(
@@ -56,7 +58,6 @@ export default function TranslationPanel({
   );
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
   const blocked = busy || running(job);
   const readStatus = async () =>
     setLocal((await request("translation.status")).local);
@@ -113,7 +114,7 @@ export default function TranslationPanel({
     if (!job || running(job)) return;
     void (async () => {
       if (job.state === "complete" && job.kind === "uninstall") {
-        setSuccess(job.result?.message || "本地大语言模型已卸载。");
+        showSuccess(job.result?.message || "本地大语言模型已卸载。");
       }
       await refresh();
       await readStatus();
@@ -125,7 +126,7 @@ export default function TranslationPanel({
         );
       }
     })().catch((e) => setError(String(e)));
-  }, [job?.job_id, job?.state]);
+  }, [job?.job_id, job?.state, showSuccess]);
   const save = (values: Record<string, unknown>) =>
     action(async () => {
       onReady?.(false);
@@ -164,7 +165,6 @@ export default function TranslationPanel({
   const start = (method: string, params: Record<string, unknown> = {}) =>
     action(async () => {
       setError("");
-      setSuccess("");
       onReady?.(false);
       const value = await request(method, {
         ...params,
@@ -363,7 +363,6 @@ export default function TranslationPanel({
             重新检测
           </button>
         </div>
-        {success && <p className="notice success" role="status">{success}</p>}
         <div className="deepl-heading status-heading">
           <h3>DeepL · 可选</h3>
           <StatusBadge tone={config.has_deepl_key ? "success" : "error"}>
@@ -425,13 +424,10 @@ export default function TranslationPanel({
         <p className="help">
           密钥只保存在系统凭据存储；DeepL 试译会消耗少量额度。
         </p>
-        {config.vault_error && (
-          <p className="inline-error">
-            {config.vault_error} 本地翻译仍可使用。
-          </p>
-        )}
+        <ReportError message={config.vault_error ? `${config.vault_error} 本地翻译仍可使用。` : null} />
         {job && (
           <div className="translation-job" role="status">
+            <ReportError message={job.state === "failed" ? job.message || job.result?.message || "翻译操作失败。" : null} />
             <strong>
               {
                 (
@@ -454,8 +450,8 @@ export default function TranslationPanel({
                   : ""}
               </p>
             )}
-            {job.message && <p>{job.message}</p>}
-            {job.result?.message && <p>{job.result.message}</p>}
+            {job.state !== "failed" && job.message && <p>{job.message}</p>}
+            {job.state !== "failed" && job.kind !== "uninstall" && job.result?.message && <p>{job.result.message}</p>}
             {job.result?.title && (
               <p>
                 {job.result.title}
@@ -487,7 +483,7 @@ export default function TranslationPanel({
             )}
           </div>
         )}
-        {error && <p className="inline-error">{error}</p>}
+        <ReportError message={error} />
       </div>
     </section>
   );

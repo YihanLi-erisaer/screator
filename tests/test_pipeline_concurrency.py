@@ -13,6 +13,29 @@ from yt2bili.db import Task, TaskStore
 
 
 class PipelineConcurrencyTests(unittest.TestCase):
+    def test_youtube_download_resolution_caps_selected_formats(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            captured = []
+
+            def transfer(opts, url):
+                captured.append(opts["format"])
+                (root / "source.mp4").write_bytes(b"downloaded fixture")
+                return {}
+
+            with patch.object(youtube, "_base_opts", return_value={}), \
+                 patch.object(youtube, "_download_with_slot", side_effect=transfer), \
+                 patch.object(youtube, "_log_selected_format"):
+                for limit, expected in (
+                    (0, "bv*+ba/b"),
+                    (720, "bv*[height<=720]+ba/b[height<=720]"),
+                    (1080, "bv*[height<=1080]+ba/b[height<=1080]"),
+                ):
+                    (root / "source.mp4").unlink(missing_ok=True)
+                    settings = SimpleNamespace(youtube_max_height=limit)
+                    self.assertEqual(youtube.download_video("url", root, settings, validate=False), root / "source.mp4")
+                    self.assertEqual(captured[-1], expected)
+
     def test_second_download_runs_while_first_is_still_validating(self):
         validating = threading.Event()
         next_download = threading.Event()

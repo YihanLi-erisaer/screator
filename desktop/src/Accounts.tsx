@@ -3,6 +3,7 @@ import { chooseFile, request } from "./bridge";
 import { accountLabel, type BiliAccount } from "./types";
 import { StyledSelect } from "./StyledSelect";
 import { StatusBadge } from "./StatusBadge";
+import { ReportError } from "./Toast";
 
 export function AccountSelector({
   accounts,
@@ -97,11 +98,7 @@ export function AccountsPanel({
         </StatusBadge>
       </div>
       <div className="section-body">
-        {error && (
-          <div className="inline-error" role="alert">
-            {error}
-          </div>
-        )}
+        <ReportError message={error} />
         {accounts.map((a) => (
           <div className="account-row" key={a.account_id}>
             <div className="account-row-heading">
@@ -252,17 +249,17 @@ export function AccountsPanel({
         )}
         {login && (
           <div className="qr-panel" role="region" aria-label="账号登录">
+            <ReportError message={status.status === "failed" ? status.message || "登录失败，请重试。"
+              : status.status === "expired" ? "二维码已过期，请刷新。" : null} />
             {status.qrcode && <img src={status.qrcode} alt="B 站登录二维码" />}
             <p>
-              {status.message ||
+              {status.status === "failed" ? "请重新登录" : status.status === "expired" ? "二维码待刷新" : status.message ||
                 (
                   {
                     loading: "正在获取二维码",
                     waiting: "请扫码并确认目标 UID",
                     scanned: "请在手机确认",
                     success: "登录成功",
-                    expired: "二维码已过期",
-                    failed: "登录失败",
                   } as Record<string, string>
                 )[status.status]}
             </p>
