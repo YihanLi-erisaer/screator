@@ -4,8 +4,9 @@ test("missing AcFun challenge offers a direct recovery action instead of a dead 
   await page.route("https://passport.kuaishou.com/**", route => route.fulfill({ contentType: "text/html", body: "Official verification fixture" }));
   await page.goto("/?preview&accounts=1&acfun=1&populated&acfunVerification&acfunVerificationMissing");
   await page.getByRole("button", { name: /用更少的工具/ }).click();
+  const detail = page.getByRole("dialog", { name: "任务详情" });
   await page.getByRole("button", { name: "完成 AcFun 安全验证" }).click();
-  await expect(page.getByText("本次验证入口未保存或来自旧版后台。", { exact: true })).toBeVisible();
+  await expect(detail.getByText("本次验证入口未保存或来自旧版后台。", { exact: true })).toBeVisible();
   await expect(page.getByText(/若平台已放行，本次重试将直接投稿/)).toBeVisible();
   await page.getByRole("button", { name: "重新获取验证入口并继续投稿" }).click();
   await page.getByRole("button", { name: "完成 AcFun 安全验证" }).click();
