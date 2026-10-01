@@ -60,6 +60,13 @@ export async function saveLog() {
     filters: [{ name: "诊断日志", extensions: ["txt"] }],
   });
 }
+export async function saveHistory() {
+  if (!isTauri()) throw new Error("投稿记录导出需要在桌面应用中使用。");
+  return save({
+    defaultPath: `yt2bili-投稿记录-${new Date().toISOString().slice(0, 10)}.json`,
+    filters: [{ name: "投稿记录 JSON", extensions: ["json"] }],
+  });
+}
 export async function external(url: string) {
   if (
     !/^https:\/\/(www\.bilibili\.com|member\.bilibili\.com|member\.acfun\.cn|stardazz-com\.vercel\.app)\//.test(

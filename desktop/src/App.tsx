@@ -3,6 +3,7 @@ import {
   useContext,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type ReactNode,
@@ -45,6 +46,7 @@ import {
   chooseFile,
   chooseDirectory,
   saveLog,
+  saveHistory,
   external,
   operationId,
   onClose,
@@ -103,6 +105,7 @@ function Modal({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   const notice = useContext(NoticeContext);
   useEffect(() => {
     ref.current?.showModal();
@@ -112,13 +115,14 @@ function Modal({
     <dialog
       ref={ref}
       className={wide ? "modal wide" : "modal"}
+      aria-labelledby={titleId}
       onCancel={(e) => {
         e.preventDefault();
         close();
       }}
     >
       <div className="modal-head">
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         <button className="icon-button" aria-label="关闭对话框" onClick={close}>
           <X size={19} />
         </button>
@@ -570,6 +574,39 @@ export default function App() {
                   新建任务 <kbd>⌘ / Ctrl N</kbd>
                 </button>
               )}
+              {page === "history" && (
+                <div className="button-row">
+                  <button
+                    className="secondary"
+                    disabled={!connected || preview || busy}
+                    onClick={() => void action(async () => {
+                      const path = await chooseFile(["json"]);
+                      if (!path) return;
+                      const result = await request("history.import", { path });
+                      await loadTasks();
+                      setFilter("");
+                      setQuery("");
+                      setAccountFilter("");
+                      setOffset(0);
+                      setNotice({ kind: "success", text: `导入 ${result.imported} 条记录，跳过 ${result.skipped} 条已有记录。` });
+                    })}
+                  >
+                    <Upload size={16} /> 导入投稿记录
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={!connected || preview || busy}
+                    onClick={() => void action(async () => {
+                      const path = await saveHistory();
+                      if (!path) return;
+                      const result = await request("history.export", { path });
+                      setNotice({ kind: "success", text: `已导出 ${result.exported} 条投稿记录。` });
+                    })}
+                  >
+                    <ArrowDownToLine size={16} /> 导出投稿记录
+                  </button>
+                </div>
+              )}
             </div>
             {connectionError && (
               <div className="banner error">
@@ -683,7 +720,7 @@ export default function App() {
                           setOffset(0);
                         }}
                       >
-                        全部任务 <span>{allTotal}</span>
+                        {page === "history" ? "全部记录" : "全部任务"} <span>{allTotal}</span>
                       </button>
                       {(page === "history"
                         ? [
@@ -757,6 +794,7 @@ export default function App() {
                                 {task.account_uid_snapshot
                                   ? ` (UID ${task.account_uid_snapshot})`
                                   : ""}
+                                {task.imported_history && " · 导入记录"}
                                 {task.uploader && ` · ${task.uploader}`}
                               </small>
                             </span>
@@ -945,7 +983,9 @@ export default function App() {
             }}
           />
         )}
-        {selected && (
+        {selected && (selected.imported_history ? (
+          <ImportedHistoryDetail task={selected} close={() => setSelected(null)} />
+        ) : (
           <TaskDetail
             task={selected}
             accounts={accountOptions}
@@ -961,7 +1001,7 @@ export default function App() {
               );
             }}
           />
-        )}
+        ))}
         {closing && (
           <Modal
             title="退出 yt2bili"
@@ -1204,6 +1244,34 @@ function NewTask({
           加入队列
         </button>
       </div>
+    </Modal>
+  );
+}
+
+function ImportedHistoryDetail({ task, close }: { task: Task; close: () => void }) {
+  const platforms = { bilibili: "Bilibili", douyin: "抖音", acfun: "AcFun" };
+  return (
+    <Modal title="导入的投稿记录" close={close} wide>
+      <div className="section-body history-detail">
+        <p className="help">这是一条只读历史记录，不包含登录凭据或视频素材，也不会加入投稿队列。</p>
+        <h3>{task.title_zh || task.title_orig || task.video_id}</h3>
+        <p><Status status={task.status} /> · {task.video_id}</p>
+        <p>账号：{task.account_name_snapshot || "原账号"}{task.account_uid_snapshot ? ` · UID ${task.account_uid_snapshot}` : ""}</p>
+        <p>创建：{task.created_at || "未知"} · 更新：{task.updated_at || "未知"}</p>
+        {task.url && <p>来源：{task.url}</p>}
+        {task.publications?.map((pub) => (
+          <div className="queue-card" key={pub.platform}>
+            <strong>{platforms[pub.platform]} · {labels[pub.status] || pub.status}</strong>
+            {pub.account_label && <p>投稿账号：{pub.account_label}</p>}
+            {pub.remote_id && <p>稿件号：{pub.remote_id}</p>}
+            {pub.text && <p>投稿标题：{pub.text}</p>}
+            {pub.error && <p>备注：{pub.error}</p>}
+          </div>
+        ))}
+        {task.desc_zh && <div><strong>中文简介</strong><pre>{task.desc_zh}</pre></div>}
+        {task.desc_orig && <div><strong>原始简介</strong><pre>{task.desc_orig}</pre></div>}
+      </div>
+      <div className="modal-actions"><button className="secondary" onClick={close}>关闭</button></div>
     </Modal>
   );
 }

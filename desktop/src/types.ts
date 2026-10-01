@@ -11,6 +11,7 @@ export interface Publication {
   snapshot?: string;
 }
 export interface Task {
+  imported_history?: boolean;
   publications?: Publication[];
   task_id: string;
   account_id: string | null;

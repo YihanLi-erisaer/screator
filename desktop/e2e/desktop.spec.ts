@@ -204,3 +204,22 @@ test("account dropdown supports keyboard selection and dismissal", async ({ page
   await expect(filter).toContainText("UID 10001");
   await expect(page.locator(".task-row")).toHaveCount(1);
 });
+
+test("publishing history exposes transfer actions only in the desktop app", async ({ page }) => {
+  await page.goto("/?preview&populated");
+  await page.getByRole("button", { name: "投稿记录", exact: true }).click();
+  await expect(page.getByRole("button", { name: "导入投稿记录" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "导出投稿记录" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /全部记录/ })).toBeVisible();
+});
+
+test("imported publishing history opens as read-only detail", async ({ page }) => {
+  await page.goto("/?preview&importedHistory");
+  await page.getByRole("button", { name: "投稿记录", exact: true }).click();
+  await page.getByRole("button", { name: /迁移的投稿记录/ }).click();
+  const dialog = page.getByRole("dialog", { name: "导入的投稿记录" });
+  await expect(dialog).toContainText("只读历史记录");
+  await expect(dialog).toContainText("AcFun 稿件");
+  await expect(dialog).toContainText("待核对");
+  await expect(dialog.getByRole("button", { name: /投稿|重试|登记|确认历史账号/ })).toHaveCount(0);
+});

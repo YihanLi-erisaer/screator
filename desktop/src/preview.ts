@@ -92,6 +92,19 @@ if (new URLSearchParams(location.search).has("samevideo") && tasks.length)
     account_uid_snapshot: a.uid,
     account_name_snapshot: a.nickname,
   }));
+if (new URLSearchParams(location.search).has("importedHistory"))
+  tasks.push({
+    task_id: "imported-preview", video_id: "abcdefghijk", url: "https://youtu.be/abcdefghijk",
+    imported_history: true, account_id: null, account_uid_snapshot: "23941395",
+    account_name_snapshot: "StarDazz", revision: 1, status: "submission_unknown",
+    title_orig: "Original title", title_zh: "迁移的投稿记录", desc_orig: "Original description",
+    desc_zh: "已迁移的简介", uploader: "Preview", work_dir: "", video_path: "",
+    cover_path: "", bv_id: "", error: "", created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(), publications: [{
+      publication_id: "", platform: "acfun", account_id: "", account_label: "AcFun 原账号",
+      status: "submitted", revision: 0, text: "AcFun 稿件", remote_id: "123456", error: "",
+    }],
+  });
 const verificationPreview = new URLSearchParams(location.search).has("acfunVerification");
 let verificationMissing = new URLSearchParams(location.search).has("acfunVerificationMissing");
 if (verificationPreview && tasks.length) {
@@ -226,7 +239,7 @@ export async function request(method: string, params: any): Promise<any> {
     const items = tasks.filter(
       (t) =>
         (!params.account_id || t.account_id === params.account_id) &&
-        (!params.history || t.status === "submitted") &&
+        (!params.history || ["submitted", "submission_unknown", "partial_success", "completed_with_abandon"].includes(t.status)) &&
         (!params.status || params.status === t.status) &&
         (!params.search || t.title_zh.includes(params.search)),
     );
