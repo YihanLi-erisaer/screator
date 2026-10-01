@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { external, operationId, request } from "./bridge";
 import { StyledSelect } from "./StyledSelect";
+import { StatusBadge } from "./StatusBadge";
 
 export function AcfunVerification({ publicationId, busy, run }: {
   publicationId: string;
@@ -150,8 +151,16 @@ export function AcfunAccountPanel() {
     catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   };
-  return <section className="section-body">
-    <h3>AcFun 同步投稿 · 单账号</h3>
+  const connectionLabel = !status
+    ? error ? "检测失败" : "检测中"
+    : status.can_sync ? "已连接" : !status.enabled ? "未启用" : status.account ? "需重新扫码" : "未登录";
+  return <section className="settings-card section-body">
+    <div className="status-heading">
+      <h3>AcFun 同步投稿 · 单账号</h3>
+      <StatusBadge tone={!status && !error ? "neutral" : status?.can_sync ? "success" : "error"}>
+        {connectionLabel}
+      </StatusBadge>
+    </div>
     <p className="help">实验性网页接入，独立队列。平台接口尚需真实账号验证；启用前请确认你接受网页接口变化的风险。</p>
     {error && <p className="inline-error">{error}</p>}
     {status?.error && <p className="help">{status.error}</p>}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { chooseFile, request } from "./bridge";
 import { accountLabel, type BiliAccount } from "./types";
 import { StyledSelect } from "./StyledSelect";
+import { StatusBadge } from "./StatusBadge";
 
 export function AccountSelector({
   accounts,
@@ -41,6 +42,7 @@ export function AccountsPanel({
   refresh: () => Promise<void>;
 }) {
   const accounts: BiliAccount[] = auth.accounts || [];
+  const validAccounts = accounts.filter((account) => account.auth_state === "valid").length;
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
   const [login, setLogin] = useState<{
@@ -90,6 +92,9 @@ export function AccountsPanel({
           <h2>哔哩哔哩账号 · {accounts.length}/5</h2>
           <p>每个账号使用独立上传队列；凭据保存在本机。</p>
         </div>
+        <StatusBadge tone={accounts.length > 0 && validAccounts === accounts.length ? "success" : "error"}>
+          {!accounts.length ? "未连接" : validAccounts === accounts.length ? "已连接" : "需处理"}
+        </StatusBadge>
       </div>
       <div className="section-body">
         {error && (
@@ -99,8 +104,12 @@ export function AccountsPanel({
         )}
         {accounts.map((a) => (
           <div className="account-row" key={a.account_id}>
-            <strong>{accountLabel(a)}</strong>
-            <span className="pill">{labels[a.auth_state] || a.auth_state}</span>
+            <div className="account-row-heading">
+              <strong>{accountLabel(a)}</strong>
+              <StatusBadge tone={a.auth_state === "valid" ? "success" : "error"}>
+                {labels[a.auth_state] || a.auth_state}
+              </StatusBadge>
+            </div>
             <div className="button-row">
               <button
                 disabled={pending[a.account_id]}
@@ -257,17 +266,19 @@ export function AccountsPanel({
                   } as Record<string, string>
                 )[status.status]}
             </p>
-            <button onClick={() => start(login.account_id)}>刷新二维码</button>
-            <button
-              onClick={() => {
-                void request("auth.login.cancel", {
-                  session_id: login.session_id,
-                });
-                setLogin(null);
-              }}
-            >
-              关闭二维码
-            </button>
+            <div className="button-row">
+              <button onClick={() => start(login.account_id)}>刷新二维码</button>
+              <button
+                onClick={() => {
+                  void request("auth.login.cancel", {
+                    session_id: login.session_id,
+                  });
+                  setLogin(null);
+                }}
+              >
+                关闭二维码
+              </button>
+            </div>
           </div>
         )}
       </div>

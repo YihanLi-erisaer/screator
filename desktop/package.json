@@ -1,6 +1,6 @@
 {
   "name": "yt2bili-desktop",
-  "version": "0.3.0",
+  "version": "1.0.0-alpha",
   "private": true,
   "type": "module",
   "scripts": {

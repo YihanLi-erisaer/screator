@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { operationId, request } from "./bridge";
 import { labels, type Task, type Publication, type Progress } from "./types";
 import { AcfunChannelSelect, AcfunVerification } from "./Acfun";
+import { StatusBadge } from "./StatusBadge";
 
 export function DouyinAccountPanel() {
   const [status, setStatus] = useState<any>(null);
@@ -26,9 +27,17 @@ export function DouyinAccountPanel() {
       setBusy(false);
     }
   };
+  const connectionLabel = !status
+    ? error ? "检测失败" : "检测中"
+    : status.can_sync ? "已连接" : status.account ? "需重新授权" : status.configured ? "未授权" : "未配置";
   return (
-    <section className="section-body">
-      <h3>抖音同步投稿 · 单账号</h3>
+    <section className="settings-card section-body">
+      <div className="status-heading">
+        <h3>抖音同步投稿 · 单账号</h3>
+        <StatusBadge tone={!status && !error ? "neutral" : status?.can_sync ? "success" : "error"}>
+          {connectionLabel}
+        </StatusBadge>
+      </div>
       <p className="help">
         复用同一份视频、封面和翻译结果，抖音独立排队。需部署官方授权服务并取得发布权限。
       </p>

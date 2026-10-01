@@ -915,6 +915,14 @@ kbd {
 .pill.positive {
   color: var(--green);
 }
+.pill.imported {
+  color: #d2f5df;
+  background: #164b32;
+}
+.pill.missing {
+  color: #ffdce0;
+  background: #622530;
+}
 .section-body {
   padding: 23px 25px;
 }
@@ -1418,8 +1426,18 @@ pre {
   gap: 10px;
 }
 .qr-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   text-align: center;
   padding: 20px 10px;
+}
+.qr-panel > p {
+  margin: 0;
+}
+.qr-panel > .button-row {
+  justify-content: center;
 }
 .qr-panel > img,
 .qr-placeholder {
@@ -1502,8 +1520,15 @@ pre {
 .queue-card strong,.queue-card small { display:block; overflow-wrap:anywhere; }
 .queue-card small { margin-top:6px; opacity:.7; }
 .account-row { border-bottom:1px solid var(--border); padding:16px 0; margin-bottom:12px; }
+.account-row-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.account-row-heading strong { min-width:0; overflow-wrap:anywhere; }
+.account-row-heading .pill { flex-shrink:0; }
 .account-row .button-row { flex-wrap:wrap; margin-top:12px; }
 .translation-panel h3 { margin: 22px 0 10px; font-size: 15px; }
+.status-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.translation-panel .status-heading { margin: 22px 0 10px; }
+.translation-panel .status-heading h3 { margin: 0; }
+.section-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 .translation-panel .field { margin-bottom: 14px; }
 .translation-toggle { display: flex; align-items: center; gap: 8px; }
 .translation-toggle input { width: auto; }

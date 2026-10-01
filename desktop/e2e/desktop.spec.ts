@@ -22,6 +22,36 @@ test("local-first translation settings and fallback can be changed", async ({
   await expect(page.getByLabel("翻译流程总超时（秒）")).toHaveValue("360");
 });
 
+test("DeepL key badge follows saved credential state", async ({ page }) => {
+  await page.goto("/?preview");
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  const heading = page.locator(".deepl-heading");
+  await expect(heading.locator(".pill.missing")).toHaveText("未导入");
+  await page.getByLabel("DeepL API 密钥").fill("preview-key");
+  await page.getByRole("button", { name: "保存密钥" }).click();
+  await expect(heading.locator(".pill.imported")).toHaveText("已导入");
+  await page.getByRole("button", { name: "清除密钥" }).click();
+  await expect(heading.locator(".pill.missing")).toHaveText("未导入");
+});
+
+test("connection and settings badges follow backend and saved values", async ({ page }) => {
+  await page.goto("/?preview&accounts=1&douyin=1&acfun=1");
+  await page.getByRole("button", { name: "账号与连接", exact: true }).click();
+  for (const name of ["抖音同步投稿 · 单账号", "AcFun 同步投稿 · 单账号"]) {
+    await expect(page.locator(".status-heading").filter({ hasText: name }).locator(".pill.imported")).toHaveText("已连接");
+  }
+  await expect(page.locator(".settings-card").filter({ has: page.getByRole("heading", { name: /哔哩哔哩账号/ }) }).locator(".section-title .pill.imported")).toHaveText("已连接");
+  await expect(page.locator(".settings-card").filter({ has: page.getByRole("heading", { name: "YouTube 访问" }) }).locator(".pill.missing")).toHaveText("未导入");
+
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  const directory = page.locator(".settings-card").filter({ has: page.getByRole("heading", { name: "工作目录" }) });
+  await expect(directory.locator(".section-title .pill.imported")).toHaveText("已保存");
+  await directory.locator("input").fill("D:\\new-work");
+  await expect(directory.locator(".section-title .pill.missing")).toHaveText("待保存");
+  await page.getByRole("button", { name: "保存设置" }).click();
+  await expect(directory.locator(".section-title .pill.imported")).toHaveText("已保存");
+});
+
 test("managed translation model can be uninstalled from settings", async ({ page }) => {
   await page.goto("/?preview");
   await page.getByRole("button", { name: "设置", exact: true }).click();

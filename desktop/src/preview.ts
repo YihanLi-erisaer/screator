@@ -189,6 +189,11 @@ export async function request(method: string, params: any): Promise<any> {
     Object.assign(config, params.values);
     return { ...config };
   }
+  if (method === "credentials.set") {
+    config.has_deepl_key = Boolean(String(params.value ?? "").trim());
+    config.translation_ready = localInstalled || config.has_deepl_key;
+    return { saved: true };
+  }
   if (method === "auth.status")
     return {
       accounts,

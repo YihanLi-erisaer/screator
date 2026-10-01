@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { request, operationId, chooseFile } from "./bridge";
 import type { Config } from "./types";
 import { StyledSelect } from "./StyledSelect";
+import { StatusBadge } from "./StatusBadge";
 
 type Action = (work: () => Promise<unknown>, message?: string) => Promise<void>;
 type Job = {
@@ -178,6 +179,9 @@ export default function TranslationPanel({
           <h2>翻译服务</h2>
           <p>默认本地推理，也可优先使用 DeepL。</p>
         </div>
+        <StatusBadge tone={config.translation_ready ? "success" : "error"}>
+          {config.translation_ready ? "已就绪" : "未就绪"}
+        </StatusBadge>
       </div>
       <div className="section-body">
         {config.translation_upgrade_notice && (
@@ -215,7 +219,12 @@ export default function TranslationPanel({
           。 使用 DeepL 时，标题和简介会发送至
           DeepL。仅本地使用时请关闭自动切换。
         </p>
-        <h3>本地大模型 · Qwen3.5 4B</h3>
+        <div className="status-heading">
+          <h3>本地大模型 · Qwen3.5 4B</h3>
+          <StatusBadge tone={!local ? "neutral" : local.state === "ready" ? "success" : "error"}>
+            {!local ? "检测中" : local.state === "ready" ? "已就绪" : "未就绪"}
+          </StatusBadge>
+        </div>
         <div className="field">
           本地运行方式
           <StyledSelect
@@ -355,7 +364,12 @@ export default function TranslationPanel({
           </button>
         </div>
         {success && <p className="notice success" role="status">{success}</p>}
-        <h3>DeepL · 可选</h3>
+        <div className="deepl-heading status-heading">
+          <h3>DeepL · 可选</h3>
+          <StatusBadge tone={config.has_deepl_key ? "success" : "error"}>
+            {config.has_deepl_key ? "已导入" : "未导入"}
+          </StatusBadge>
+        </div>
         <label className="field">
           DeepL API 密钥
           <input

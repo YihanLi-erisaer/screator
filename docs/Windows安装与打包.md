@@ -1,11 +1,11 @@
 # Windows 应用与安装包
 
-适用于 Windows 10/11 x64。版本为 `v0.3.0`。
+适用于 Windows 10/11 x64。版本为 `v1.0.0alpha`。
 
 ## 安装和运行
 
-- **安装版**：运行 `yt2bili_0.3.0_x64-setup.exe`，按向导安装，随后从开始菜单的 StarDazz 文件夹启动。
-- **免安装版**：完整解压 `yt2bili_0.3.0_x64-portable.zip`，双击 `yt2bili/yt2bili.exe`。也可以直接运行构建输出 `dist/windows/yt2bili/yt2bili.exe`。必须保留相邻的 `worker` 和 `bin` 文件夹，不能只复制主 EXE。
+- **安装版**：运行 `yt2bili_1.0.0-alpha_x64-setup.exe`，按向导安装，随后从开始菜单的 StarDazz 文件夹启动。
+- **免安装版**：完整解压 `yt2bili_1.0.0-alpha_x64-portable.zip`，双击 `yt2bili/yt2bili.exe`。也可以直接运行构建输出 `dist/windows/yt2bili/yt2bili.exe`。必须保留相邻的 `worker` 和 `bin` 文件夹，不能只复制主 EXE。
 - 已包含 Python 后台、FFmpeg、ffprobe、biliup 和 Node.js，无需安装开发工具。界面仍需要 Microsoft WebView2 Runtime；安装版会在缺失时联网安装，免安装版需要电脑已有此运行时。
 - 本地翻译模型首次使用时在应用内安装，模型不包含在安装包里。DeepL 为可选项。抖音官方同步仍需要单独配置授权服务。
 - 本次安装包未做代码签名。

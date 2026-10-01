@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 
 from PIL import Image
 
-from yt2bili import bili_upload, youtube, translate, publications, history_transfer
+from yt2bili import __version__, bili_upload, youtube, translate, publications, history_transfer
 from yt2bili.db import Task, TaskStore
 from yt2bili.desktop_auth import LoginSession, account_status, validate_login
 from yt2bili.desktop_settings import DesktopSettings, atomic_json
@@ -186,7 +186,7 @@ class DesktopService:
             capabilities.append("acfun_sync_v1")
         return {"protocol_version": 2, "schema_version": 5, "account_limit": 5,
                 "capabilities": capabilities,
-                "migration_notes": self.migration_notes, "version": "0.3.0", "queue": self.scheduler.snapshot(),
+                "migration_notes": self.migration_notes, "version": __version__, "queue": self.scheduler.snapshot(),
                 "data_dir": str(self.paths.root)}
 
     def translation_status(self):

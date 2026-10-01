@@ -1,6 +1,6 @@
 # yt2bili 桌面端 · 第一期
 
-版本：`v0.3.0`。提供 React + Tauri 原生桌面应用，连接现有 Python 视频业务。Windows 安装包和免安装应用的使用及构建见 [Windows 安装与打包](../docs/Windows安装与打包.md)。macOS DMG 尚未提供。
+版本：`v1.0.0alpha`。提供 React + Tauri 原生桌面应用，连接现有 Python 视频业务。Windows 安装包和免安装应用的使用及构建见 [Windows 安装与打包](../docs/Windows安装与打包.md)。macOS DMG 尚未提供。
 
 ## 在当前电脑启动
 

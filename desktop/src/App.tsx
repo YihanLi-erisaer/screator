@@ -71,6 +71,7 @@ import { AcfunAccountPanel, AcfunChannelSelect } from "./Acfun";
 import { accountLabel, type BiliAccount } from "./types";
 import TranslationPanel from "./TranslationPanel";
 import { StyledSelect } from "./StyledSelect";
+import { StatusBadge } from "./StatusBadge";
 
 type Page = "tasks" | "history" | "account" | "settings";
 type Notice = { kind: "success" | "error"; text: string };
@@ -536,7 +537,7 @@ export default function App() {
                 <Sun size={16} />
               </button>
             </div>
-            <span className="version">DESKTOP · v0.3.0</span>
+            <span className="version">DESKTOP · v1.0.0alpha</span>
           </div>
         </aside>
         <div className="workspace">
@@ -1854,9 +1855,9 @@ function Account({
             <h2>YouTube 访问</h2>
             <p>当源站要求登录验证时，提供你的浏览器 Cookie。</p>
           </div>
-          <span className="pill">
-            {config.youtube_cookies ? "已导入" : "可选配置"}
-          </span>
+          <StatusBadge tone={config.youtube_cookies ? "success" : "error"}>
+            {config.youtube_cookies ? "已导入" : "未导入"}
+          </StatusBadge>
         </div>
         <div className="section-body">
           <div className="button-row">
@@ -1919,6 +1920,10 @@ function Settings({
   useEffect(() => setForm(config), [config]);
   const update = (key: keyof Config, value: unknown) =>
     setForm((old) => ({ ...old, [key]: value }));
+  const unsaved = (...keys: (keyof Config)[]) => keys.some((key) => form[key] !== config[key]);
+  const toolsReady = diagnostics &&
+    ["ffmpeg", "ffprobe", "biliup"].every((name) => diagnostics.tools.some((tool: any) => tool.name === name && tool.available)) &&
+    diagnostics.tools.some((tool: any) => ["deno", "node"].includes(tool.name) && tool.available);
   return (
     <div className="settings-stack">
       <TranslationPanel
@@ -1933,6 +1938,9 @@ function Settings({
             <h2>工作目录</h2>
             <p>视频素材可能占用较多空间，建议选择独立的工作文件夹。</p>
           </div>
+          <StatusBadge tone={unsaved("work_dir") ? "error" : "success"}>
+            {unsaved("work_dir") ? "待保存" : "已保存"}
+          </StatusBadge>
         </div>
         <div className="section-body">
           <label className="field">
@@ -1970,6 +1978,9 @@ function Settings({
             <h2>投稿默认值</h2>
             <p>新建任务时保存参数快照，修改默认值不影响已有任务。</p>
           </div>
+          <StatusBadge tone={unsaved("bili_tid", "acfun_channel_id", "bili_tags", "bili_line", "upload_gap_seconds") ? "error" : "success"}>
+            {unsaved("bili_tid", "acfun_channel_id", "bili_tags", "bili_line", "upload_gap_seconds") ? "待保存" : "已保存"}
+          </StatusBadge>
         </div>
         <div className="section-body form-grid">
           <label className="field">
@@ -2022,6 +2033,9 @@ function Settings({
             <h2>外观与校验</h2>
             <p>沿用 StarDazz 的简洁界面，也保留可靠的素材检查。</p>
           </div>
+          <StatusBadge tone={unsaved("theme", "hwaccel", "validation_cache") ? "error" : "success"}>
+            {unsaved("theme", "hwaccel", "validation_cache") ? "待保存" : "已保存"}
+          </StatusBadge>
         </div>
         <div className="section-body">
           <div className="setting-row">
@@ -2116,18 +2130,23 @@ function Settings({
             <h2>环境与数据</h2>
             <p>检查本地工具，或导入命令行版本的任务记录。</p>
           </div>
-          <button
-            className="text-button"
-            disabled={busy}
-            onClick={() =>
-              action(async () =>
-                setDiagnostics(await request("system.diagnostics")),
-              )
-            }
-          >
-            <RefreshCw size={14} />
-            重新检测
-          </button>
+          <div className="section-actions">
+            <StatusBadge tone={!diagnostics ? "neutral" : toolsReady ? "success" : "error"}>
+              {!diagnostics ? "待检测" : toolsReady ? "工具就绪" : "需处理"}
+            </StatusBadge>
+            <button
+              className="text-button"
+              disabled={busy}
+              onClick={() =>
+                action(async () =>
+                  setDiagnostics(await request("system.diagnostics")),
+                )
+              }
+            >
+              <RefreshCw size={14} />
+              重新检测
+            </button>
+          </div>
         </div>
         <div className="section-body">
           <div className="tool-list">
