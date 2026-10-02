@@ -7,6 +7,34 @@ on:
 permissions:
   contents: read
 jobs:
+  macos-arm64:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install Python dependencies and FFmpeg
+        run: |
+          test "$(uname -m)" = arm64
+          python -m pip install -r requirements-desktop.txt -r services/douyin-broker/requirements.txt
+          brew install ffmpeg
+      - name: Backend regression and source worker
+        run: |
+          python -m unittest discover -s tests -q
+          python scripts/smoke_worker.py
+      - name: Frontend and native build
+        run: |
+          cd desktop
+          npm ci
+          npm run test:launcher
+          npm run build
+          cargo build --locked --manifest-path src-tauri/Cargo.toml
   windows:
     runs-on: windows-latest
     steps:

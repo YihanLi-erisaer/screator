@@ -18,6 +18,7 @@ class TranslationResult:
     model_digest: str | None = None
     prompt_version: str | None = None
     runtime_version: str | None = None
+    inference_device: str | None = None
     elapsed_ms: int = 0
     fallback_used: bool = False
     fallback_reason: str | None = None

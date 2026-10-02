@@ -52,11 +52,14 @@ def find_biliup(settings: Settings) -> Path:
         if found:
             return Path(found)
 
+    package_hint = ("biliupR-*-aarch64-macos.tar.xz，解压后把 biliup 放到 bin/ 目录。"
+                    if sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}
+                    else "biliupR-*-x86_64-windows.zip，解压后把 biliup.exe 放到 bin/ 目录。")
     raise Yt2BiliError(
         "未找到 biliup 命令行工具。\n"
         "请运行：python -m yt2bili setup\n"
         "或从 https://github.com/biliup/biliup/releases/latest 下载 "
-        "biliupR-*-x86_64-windows.zip，解压后把 biliup.exe 放到 bin/ 目录。"
+        + package_hint
     )
 
 
@@ -327,7 +330,7 @@ def _asset_needles() -> list[str]:
         return ["x86_64-windows.zip"]
     if sys.platform == "darwin":
         return (
-            ["aarch64-macos.tar.xz", "x86_64-macos.tar.xz"]
+            ["aarch64-macos.tar.xz", "arm64-macos.tar.xz"]
             if arm
             else ["x86_64-macos.tar.xz"]
         )

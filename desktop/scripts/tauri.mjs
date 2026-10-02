@@ -41,8 +41,11 @@ if (process.argv[2] === "dev" && !env.YT2BILI_WORKER) {
     },
   );
   if (check.error || check.status !== 0) {
+    const repair = process.platform === "win32"
+      ? ".desktop-venv/Scripts/python.exe -m pip install --force-reinstall -r requirements-desktop-lock.txt"
+      : ".desktop-venv/bin/python -m pip install --force-reinstall -r requirements-desktop.txt";
     console.error(
-      "桌面 Python 环境无法启动。若更换过 Python 版本，请重新安装对应版本的依赖。\n在项目根目录运行：\n.desktop-venv/Scripts/python.exe -m pip install --force-reinstall -r requirements-desktop-lock.txt",
+      `桌面 Python 环境无法启动。若更换过 Python 版本，请重新安装对应版本的依赖。\n在项目根目录运行：\n${repair}`,
     );
     console.error(check.error?.message || check.stderr.trim());
     process.exit(1);

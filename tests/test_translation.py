@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import threading
 import time
@@ -210,6 +211,7 @@ class LocalHttpTests(unittest.TestCase):
         self.ready_delay = 0
         self.content = json.dumps({"title": "译文", "description": "正文"})
         self.done_reason = "stop"
+        self.gpu_size = None
         self.last_body = None
         self.model_name = manifest()["model"]["name"]
         self.model_digest = manifest()["model"]["digest"]
@@ -224,7 +226,9 @@ class LocalHttpTests(unittest.TestCase):
             def do_GET(self):
                 if self.path == "/api/version":
                     time.sleep(owner.ready_delay)
-                self.respond({"version": "test"} if self.path == "/api/version" else {"models": [{"name": owner.model_name, "digest": owner.model_digest}]})
+                self.respond({"version": "test"} if self.path == "/api/version" else
+                             {"models": [{"name": owner.model_name, "digest": owner.model_digest,
+                                          **({"size_vram": owner.gpu_size} if self.path == "/api/ps" and owner.gpu_size is not None else {})}]})
             def do_POST(self):
                 owner.last_body=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 time.sleep(owner.delay)
@@ -248,6 +252,13 @@ class LocalHttpTests(unittest.TestCase):
         self.config["local_llm_model"] = self.model_name
         self.payload["expected_digest"] = self.model_digest
         self.assertEqual(isolated_request(self.payload, time.monotonic() + 10)["model_digest"], self.model_digest)
+
+    def test_reports_actual_inference_device_from_ollama(self):
+        self.gpu_size = 1024
+        result = isolated_request(self.payload, time.monotonic() + 10)
+        self.assertEqual(result["inference_device"], "Apple GPU (Metal)" if sys.platform == "darwin" else "GPU")
+        self.gpu_size = 0
+        self.assertEqual(isolated_request(self.payload, time.monotonic() + 10)["inference_device"], "CPU")
 
     def test_local_timeout_starts_after_service_is_ready(self):
         self.ready_delay = 1.4

@@ -190,10 +190,15 @@ class DesktopService:
 
     def translation_status(self):
         from yt2bili.translation.runtime import status, manifest
+        from yt2bili.translation.runtime import runtime_spec
+        try:
+            selected_runtime = runtime_spec(manifest())
+        except Exception:
+            selected_runtime = manifest()["runtime"]
         return {"local": status(self.config.values, self.paths.root / "translation"),
                 "primary": self.config.values["translation_primary"],
                 "fallback_enabled": self.config.values["translation_fallback_enabled"],
-                "model": manifest()["model"], "runtime": manifest()["runtime"]}
+                "model": manifest()["model"], "runtime": selected_runtime}
 
     def translation_install(self, operation_id, model_id="qwen3.5:4b", offline_path=None):
         if model_id != "qwen3.5:4b":

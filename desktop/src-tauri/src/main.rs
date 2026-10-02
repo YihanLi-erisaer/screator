@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 use serde_json::{json, Value};
 use std::{collections::HashMap, fs::OpenOptions, io::{BufRead, BufReader, Write}, path::PathBuf,
@@ -73,9 +73,13 @@ fn take_worker_process(worker: &Worker) -> WorkerProcess {
 fn reap_worker(mut process: WorkerProcess) {
     if let Some(mut child) = process.child.take() {
         for _ in 0..30 {
-            if child.try_wait().ok().flatten().is_some() { return close_worker_job(process); }
+            if child.try_wait().ok().flatten().is_some() {
+                kill_worker_group(&child);
+                return close_worker_job(process);
+            }
             std::thread::sleep(Duration::from_millis(100));
         }
+        kill_worker_group(&child);
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -89,8 +93,20 @@ fn force_stop_worker(mut process: WorkerProcess) {
     if let Some(job) = process.job.take() {
         unsafe { windows_sys::Win32::Foundation::CloseHandle(job as _); }
     }
-    if let Some(mut child) = process.child.take() { let _ = child.kill(); }
+    if let Some(mut child) = process.child.take() {
+        kill_worker_group(&child);
+        let _ = child.kill();
+    }
 }
+
+#[cfg(unix)]
+fn kill_worker_group(child: &Child) {
+    // The worker is a process-group leader; stop its FFmpeg and Ollama children too.
+    unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGKILL); }
+}
+
+#[cfg(windows)]
+fn kill_worker_group(_: &Child) {}
 
 #[cfg(windows)]
 fn close_worker_job(mut process: WorkerProcess) {

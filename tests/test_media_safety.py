@@ -210,13 +210,23 @@ class ValidationAccelerationCacheTests(unittest.TestCase):
         self.addCleanup(self.environment.stop)
 
     def test_auto_tries_gpu_then_cpu_on_failure(self):
-        with patch.object(media, "_decode_track", side_effect=[InvalidMediaError("no device"), 3.0, 3.0]) as decode:
+        with patch.object(media.platform, "system", return_value="Linux"), \
+             patch.object(media, "_decode_track", side_effect=[InvalidMediaError("no device"), 3.0, 3.0]) as decode:
             media.validate_media(self.source, 3)
         calls = decode.call_args_list
         self.assertIn("cuda", calls[0].args[3])
         self.assertEqual(calls[1].args[1:], ("v:0", 3, []))
         self.assertEqual(calls[2].args[1:], ("a:0", 3, []))
         self.assertTrue(media._validation_cache_path(self.source).exists())
+
+    def test_apple_silicon_tries_videotoolbox_then_cpu(self):
+        with patch.object(media.platform, "system", return_value="Darwin"), \
+             patch.object(media.platform, "machine", return_value="arm64"), \
+             patch.object(media, "_decode_track", side_effect=[InvalidMediaError("no device"), 3.0, 3.0]) as decode:
+            media.validate_media(self.source, 3)
+        self.assertEqual(decode.call_args_list[0].args[3],
+                         ["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"])
+        self.assertEqual(decode.call_args_list[1].args[3], [])
 
     def test_gpu_and_cpu_failure_never_saved_as_pass(self):
         with patch.object(media, "_decode_track", side_effect=InvalidMediaError("broken")) as decode:

@@ -5,6 +5,7 @@ import hashlib
 import logging
 import math
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -122,6 +123,19 @@ def _cuda_decode_args(info: dict) -> list[str]:
     return ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-c:v", decoder] if decoder else []
 
 
+def _validation_decode_args(info: dict) -> list[str]:
+    choice = os.getenv("YT2BILI_HWACCEL", "auto").strip().lower()
+    if choice == "cpu":
+        return []
+    if (platform.system() == "Darwin" and platform.machine().lower() == "arm64"
+            and choice in {"", "auto", "videotoolbox"}
+            and info.get("vcodec") in {"h264", "hevc", "av1"}):
+        # VideoToolbox support varies by M-series generation and codec profile.
+        # A failed hardware decode is always retried from the start on CPU.
+        return ["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"]
+    return _cuda_decode_args(info)
+
+
 def _file_state(path: Path) -> tuple:
     stat = path.stat()
     return (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_dev, stat.st_ino)
@@ -198,7 +212,7 @@ def _write_validation_cache(path: Path, fingerprint: dict) -> None:
 
 
 def _decode_track(path: Path, stream: str, expected, acceleration: list[str]) -> float:
-    backend = "GPU" if acceleration else "CPU"
+    backend = "VideoToolbox" if "videotoolbox" in acceleration else "GPU" if acceleration else "CPU"
 
     def report(actual: float, speed_ratio: float | None) -> None:
         events.progress("validating", percent=min(100, actual / expected * 100) if expected else None,
@@ -292,8 +306,9 @@ def validate_media(
     logger.info("正在完整解码校验（不会写出转码文件）：%s", path)
     ends = []
     for stream in (["v:0", "a:0"] if info["has_audio"] else ["v:0"]):
-        acceleration = _cuda_decode_args(info) if stream == "v:0" else []
-        logger.info("校验 %s %s：%s", path.name, stream, "优先 NVIDIA GPU" if acceleration else "CPU")
+        acceleration = _validation_decode_args(info) if stream == "v:0" else []
+        backend = "Apple VideoToolbox" if "videotoolbox" in acceleration else "NVIDIA GPU" if acceleration else "CPU"
+        logger.info("校验 %s %s：%s", path.name, stream, backend)
         try:
             actual = _decode_track(path, stream, expected, acceleration)
         except InvalidMediaError as exc:

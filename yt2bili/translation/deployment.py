@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import re
 import shutil
-import sys
+import tarfile
 import zipfile
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from yt2bili import events
 from yt2bili.desktop_settings import atomic_json
 from .http import open_local
-from .runtime import manifest, model_manifest_path, runtime_path, sha256, local_session, model_status
+from .runtime import manifest, runtime_spec, model_manifest_path, runtime_path, sha256, local_session, model_status
 from .service import execution_slot
 from .types import TranslationError
 
@@ -41,21 +41,64 @@ def safe_extract(archive, destination, *, limit=12 * 1024**3):
                     out.write(chunk)
 
 
+def safe_extract_tar(archive, destination, *, limit=12 * 1024**3):
+    destination = Path(destination).resolve()
+    with tarfile.open(archive, "r:gz") as bundle:
+        members = bundle.getmembers()
+        if sum(item.size for item in members) > limit:
+            raise TranslationError("INVALID_ARCHIVE", "组件解压大小超出限制。")
+        for item in members:
+            target = (destination / item.name).resolve()
+            link = (destination / item.name).parent / item.linkname
+            if (not target.is_relative_to(destination)
+                    or not (item.isfile() or item.isdir() or item.issym())
+                    or (item.issym() and (Path(item.linkname).is_absolute()
+                                          or not link.resolve().is_relative_to(destination)))):
+                raise TranslationError("INVALID_ARCHIVE", "组件压缩包包含不安全路径或链接。")
+        for item in members:
+            events.check_cancelled()
+            target = destination / item.name
+            if item.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if item.issym():
+                target.symlink_to(item.linkname)
+                continue
+            source = bundle.extractfile(item)
+            if source is None:
+                raise TranslationError("INVALID_ARCHIVE", "组件压缩包包含无法读取的文件。")
+            with source, open(target, "wb") as out:
+                shutil.copyfileobj(source, out, 1024 * 1024)
+            target.chmod(item.mode & 0o777)
+
+
 def download_runtime(root):
-    spec = manifest()["runtime"]
-    target = root / "downloads/runtime.zip"
+    spec = runtime_spec(manifest())
+    target = root / ("downloads/runtime.zip" if spec["archive"] == "zip" else "downloads/runtime.tgz")
     target.parent.mkdir(parents=True, exist_ok=True)
+    maximum = spec.get("size", 512 * 1024**2)
     if target.is_file() and sha256(target) == spec["sha256"]:
         return target
-    partial = target.with_suffix(".part")
+    partial = target.with_suffix(".part" if spec["archive"] == "zip" else ".tgz.part")
     offset = partial.stat().st_size if partial.exists() else 0
-    if offset >= spec["size"]:
+    if offset and sha256(partial) == spec["sha256"]:
+        partial.replace(target)
+        return target
+    if offset >= maximum:
         partial.unlink()
         offset = 0
     headers = {"User-Agent": "yt2bili-translation/1"}
     if offset:
         headers["Range"] = f"bytes={offset}-"
-    with urlopen(Request(spec["url"], headers=headers), timeout=15) as response:
+    try:
+        response = urlopen(Request(spec["url"], headers=headers), timeout=15)
+    except HTTPError as exc:
+        if exc.code == 416 and offset:
+            partial.unlink(missing_ok=True)
+            return download_runtime(root)
+        raise
+    with response:
         resume = response.status == 206 and response.headers.get("Content-Range", "").startswith(f"bytes {offset}-")
         if response.status == 206 and not resume:
             raise TranslationError("DOWNLOAD_FAILED", "运行时下载续传范围不匹配。")
@@ -65,11 +108,12 @@ def download_runtime(root):
             while chunk := response.read(1024 * 1024):
                 events.check_cancelled()
                 offset += len(chunk)
-                if offset > spec["size"]:
+                if offset > maximum:
                     raise TranslationError("DOWNLOAD_FAILED", "运行时下载大小不匹配。")
                 out.write(chunk)
-                events.progress("runtime_download", bytes=offset, total=spec["size"], percent=offset / spec["size"] * 100)
-    if partial.stat().st_size != spec["size"] or sha256(partial) != spec["sha256"]:
+                events.progress("runtime_download", bytes=offset, total=spec.get("size"),
+                                percent=offset / spec["size"] * 100 if spec.get("size") else None)
+    if (spec.get("size") and partial.stat().st_size != spec["size"]) or sha256(partial) != spec["sha256"]:
         partial.unlink(missing_ok=True)
         raise TranslationError("CHECKSUM_FAILED", "运行时校验失败，请重新下载。")
     partial.replace(target)
@@ -77,16 +121,22 @@ def download_runtime(root):
 
 
 def install_runtime(root, archive):
-    if sha256(archive) != manifest()["runtime"]["sha256"]:
+    spec = runtime_spec(manifest())
+    if sha256(archive) != spec["sha256"]:
         raise TranslationError("CHECKSUM_FAILED", "运行时文件校验失败。")
     binary = runtime_path(root)
     staging = binary.parent.with_name(binary.parent.name + ".installing")
     if staging.exists():
         shutil.rmtree(staging)
-    safe_extract(archive, staging)
-    executable = staging / "ollama.exe"
+    if spec["archive"] == "zip":
+        safe_extract(archive, staging)
+    else:
+        safe_extract_tar(archive, staging)
+    executable = staging / ("ollama.exe" if spec["archive"] == "zip" else "ollama")
     if not executable.is_file():
-        raise TranslationError("INVALID_ARCHIVE", "压缩包缺少 ollama.exe。")
+        raise TranslationError("INVALID_ARCHIVE", "压缩包缺少 Ollama 可执行文件。")
+    if spec["archive"] != "zip":
+        executable.chmod(executable.stat().st_mode | 0o111)
     atomic_json(staging / "installed.json", {"binary_sha256": sha256(executable)})
     # Execution slot excludes running managed requests during this replacement.
     previous = binary.parent.with_name(binary.parent.name + ".previous")
@@ -125,11 +175,10 @@ def install(config, root, *, offline_path=None):
         raise TranslationError("INPUT_INVALID", "外部模式不修改用户已有模型；请切回应用管理模式安装。")
     if config["local_llm_model"] != manifest()["model"]["name"]:
         raise TranslationError("INPUT_INVALID", "应用管理模式只能安装当前固定的 Qwen3.5 4B 模型。")
-    if sys.platform != "win32" or platform.machine().upper() not in ("AMD64", "X86_64"):
-        raise TranslationError("UNSUPPORTED_PLATFORM", "自动安装仅支持 Windows x64。")
+    spec = runtime_spec(manifest())
     root.mkdir(parents=True, exist_ok=True)
     with execution_slot(root):
-        required = manifest()["runtime"]["size"] * 4 + manifest()["model"]["size"] + 1024**3
+        required = spec.get("size", 200 * 1024**2) * 4 + manifest()["model"]["size"] + 1024**3
         if shutil.disk_usage(root).free < required:
             raise TranslationError("DISK_FULL", f"翻译组件需要预留约 {required / 1024**3:.1f} GiB 可用空间。")
         if offline_path:
@@ -139,7 +188,7 @@ def install(config, root, *, offline_path=None):
             try:
                 safe_extract(offline_path, staging, limit=24 * 1024**3)
                 verify_models(staging)
-                install_runtime(root, staging / "runtime.zip")
+                install_runtime(root, staging / ("runtime.zip" if spec["archive"] == "zip" else "runtime.tgz"))
                 shutil.copytree(staging / "models", root / "models", dirs_exist_ok=True)
             finally:
                 if staging.exists():
@@ -169,7 +218,7 @@ def install(config, root, *, offline_path=None):
                 if state["state"] != "ready":
                     raise TranslationError(state["code"], state["message"])
             verify_models(root)
-        installed = {"model_digest": manifest()["model"]["digest"], "runtime_version": manifest()["runtime"]["version"]}
+        installed = {"model_digest": manifest()["model"]["digest"], "runtime_version": spec["version"]}
         atomic_json(root / "deployment.json", installed)
         return {"installed": True, **installed, "message": "组件安装完成，请试译验证本机推理。"}
 
@@ -198,15 +247,16 @@ def export_bundle(root, destination):
     root, destination = Path(root), Path(destination)
     with execution_slot(root):
         verify_models(root)
-        runtime = root / "downloads/runtime.zip"
-        if not runtime.is_file() or sha256(runtime) != manifest()["runtime"]["sha256"]:
+        spec = runtime_spec(manifest())
+        runtime = root / ("downloads/runtime.zip" if spec["archive"] == "zip" else "downloads/runtime.tgz")
+        if not runtime.is_file() or sha256(runtime) != spec["sha256"]:
             raise TranslationError("LOCAL_UNAVAILABLE", "缺少已校验的运行时压缩包，请在线安装后再导出。")
         if destination.resolve().is_relative_to(root.resolve()):
             raise TranslationError("INPUT_INVALID", "离线包请保存到组件目录之外。")
         partial = destination.with_suffix(destination.suffix + ".part")
         try:
             with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_STORED) as bundle:
-                bundle.write(runtime, "runtime.zip")
+                bundle.write(runtime, runtime.name)
                 model_file = model_manifest_path(root)
                 bundle.write(model_file, model_file.relative_to(root).as_posix())
                 value = json.loads(model_file.read_text())

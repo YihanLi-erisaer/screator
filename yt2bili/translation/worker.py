@@ -2,12 +2,28 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import sys
+import threading
+import time
 from dataclasses import asdict
 from .types import TranslationError
 
 
 def main():
+    if sys.platform == "darwin":
+        parent = os.getppid()
+        def stop_if_parent_exits():
+            while True:
+                time.sleep(.25)
+                if os.getppid() != parent:
+                    # This worker leads the request process group. Its Ollama
+                    # runner inherits that group, so a forced desktop exit
+                    # cannot leave Metal inference running in the background.
+                    os.killpg(os.getpgrp(), signal.SIGKILL)
+                    return
+        threading.Thread(target=stop_if_parent_exits, daemon=True).start()
     for stream in (sys.stdin, sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")

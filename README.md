@@ -4,13 +4,13 @@
 
 支持一次传入多条链接：下载和封面处理可以并行，B 站上传会自动排队（同一账号不并行投稿）。创作声明为「内容无需标注」，简介末尾会带上原标题、原作者和原链接。
 
-## 可视化桌面版与 Windows 安装包
+## 可视化桌面版
 
 现已提供与 StarDazz 官网风格一致的桌面应用，支持任务管理、素材预览与编辑、扫码登录、设置、日志和投稿操作。Windows 安装包和免安装版输出在 `dist/windows/`，使用与构建步骤见 [Windows 安装与打包](docs/Windows安装与打包.md)。
 
 当前电脑可双击根目录 `启动桌面版.cmd`，或执行 `cd desktop` 后运行 `npm run desktop`。首次使用请从任务中心的“开始配置”进入。
 
-开发环境与使用方法见 [桌面版说明](desktop/README.md)，实现与测试记录见 [第一期开发与验收记录](第一期开发与验收记录.md)。macOS DMG 尚未提供。以下仍是原有 CLI 用法。
+macOS Apple Silicon 可按 [macOS 安装与打包](docs/macOS安装与打包.md) 在 M 系列设备上原生运行和构建 DMG。开发环境与使用方法见 [桌面版说明](desktop/README.md)，实现与测试记录见 [第一期开发与验收记录](第一期开发与验收记录.md)。以下仍是原有 CLI 用法。
 
 ## 抖音同步投稿（官方接入，待真实平台联调）
 
@@ -24,7 +24,7 @@
 
 ## 环境
 
-- Windows 10/11（也可用手动安装的 biliup 在其它系统上跑）
+- Windows 10/11 或 macOS 14+ Apple Silicon
 - Python 3.11+
 - [FFmpeg](https://ffmpeg.org/download.html)（`ffmpeg` 和 `ffprobe` 都要在 PATH 里）
 - 本地翻译组件，或可选的 [DeepL API](https://www.deepl.com/pro-api) 密钥
@@ -130,7 +130,7 @@ python -m yt2bili repair TASK_ID
 
 修复会先尝试复用本任务完整素材，缺失或损坏时重新准备。成功后使用日志显示的路径在创作中心替换原稿件视频；不上传、不修改 BV、不触发成功清理。
 
-完整校验默认优先尝试 NVIDIA GPU 解码（当前支持普通 8-bit 4:2:0 的 AV1/H.264/VP9）；没有可用设备、驱动/解码器不支持或 GPU 校验出错时，自动从头用 CPU 复核。其它格式使用 CPU，音频也使用 CPU。无需手动设置环境变量。可设置 `$env:YT2BILI_HWACCEL='cpu'` 强制 CPU，或设为 `'auto'` 恢复自动选择。CPU 处理 AV1 时建议使用包含 `libdav1d` 的 FFmpeg full 构建。
+完整校验在 Windows 上默认优先尝试 NVIDIA GPU 解码（普通 8-bit 4:2:0 的 AV1/H.264/VP9）；在 Apple Silicon 上对 H.264/HEVC/AV1 优先尝试 VideoToolbox 硬件解码。没有可用设备、解码器不支持或硬件校验出错时，自动从头用 CPU 复核。其它格式和音频使用 CPU。可设置 `YT2BILI_HWACCEL=cpu` 强制 CPU，或设为 `auto` 恢复自动选择。CPU 处理 AV1 时建议使用包含 `libdav1d` 的 FFmpeg full 构建。
 
 完整校验成功后，会在视频旁写入 `<文件名>.validation.json` 缓存，程序重启后仍可复用。每次先检查轨道信息并计算**整文件 SHA-256**，只有内容、文件状态、预期时长、解码模式、校验规则版本及 FFmpeg/ffprobe 工具状态均匹配才跳过重复解码；仍需顺序读取整个文件，但无需再次逐帧解码。文件中间内容变化（即使大小和修改时间不变）也会使缓存失效。失败或中断的校验不写成功缓存；缓存损坏时重新校验，缓存写入失败不影响已通过的结果。上传后清理任务目录时缓存一并删除。
 

@@ -9,6 +9,8 @@
     "desktop": "node scripts/tauri.mjs dev",
     "desktop:build": "node scripts/package-windows.mjs",
     "desktop:package": "node scripts/package-windows.mjs",
+    "desktop:build:mac": "node scripts/package-macos.mjs",
+    "desktop:package:mac": "node scripts/package-macos.mjs",
     "tauri": "node scripts/tauri.mjs",
     "test": "playwright test",
     "test:e2e": "playwright test",

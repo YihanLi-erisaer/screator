@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from . import prompts
 from .http import request_json
 from .types import TranslationError
@@ -54,6 +55,16 @@ def translate(payload):
             urls = [url.rstrip(".,;:!?)]}") for url in re.findall(r'https?://[^\s<>"，。]+', supplied)]
             if any(url not in result[key] for url in urls):
                 raise TranslationError("OUTPUT_INVALID", "模型输出未保留原文链接。", retryable=True)
+        inference_device = None
+        try:
+            running = request_json(address, "/api/ps").get("models", [])
+            loaded = next((item for item in running if item.get("name") == config["local_llm_model"]
+                           or item.get("model") == config["local_llm_model"]
+                           or str(item.get("digest", "")).removeprefix("sha256:") == status["digest"]), None)
+            if loaded is not None and isinstance(loaded.get("size_vram"), int):
+                inference_device = ("Apple GPU (Metal)" if sys.platform == "darwin" else "GPU") if loaded["size_vram"] > 0 else "CPU"
+        except TranslationError:
+            pass
         return {**result, "provider": "local_llm", "model_digest": status["digest"],
                 "runtime_version": status["runtime_version"], "prompt_version": prompts.VERSION,
-                "input_truncated": body != source["description"]}
+                "input_truncated": body != source["description"], "inference_device": inference_device}

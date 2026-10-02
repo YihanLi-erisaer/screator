@@ -16,6 +16,7 @@ type Job = {
     title?: string;
     description?: string;
     elapsed_ms?: number;
+    inference_device?: string | null;
     message?: string;
   };
 };
@@ -240,7 +241,7 @@ export default function TranslationPanel({
                     : "http://127.0.0.1:11434",
               })
             }
-            options={[{ value: "managed", label: "应用管理（Windows x64）" }, { value: "external", label: "连接已有本机 Ollama" }]}
+            options={[{ value: "managed", label: "应用管理（Windows x64 / Apple Silicon）" }, { value: "external", label: "连接已有本机 Ollama" }]}
           />
         </div>
         {config.local_llm_mode === "external" && (
@@ -262,7 +263,7 @@ export default function TranslationPanel({
         )}
         <p role="status">{local?.message || "正在检测组件…"}</p>
         <p className="help">
-          首次下载约 4.9 GB；安装时需预留约 10 GB 空间。实际内存占用和速度取决于硬件及上下文长度。安装后可断网翻译，首次请试译验证。
+          首次下载约 3.6～4.9 GB；安装时需预留约 6～10 GB 空间。Apple Silicon 使用 Ollama Metal 推理；试译后会显示实际设备。安装后可断网翻译。
         </p>
         <h3>翻译超时</h3>
         <div className="form-grid">
@@ -459,6 +460,7 @@ export default function TranslationPanel({
                 {job.result.description}
                 <br />
                 耗时 {((job.result.elapsed_ms || 0) / 1000).toFixed(1)} 秒
+                {job.result.inference_device && ` · ${job.result.inference_device}`}
               </p>
             )}
             {running(job) && job.kind !== "uninstall" && (

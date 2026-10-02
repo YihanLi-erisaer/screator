@@ -4985,6 +4985,7 @@ dependencies = [
 name = "yt2bili-desktop"
 version = "1.0.0-alpha"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "tauri",
