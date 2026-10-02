@@ -20,6 +20,16 @@ class MediaSafetyTests(unittest.TestCase):
             media.require_ffmpeg()
         except Yt2BiliError as exc:
             raise unittest.SkipTest(str(exc))
+        encoders = subprocess.run(
+            [media.ffmpeg_tool("ffmpeg"), "-hide_banner", "-encoders"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        if "libsvtav1" in encoders:
+            cls.av1_encoder = ("-c:v", "libsvtav1", "-preset", "11", "-crf", "40")
+        elif "libaom-av1" in encoders:
+            cls.av1_encoder = ("-c:v", "libaom-av1", "-cpu-used", "8", "-crf", "40")
+        else:
+            raise unittest.SkipTest("FFmpeg has no AV1 encoder for media fixtures")
         cls.temp = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temp.name)
         cls.good = cls.root / "good.mp4"
@@ -31,7 +41,7 @@ class MediaSafetyTests(unittest.TestCase):
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
             "-movflags", "+faststart", str(cls.good),
         )
-        cls.ffmpeg("-i", str(cls.good), "-c:v", "libaom-av1", "-cpu-used", "8", "-crf", "40", "-c:a", "copy", str(cls.av1))
+        cls.ffmpeg("-i", str(cls.good), *cls.av1_encoder, "-c:a", "copy", str(cls.av1))
         cls.ffmpeg(
             "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=25:duration=3",
             "-f", "lavfi", "-i", "sine=frequency=440:duration=10",
@@ -44,7 +54,10 @@ class MediaSafetyTests(unittest.TestCase):
 
     @staticmethod
     def ffmpeg(*args):
-        subprocess.run([media.ffmpeg_tool("ffmpeg"), "-nostdin", "-y", "-v", "error", *args], check=True, capture_output=True)
+        command = [media.ffmpeg_tool("ffmpeg"), "-nostdin", "-y", "-v", "error", *args]
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(f"FFmpeg fixture failed ({result.returncode}): {result.stderr}")
 
     def setUp(self):
         media._validated.clear()
@@ -178,7 +191,7 @@ class MediaSafetyTests(unittest.TestCase):
 
     def test_optional_cuda_full_decode_and_conversion(self):
         source = self.root / "cuda-source.mp4"
-        self.ffmpeg("-i", str(self.good), "-vf", "scale=320:240", "-c:v", "libaom-av1", "-cpu-used", "8", "-crf", "40", "-c:a", "copy", str(source))
+        self.ffmpeg("-i", str(self.good), "-vf", "scale=320:240", *self.av1_encoder, "-c:a", "copy", str(source))
         check = subprocess.run([
             media.ffmpeg_tool("ffmpeg"), "-v", "error", "-hwaccel", "cuda",
             "-hwaccel_output_format", "cuda", "-c:v", "av1_cuvid", "-i", str(source),

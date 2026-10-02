@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import tempfile
 import tarfile
 import unittest
@@ -112,7 +113,8 @@ class DeploymentTests(unittest.TestCase):
             install_runtime(self.root, archive)
         binary = self.root / "runtime/0.34.3/ollama"
         self.assertEqual(binary.read_bytes(), self.payload)
-        self.assertTrue(binary.stat().st_mode & 0o111)
+        if os.name != "nt":
+            self.assertTrue(binary.stat().st_mode & 0o111)
 
     def test_platform_runtime_selection(self):
         spec = {"runtime": {"version": "windows"}, "runtime_macos_arm64": {"version": "mac"}}
