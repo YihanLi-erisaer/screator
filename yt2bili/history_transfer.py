@@ -3,16 +3,20 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from dataclasses import asdict
 from pathlib import Path
 
 from yt2bili.db import _now
 from yt2bili.exceptions import Yt2BiliError
 from yt2bili import publications
+from yt2bili.locking import work_lock
+from yt2bili.task_paths import validate_task_paths
 
 FORMAT = "yt2bili-publishing-history"
 VERSION = 1
 HISTORY_STATUSES = {"submitted", "submission_unknown", "partial_success", "completed_with_abandon"}
+DELETEABLE_STATUSES = HISTORY_STATUSES | {"ready", "failed", "cancelled", "interrupted"}
 PLATFORMS = {"bilibili", "douyin", "acfun"}
 MAX_BYTES = 100 * 1024 * 1024
 MAX_RECORDS = 100_000
@@ -176,7 +180,7 @@ def import_file(store, path):
 
 
 def delete_record(store, task_id, expected_revision):
-    """Remove one local or imported history entry without touching remote posts or assets."""
+    """Remove an inactive local task or imported record and its unsubmitted assets."""
     if not isinstance(task_id, str) or not task_id or type(expected_revision) is not int or expected_revision < 1:
         raise Yt2BiliError("投稿记录删除参数无效。")
     with store.transaction() as db:
@@ -186,18 +190,28 @@ def delete_record(store, task_id, expected_revision):
                 raise Yt2BiliError("投稿记录已变化，请刷新后重试。")
             db.execute("DELETE FROM imported_publishing_history WHERE task_id=?", (task_id,))
             return {"deleted": True, "kind": "imported"}
-        task = db.execute("SELECT status,revision FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+        task = store.get(task_id)
         if not task:
             raise Yt2BiliError("投稿记录不存在，请刷新列表。")
-        if task["status"] not in HISTORY_STATUSES:
-            raise Yt2BiliError("只有投稿记录页中的已提交或待核对任务可以删除。")
-        if task["revision"] != expected_revision:
+        if task.status not in DELETEABLE_STATUSES:
+            raise Yt2BiliError("任务仍在处理中，请先取消并等待任务停止。")
+        if task.revision != expected_revision:
             raise Yt2BiliError("投稿记录已变化，请刷新后重试。")
         job = db.execute("SELECT payload FROM desktop_jobs WHERE task_id=?", (task_id,)).fetchone()
         if job and json.loads(job[0]).get("execution_state") in {"queued", "running", "waiting"}:
             raise Yt2BiliError("任务仍在队列中，不能删除投稿记录。")
         if db.execute("SELECT 1 FROM task_publications WHERE task_id=? AND status IN ('queued','waiting','uploading_media','creating')", (task_id,)).fetchone():
             raise Yt2BiliError("仍有平台投稿正在等待或执行，不能删除记录。")
+        receipts = db.execute("SELECT status,remote_id FROM task_publications WHERE task_id=?", (task_id,)).fetchall()
+        unsubmitted = not task.bv_id and task.status not in {"submitted", "partial_success", "submission_unknown"} and all(
+            row["status"] not in {"submitted", "submission_unknown"} and not row["remote_id"] for row in receipts)
+        asset_dir = None
+        if unsubmitted and task.work_dir:
+            asset_dir = validate_task_paths(task)
+            resolved = asset_dir.resolve()
+            for other in store.list_all():
+                if other.task_id != task_id and other.work_dir and Path(other.work_dir).resolve() == resolved:
+                    raise Yt2BiliError("素材目录还被其他任务使用，不能删除该记录。")
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "acfun_attempts" in tables:
             db.execute("DELETE FROM acfun_attempts WHERE publication_id IN (SELECT publication_id FROM task_publications WHERE task_id=?)", (task_id,))
@@ -210,4 +224,11 @@ def delete_record(store, task_id, expected_revision):
         db.execute("DELETE FROM tasks WHERE task_id=?", (task_id,))
         if db.execute("PRAGMA foreign_key_check").fetchone():
             raise Yt2BiliError("投稿记录引用检查失败，删除已回滚。")
-    return {"deleted": True, "kind": "local"}
+        assets_deleted = bool(asset_dir and asset_dir.exists())
+        if assets_deleted:
+            with work_lock(asset_dir):
+                try:
+                    shutil.rmtree(asset_dir)
+                except OSError as exc:
+                    raise Yt2BiliError(f"任务素材删除失败，投稿记录已保留：{exc}") from exc
+    return {"deleted": True, "kind": "local", "assets_deleted": assets_deleted}

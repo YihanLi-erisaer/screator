@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from yt2bili import publications
 from yt2bili.db import Task
@@ -145,7 +146,97 @@ class HistoryTransferTests(unittest.TestCase):
             self.assertIsNone(service.store._conn.execute("PRAGMA foreign_key_check").fetchone())
             self.assertEqual(service.store._conn.execute("SELECT count(*) FROM import_conflicts").fetchone()[0], 0)
 
-    def test_delete_imported_record_and_reject_unfinished_or_queued_task(self):
+    def test_delete_unsubmitted_record_removes_its_assets(self):
+        for status in ("ready", "failed", "cancelled", "interrupted"):
+            with self.subTest(status=status):
+                service = self.service(status)
+                task = self.task(service, "abcdefghijk", status=status, bv_id="")
+                folder = self.root / status / "work" / task.task_id
+                folder.mkdir(parents=True)
+                (folder / "video.mp4").write_bytes(b"video")
+                (folder / "cover.jpg").write_bytes(b"cover")
+                outside = self.root / status / "keep.mp4"
+                outside.write_bytes(b"keep")
+                service.store.update(task.task_id, work_root=str(folder.parent), work_dir=str(folder),
+                                     video_path=str(folder / "video.mp4"), cover_path=str(folder / "cover.jpg"))
+                revision = service.store.require(task.task_id).revision
+                result = service.dispatch("history.delete", {"task_id": task.task_id,
+                                             "expected_revision": revision, "confirmed": True})
+                self.assertTrue(result["assets_deleted"])
+                self.assertFalse(folder.exists())
+                self.assertTrue(outside.exists())
+                self.assertIsNone(service.store.get(task.task_id))
+                self.assertEqual(len(service.store.accounts(True)), 1)
+
+    def test_delete_unsubmitted_record_rejects_unsafe_or_shared_asset_directory(self):
+        service = self.service("safety")
+        task = self.task(service, "abcdefghijk", status="failed", bv_id="")
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "video.mp4").write_bytes(b"keep")
+        service.store.update(task.task_id, work_root=str(self.root / "safety" / "work"), work_dir=str(outside))
+        revision = service.store.require(task.task_id).revision
+        with self.assertRaises(Yt2BiliError):
+            service.dispatch("history.delete", {"task_id": task.task_id,
+                              "expected_revision": revision, "confirmed": True})
+        self.assertTrue((outside / "video.mp4").exists())
+        self.assertIsNotNone(service.store.get(task.task_id))
+
+        folder = self.root / "safety" / "work" / task.task_id
+        folder.mkdir(parents=True)
+        (folder / "video.mp4").write_bytes(b"shared")
+        service.store.update(task.task_id, work_root=str(folder.parent), work_dir=str(folder),
+                             video_path=str(folder / "video.mp4"))
+        other = Task(task_id=str(uuid.uuid4()), video_id="lmnopqrstuv", url="https://youtu.be/lmnopqrstuv",
+                     status="ready", work_root=str(folder.parent), work_dir=str(folder))
+        service.store.upsert(other)
+        revision = service.store.require(task.task_id).revision
+        with self.assertRaises(Yt2BiliError):
+            service.dispatch("history.delete", {"task_id": task.task_id,
+                              "expected_revision": revision, "confirmed": True})
+        self.assertTrue((folder / "video.mp4").exists())
+        self.assertIsNotNone(service.store.get(task.task_id))
+
+    def test_delete_record_rejects_active_status_even_without_job(self):
+        service = self.service("active")
+        task = self.task(service, "abcdefghijk", status="uploading", bv_id="")
+        with self.assertRaises(Yt2BiliError):
+            service.dispatch("history.delete", {"task_id": task.task_id,
+                              "expected_revision": service.store.require(task.task_id).revision, "confirmed": True})
+        self.assertIsNotNone(service.store.get(task.task_id))
+
+    def test_delete_failed_task_keeps_assets_when_another_platform_succeeded(self):
+        service = self.service("mixed")
+        task = self.task(service, "abcdefghijk", status="failed", bv_id="")
+        folder = self.root / "mixed" / "work" / task.task_id
+        folder.mkdir(parents=True)
+        (folder / "video.mp4").write_bytes(b"video")
+        service.store.update(task.task_id, work_root=str(folder.parent), work_dir=str(folder),
+                             video_path=str(folder / "video.mp4"))
+        with service.store.transaction() as db:
+            db.execute("INSERT INTO task_publications(publication_id,task_id,platform,account_id,source_video_id,status,remote_id) VALUES(?,?,?,?,?,?,?)",
+                       (str(uuid.uuid4()), task.task_id, "acfun", "acfun-source", task.video_id, "submitted", "123456"))
+        result = service.dispatch("history.delete", {"task_id": task.task_id,
+                                 "expected_revision": service.store.require(task.task_id).revision, "confirmed": True})
+        self.assertFalse(result["assets_deleted"])
+        self.assertTrue((folder / "video.mp4").exists())
+
+    def test_asset_cleanup_error_keeps_record(self):
+        service = self.service("cleanup-error")
+        task = self.task(service, "abcdefghijk", status="failed", bv_id="")
+        folder = self.root / "cleanup-error" / "work" / task.task_id
+        folder.mkdir(parents=True)
+        (folder / "video.mp4").write_bytes(b"video")
+        service.store.update(task.task_id, work_root=str(folder.parent), work_dir=str(folder),
+                             video_path=str(folder / "video.mp4"))
+        with patch("yt2bili.history_transfer.shutil.rmtree", side_effect=OSError("locked")):
+            with self.assertRaises(Yt2BiliError):
+                service.dispatch("history.delete", {"task_id": task.task_id,
+                                  "expected_revision": service.store.require(task.task_id).revision, "confirmed": True})
+        self.assertIsNotNone(service.store.get(task.task_id))
+        self.assertTrue((folder / "video.mp4").exists())
+
+    def test_delete_imported_record_and_reject_queued_task(self):
         source = self.service("source")
         task = self.task(source, "abcdefghijk")
         file = self.root / "history.json"
@@ -157,11 +248,6 @@ class HistoryTransferTests(unittest.TestCase):
         with self.assertRaises(Yt2BiliError):
             target.dispatch("history.delete", {"task_id": task.task_id, "expected_revision": 1, "confirmed": True})
 
-        source.store.update(task.task_id, status="ready")
-        revision = source.store.require(task.task_id).revision
-        with self.assertRaises(Yt2BiliError):
-            source.dispatch("history.delete", {"task_id": task.task_id, "expected_revision": revision, "confirmed": True})
-        source.store.update(task.task_id, status="submitted")
         source.store.save_job(task.task_id, {"execution_state": "queued"})
         revision = source.store.require(task.task_id).revision
         with self.assertRaises(Yt2BiliError):

@@ -334,37 +334,47 @@ class Scheduler:
                 if not cancelled: raise Yt2BiliError("所有剩余目标均已在途或待核对，请等待并核对结果。")
                 for lane in [*self.upload_lanes.values(), self.douyin_lane, self.acfun_lane]: lane.wake()
                 return
-        with self.store.transaction():
-            task = self.store.require(identity)
-            if any(p["status"] in publications.INFLIGHT for p in publications.items(self.store, task.task_id)):
-                raise Yt2BiliError("正在投稿，请等待结果；可单独取消尚未上传的目标。")
-            if task.status == "uploading":
-                raise Yt2BiliError("正在提交，请等待上传结束并核对结果。")
-            saved = self.store.get_job(task.task_id) or {}
-            if task.status in ("submitted", "submission_unknown"):
-                raise Yt2BiliError("该任务不能取消，请先核对投稿结果。")
-            self.store.update(task.task_id, cancel_requested=1, status="cancel_requested")
         with self.guard:
-            item = self.active.get(task.task_id)
+            with self.store.transaction():
+                task = self.store.require(identity)
+                if any(p["status"] in publications.INFLIGHT for p in publications.items(self.store, task.task_id)):
+                    raise Yt2BiliError("正在投稿，请等待结果；可单独取消尚未上传的目标。")
+                if task.status == "uploading":
+                    raise Yt2BiliError("正在提交，请等待上传结束并核对结果。")
+                saved = self.store.get_job(task.task_id) or {}
+                if task.status in ("submitted", "submission_unknown"):
+                    raise Yt2BiliError("该任务不能取消，请先核对投稿结果。")
+                item = self.active.get(task.task_id)
+                # Dispatched downloads can wait behind another video for a long time.
+                # Settle them now; the worker will discard their stale queue entries.
+                immediate = item is None or (task.status == "queued_download" and
+                    item.stage == "download" and not item.running)
+                self.store.update(task.task_id, cancel_requested=1,
+                                  status="cancelled" if immediate else "cancel_requested",
+                                  wait_reason="" if immediate else task.wait_reason)
+                if immediate:
+                    if saved.get("mode") == "retranslate":
+                        record = self.store.translation(task.task_id) or {}
+                        self.store.save_translation(self.store.require(task.task_id), {**record, "state": "cancelled"})
+                    for p in publications.items(self.store, task.task_id):
+                        if p["status"] not in publications.TERMINAL | {"submission_unknown"}:
+                            publications.change(self.store, p["publication_id"], status="cancelled", error="用户取消，素材保留。")
+                    publications.project(self.store, task.task_id)
+                    if item is None:
+                        saved["execution_state"] = "finished"
+                        self.store.save_job(task.task_id, saved)
             if item:
                 item.cancel.set()
                 for child in item.children.values(): child.cancel.set()
-            else:
-                self.store.update(task.task_id, status="cancelled", wait_reason="")
-                if saved.get("mode") == "retranslate":
-                    record = self.store.translation(task.task_id) or {}
-                    self.store.save_translation(self.store.require(task.task_id), {**record, "state": "cancelled"})
-                for p in publications.items(self.store, task.task_id):
-                    if p["status"] not in publications.TERMINAL | {"submission_unknown"}:
-                        publications.change(self.store, p["publication_id"], status="cancelled", error="用户取消，素材保留。")
-                publications.project(self.store, task.task_id)
-                saved["execution_state"] = "finished"
-                self.store.save_job(task.task_id, saved)
+                if immediate:
+                    self.finish(item)
             for lane in self.upload_lanes.values():
                 lane.wake()
             self.douyin_lane.wake()
             self.acfun_lane.wake()
         self.signal.set()
+        if immediate and item is None:
+            self.emit("queue.changed", self.snapshot())
 
     def _work(self, stage):
         while True:
@@ -374,7 +384,11 @@ class Scheduler:
                 return
             finished = False
             try:
-                item.running = True
+                with self.guard:
+                    if self.active.get(item.task_id) is not item:
+                        continue
+                    item.running = True
+                    item.running_action = stage
                 with self.context(item):
                     if stage == "download":
                         if shutil.disk_usage(item.settings.work_dir).free < 512 * 1024 * 1024:
@@ -430,7 +444,10 @@ class Scheduler:
                     finished = True
                     self.fail(item, exc)
             finally:
-                item.running = False
+                with self.guard:
+                    if item.running_action == stage:
+                        item.running = False
+                        item.running_action = ""
                 if finished:
                     self.finish(item)
                 self.queues[stage].task_done()

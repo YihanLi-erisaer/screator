@@ -370,6 +370,46 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(publications.for_platform(self.service.store, queued["task_id"], "bilibili")["text"], "新翻译")
         self.assertFalse(self.uploads)
 
+    def test_cancel_waiting_download_finishes_immediately_and_keeps_record(self):
+        started, release = threading.Event(), threading.Event()
+        calls = []
+        def download(url, *args, **kwargs):
+            calls.append(url)
+            if "abcdefghijk" in url:
+                started.set()
+                release.wait(5)
+            return self.download(url, *args, **kwargs)
+        with self.mocks(), patch.object(youtube, "download_video", side_effect=download):
+            try:
+                self.create()
+                self.assertTrue(started.wait(2))
+                second = self.create("12345678901")["task_id"]
+                def dispatched_but_not_started():
+                    with self.service.scheduler.guard:
+                        item = self.service.scheduler.active.get(second)
+                        return bool(item and item.stage == "download" and not item.running)
+                self.wait_until(dispatched_but_not_started, "waiting download dispatch")
+                self.service.cancel(second)
+                self.assertEqual(self.service.task(second).status, "cancelled")
+                self.assertIsNotNone(self.service.store.get(second))
+                self.assertEqual(self.service.store.get_job(second)["execution_state"], "finished")
+                self.assertNotIn(second, self.service.scheduler.active)
+                self.assertNotIn(second, [item["task_id"] for item in self.service.scheduler.snapshot()["active"]])
+                self.service.retry(second, "retry-waiting-cancel")
+            finally:
+                release.set()
+            self.wait_idle()
+        self.assertEqual(sum("12345678901" in url for url in calls), 1)
+        self.assertEqual(self.service.task(second).status, "ready")
+
+    def test_cancel_download_before_dispatch_keeps_record(self):
+        with self.service.scheduler.guard:
+            task_id = self.create()["task_id"]
+            self.service.cancel(task_id)
+            self.assertEqual(self.service.task(task_id).status, "cancelled")
+            self.assertEqual(self.service.store.get_job(task_id)["execution_state"], "finished")
+        self.assertIsNotNone(self.service.store.get(task_id))
+
     def test_failed_retranslation_keeps_text_cleared_and_task_retryable(self):
         from yt2bili.translation.types import TranslationError
         with self.mocks():

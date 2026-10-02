@@ -685,7 +685,7 @@ class DesktopService:
     def cancel(self, task_id):
         self.task(task_id)
         self.scheduler.cancel(task_id)
-        return {"requested": True}
+        return {"requested": True, "status": self.task(task_id).status}
 
     def repair(self, task_id, operation_id):
         def action():

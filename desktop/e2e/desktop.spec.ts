@@ -510,7 +510,29 @@ test("task detail deletes one local publishing record after confirmation", async
   await dialog.getByRole("button", { name: "确认删除记录" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole("button", { name: /让创作回归简单/ })).toHaveCount(0);
-  await expect(page.getByRole("status")).toContainText("本机投稿记录已删除");
+  await expect(page.getByRole("status")).toContainText("本机记录已删除");
+});
+
+test("cancelled task stays in the list and reports immediate completion", async ({ page }) => {
+  await page.goto("/?preview&populated");
+  await page.getByRole("button", { name: /关于设计系统/ }).click();
+  const dialog = page.getByRole("dialog", { name: "任务详情" });
+  await dialog.getByRole("button", { name: "取消任务" }).click();
+  await expect(dialog).toContainText("已取消");
+  await expect(dialog.getByRole("status")).toContainText("任务已取消，记录已保留。");
+  await dialog.getByRole("button", { name: "关闭对话框" }).click();
+  await expect(page.getByRole("button", { name: /关于设计系统/ })).toBeVisible();
+});
+
+test("unsubmitted ready task can be deleted from the task list", async ({ page }) => {
+  await page.goto("/?preview&populated");
+  await page.getByRole("button", { name: /用更少的工具/ }).click();
+  const dialog = page.getByRole("dialog", { name: "任务详情" });
+  await dialog.getByRole("button", { name: "删除投稿记录" }).click();
+  await expect(dialog).toContainText("未投稿成功的任务会一并删除本机素材");
+  await dialog.getByRole("button", { name: "确认删除记录" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /用更少的工具/ })).toHaveCount(0);
 });
 
 test("imported history detail can remove its local copy", async ({ page }) => {

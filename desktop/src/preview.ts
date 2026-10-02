@@ -315,6 +315,12 @@ export async function request(method: string, params: any): Promise<any> {
     }
     return tasks.find((t) => t.task_id === params.task_id);
   }
+  if (method === "tasks.cancel") {
+    const task = tasks.find((t) => t.task_id === params.task_id)!;
+    task.status = "cancelled";
+    task.revision += 1;
+    return { requested: true, status: task.status };
+  }
   if (method === "history.delete") {
     const index = tasks.findIndex((t) => t.task_id === params.task_id);
     if (!params.confirmed || index < 0 || tasks[index].revision !== params.expected_revision)

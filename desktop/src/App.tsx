@@ -87,7 +87,6 @@ const titles = {
   account: "账号与连接",
   settings: "设置",
 };
-const historyStatuses = new Set(["submitted", "submission_unknown", "partial_success", "completed_with_abandon"]);
 const progressSpeed = (progress?: Progress) => {
   if (progress?.speed != null) return transferRate(progress.speed);
   if (progress?.speed_ratio != null)
@@ -468,7 +467,7 @@ export default function App() {
       delete latestTasks.current[task.task_id];
       await loadTasks();
       setSelected(null);
-    }, "本机投稿记录已删除。");
+    }, "本机记录已删除。");
   const activeAccounts = accountOptions.filter(
     (account) => account.lifecycle === "active",
   );
@@ -1304,6 +1303,7 @@ function TaskDetail({
   close: () => void;
   refresh: () => Promise<void>;
 }) {
+  const { showSuccess } = useToast();
   const [legacyAccount, setLegacyAccount] = useState("");
   const [tab, setTab] = useState("metadata");
   const [title, setTitle] = useState(task.title_zh);
@@ -1666,7 +1666,7 @@ function TaskDetail({
                 : confirm === "repair"
                   ? "准备原稿件的替换视频？此操作不会投稿。"
                   : confirm === "delete_history"
-                    ? "确定从本机删除这条任务及其所有平台投稿记录？不会删除平台上的稿件，也不会清理本机视频素材。删除后只能从备份或先前导出的记录中恢复。"
+                    ? "确定从本机删除这条任务及其所有平台投稿记录？不会删除平台上的稿件。未投稿成功的任务会一并删除本机素材；已提交或待核对的任务会保留素材。删除后只能从备份恢复记录。"
                   : "确认创作中心没有这条稿件？"}
           </strong>
           <div>
@@ -1710,7 +1710,7 @@ function TaskDetail({
       )}
       <div className="modal-actions">
         <span className="help">已提交 ≠ 已过审</span>
-        {historyStatuses.has(task.status) && (
+        {!active(task) && (
           <button className="secondary danger" disabled={busy} onClick={() => setConfirm("delete_history")}>
             删除投稿记录
           </button>
@@ -1762,9 +1762,10 @@ function TaskDetail({
             disabled={busy || task.status === "cancel_requested"}
             onClick={() =>
               action(async () => {
-                await request("tasks.cancel", { task_id: task.task_id });
+                const result = await request<{ status: string }>("tasks.cancel", { task_id: task.task_id });
                 await refresh();
-              }, "已请求取消，素材会保留。")
+                showSuccess(result.status === "cancelled" ? "任务已取消，记录已保留。" : "已请求取消，素材会保留。");
+              })
             }
           >
             取消任务
