@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
+import time as time_module
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -322,8 +322,8 @@ class MultiAccountTests(unittest.TestCase):
             self.assertTrue(process_alive(child))
             parent.kill()
             parent.communicate(timeout=10)
-            deadline = time.monotonic() + 5
-            while process_alive(child) and time.monotonic() < deadline: time.sleep(.05)
+            deadline = time_module.monotonic() + 5
+            while process_alive(child) and time_module.monotonic() < deadline: time_module.sleep(.05)
             self.assertFalse(process_alive(child))
         finally:
             if parent.poll() is None: parent.kill()
