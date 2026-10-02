@@ -1,5 +1,40 @@
 import { test, expect } from "@playwright/test";
 
+test("display language is saved in general settings and updates the interface", async ({ page }) => {
+  await page.goto("/?preview");
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  const language = page.getByRole("combobox", { name: "界面语言" });
+  await expect(page.getByRole("heading", { name: "通用设置" })).toBeVisible();
+  await language.click();
+  await page.getByRole("option", { name: "English" }).click();
+  await page.getByRole("button", { name: "保存设置" }).click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(page.getByRole("heading", { name: "General settings" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Task center", exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "Display language" }).click();
+  await page.getByRole("option", { name: "繁體中文" }).click();
+  await page.getByRole("button", { name: "Save settings" }).click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-HK");
+  await expect(page.getByRole("heading", { name: "通用設定" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "任務中心", exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "介面語言" }).click();
+  await page.getByRole("option", { name: "简体中文" }).click();
+  await page.getByRole("button", { name: "儲存設定" }).click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+  await expect(page.getByRole("heading", { name: "通用设置" })).toBeVisible();
+});
+
+test("task center shows today's successful submissions for each Bilibili account", async ({ page }) => {
+  await page.goto("/?preview&accounts=5&populated");
+  await expect(page.locator(".stats-heading")).toHaveText("B 站账号 · 今日提交成功");
+  const cards = page.locator(".stats-strip .stat");
+  await expect(cards).toHaveCount(5);
+  await expect(cards.first()).toContainText("账号 1");
+  await expect(cards.first().locator("strong")).toHaveText("01");
+  await expect(cards.nth(1).locator("strong")).toHaveText("00");
+  await expect(cards.last()).toContainText("账号 5");
+});
+
 test("local-first translation settings and fallback can be changed", async ({
   page,
 }) => {
@@ -60,9 +95,26 @@ test("YouTube download resolution is saved from settings", async ({ page }) => {
   await expect(select).toContainText("最佳可用画质");
   await select.click();
   await page.getByRole("option", { name: "720p" }).click();
+  const audio = card.getByRole("combobox", { name: "YouTube 下载配音音轨" });
+  await expect(audio).toContainText("自动（YouTube 默认）");
+  await audio.click();
+  await page.getByRole("option", { name: "中文" }).click();
   await expect(card.locator(".section-title .pill.missing")).toHaveText("待保存");
   await page.getByRole("button", { name: "保存设置" }).click();
   await expect(select).toContainText("720p");
+  await expect(audio).toContainText("中文");
+  await expect(card.locator(".section-title .pill.imported")).toHaveText("已保存");
+});
+
+test("settings do not send audio language to an older desktop worker", async ({ page }) => {
+  await page.goto("/?preview&legacyAudioSettings");
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  const card = page.locator(".settings-card").filter({ has: page.getByRole("heading", { name: "YouTube 下载" }) });
+  await expect(card.getByText("后台尚未加载配音设置。关闭并重新启动桌面程序后即可选择配音。")).toBeVisible();
+  await expect(card.getByRole("combobox", { name: "YouTube 下载配音音轨" })).toHaveCount(0);
+  await card.getByRole("combobox", { name: "YouTube 下载最高分辨率" }).click();
+  await page.getByRole("option", { name: "720p" }).click();
+  await page.getByRole("button", { name: "保存设置" }).click();
   await expect(card.locator(".section-title .pill.imported")).toHaveText("已保存");
 });
 

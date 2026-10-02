@@ -1,5 +1,6 @@
 import { Check, ChevronDown } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { uiText } from "./i18n";
 
 export type SelectOption = {
   value: string;
@@ -172,7 +173,7 @@ export function StyledSelect({
             search.current += event.key.toLocaleLowerCase();
             window.clearTimeout(searchTimer.current);
             searchTimer.current = window.setTimeout(() => { search.current = ""; }, 600);
-            const match = options.findIndex((option) => !option.disabled && option.label.toLocaleLowerCase().startsWith(search.current));
+            const match = options.findIndex((option) => !option.disabled && uiText(option.label).toLocaleLowerCase().startsWith(search.current));
             if (match >= 0) {
               event.preventDefault();
               if (open) setActiveIndex(match);

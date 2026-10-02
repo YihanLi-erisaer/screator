@@ -13,6 +13,31 @@ from yt2bili.db import Task, TaskStore
 
 
 class PipelineConcurrencyTests(unittest.TestCase):
+    def test_youtube_audio_format_prefers_language_and_original_fallback(self):
+        formats = [
+            dict(format_id="video", url="https://example.com/video", ext="mp4", vcodec="avc1", acodec="none", height=720),
+            dict(format_id="english", url="https://example.com/en", ext="m4a", vcodec="none", acodec="mp4a", language="en", format_note="medium (original)"),
+            dict(format_id="chinese", url="https://example.com/zh", ext="m4a", vcodec="none", acodec="mp4a", language="zh-Hans", format_note="medium"),
+        ]
+        for preference, selected in (("zh", "chinese"), ("ja", "english"), ("original", "english")):
+            with self.subTest(preference=preference), youtube.yt_dlp.YoutubeDL({
+                "format": youtube._video_format(720, preference), "quiet": True,
+            }) as ydl:
+                info = ydl.process_ie_result({
+                    "_type": "video", "id": "sample", "title": "sample", "extractor": "Generic",
+                    "webpage_url": "https://example.com", "formats": formats,
+                }, download=False)
+                self.assertEqual(info["requested_formats"][-1]["format_id"], selected)
+        for preference, selected in (("zh", "chinese"), ("ja", "english"), ("original", "english")):
+            with self.subTest(audio_only=preference), youtube.yt_dlp.YoutubeDL({
+                "format": youtube._audio_format(preference), "quiet": True,
+            }) as ydl:
+                info = ydl.process_ie_result({
+                    "_type": "video", "id": "audio-sample", "title": "audio-sample", "extractor": "Generic",
+                    "webpage_url": "https://example.com", "formats": formats[1:],
+                }, download=False)
+                self.assertEqual(info["format_id"], selected)
+
     def test_youtube_download_resolution_caps_selected_formats(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

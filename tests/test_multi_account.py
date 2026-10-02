@@ -12,13 +12,14 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import test_desktop as desktop_tests
 from test_desktop import MemoryVault, login_fixture
-from yt2bili import bili_upload, desktop_auth, events, media, pipeline
+from yt2bili import bili_upload, desktop_auth, events, media, pipeline, publications
 from yt2bili.cli import _build_parser
 from yt2bili.db import Task, TaskStore
 from yt2bili.desktop_service import DesktopService
@@ -50,6 +51,41 @@ class MultiAccountTests(unittest.TestCase):
 
     def add_account(self, uid):
         return self.service.accounts.bind(credentials(uid), verify=False)
+
+    def test_today_successful_submissions_by_account(self):
+        other = self.add_account(124)
+        today = datetime.now().astimezone().date()
+        today_at = datetime.combine(today, time(12)).astimezone(timezone.utc).isoformat()
+        yesterday_at = datetime.combine(today - timedelta(days=1), time(12)).astimezone(timezone.utc).isoformat()
+
+        def record(number, account, status, completed_at=None, task_updated_at=None):
+            task = Task(video_id=f"abcdefgh{number:03d}", url=f"https://youtu.be/abcdefgh{number:03d}",
+                        status=status, account_id=account["account_id"],
+                        account_uid_snapshot=account["uid"], account_name_snapshot=account["nickname"])
+            self.service.store.upsert(task)
+            publications.ensure_bili(self.service.store, task)
+            if status == "partial_success":
+                pub = publications.for_platform(self.service.store, task.task_id, "bilibili")
+                publications.change(self.service.store, pub["publication_id"], status="submitted", remote_id="BV1234567890")
+            if completed_at:
+                self.service.store._conn.execute("""INSERT INTO upload_attempts
+                    (attempt_id,task_id,account_id,uid,run_id,prepared_at,ended_at,outcome,bv_id)
+                    VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (f"attempt-{number}", task.task_id, account["account_id"], account["uid"],
+                     f"run-{number}", completed_at, completed_at, "submitted", "BV1234567890"))
+            if task_updated_at:
+                self.service.store._conn.execute("UPDATE tasks SET updated_at=? WHERE task_id=?",
+                                                 (task_updated_at, task.task_id))
+
+        record(1, self.account, "submitted", today_at, yesterday_at)
+        record(2, self.account, "partial_success", today_at)
+        record(3, self.account, "submission_unknown", task_updated_at=today_at)
+        record(4, other, "submitted", yesterday_at, today_at)
+        record(5, other, "submitted", task_updated_at=today_at)  # manually confirmed result
+
+        counts = self.service.list_tasks(account_id=other["account_id"], search="no matches")["today_submitted_by_account"]
+        self.assertEqual(counts[self.account["account_id"]], 2)
+        self.assertEqual(counts[other["account_id"]], 1)
 
     def test_capacity_archival_restore_and_database_constraints(self):
         accounts = [self.account] + [self.add_account(i) for i in range(124, 128)]

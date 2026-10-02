@@ -13,6 +13,8 @@ class CLISettings(DesktopSettings):
             self.values.update({key: getattr(settings, key, default) for key, default in DEFAULTS.items()})
             self.values.update(work_dir=str(settings.work_dir), bili_tid=settings.bili_tid,
                 bili_tags=settings.bili_tags, bili_line=settings.bili_line,
+                youtube_max_height=settings.youtube_max_height,
+                youtube_audio_language=settings.youtube_audio_language,
                 upload_gap_seconds=settings.upload_gap_seconds)
 
     def key(self):
@@ -23,5 +25,7 @@ class CLISettings(DesktopSettings):
         return replace(self.base, root=self.paths.root, data_dir=self.paths.root / "data",
                        work_dir=Path(value["work_dir"]), bili_tid=value["bili_tid"],
                        bili_tags=value["bili_tags"], bili_line=value["bili_line"],
+                       youtube_max_height=value.get("youtube_max_height", 0),
+                       youtube_audio_language=value.get("youtube_audio_language", "auto"),
                        upload_gap_seconds=value["upload_gap_seconds"],
                        translation_root=self.paths.root / "translation", **validate(value))

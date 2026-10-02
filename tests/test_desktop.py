@@ -271,6 +271,29 @@ class DesktopTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(Yt2BiliError):
                 self.service.update_settings({"youtube_max_height": invalid})
 
+    def test_ui_language_persists_and_rejects_invalid_values(self):
+        self.assertEqual(self.service.config.public()["ui_language"], "zh-CN")
+        self.assertEqual(self.service.update_settings({"ui_language": "en"})["ui_language"], "en")
+        self.assertEqual(DesktopSettings(self.paths, MemoryVault()).values["ui_language"], "en")
+        self.assertEqual(self.service.update_settings({"ui_language": "zh-HK"})["ui_language"], "zh-HK")
+        for invalid in (None, True, "fr", ["en"]):
+            with self.subTest(invalid=invalid), self.assertRaises(Yt2BiliError):
+                self.service.update_settings({"ui_language": invalid})
+
+    def test_youtube_audio_language_persists_and_old_snapshots_use_auto(self):
+        old_snapshot = self.service.config.snapshot()
+        old_snapshot.pop("youtube_audio_language")
+        result = self.service.update_settings({"youtube_audio_language": "zh"})
+        self.assertEqual(result["youtube_audio_language"], "zh")
+        self.assertEqual(self.service.config.build().youtube_audio_language, "zh")
+        self.assertEqual(self.service.config.build(old_snapshot).youtube_audio_language, "auto")
+        saved = json.loads((self.paths.root / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["youtube_audio_language"], "zh")
+        self.assertEqual(DesktopSettings(self.paths, MemoryVault()).build().youtube_audio_language, "zh")
+        for invalid in (None, True, "xx", ["zh"]):
+            with self.subTest(invalid=invalid), self.assertRaises(Yt2BiliError):
+                self.service.update_settings({"youtube_audio_language": invalid})
+
     def test_old_acfun_enable_setting_is_ignored_and_removed_on_next_save(self):
         saved = self.service.config.snapshot()
         saved["acfun_experimental_enabled"] = False

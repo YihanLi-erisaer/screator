@@ -26,6 +26,7 @@ class Settings:
     bin_dir: Path
     download_jobs: int = 1
     youtube_max_height: int = 0
+    youtube_audio_language: str = "auto"
     upload_gap_seconds: int = 20
     desc_limit: int = 2000
     title_limit: int = 80

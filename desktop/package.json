@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/extract-ui-source.mjs --check && tsc --noEmit && vite build",
     "desktop": "node scripts/tauri.mjs dev",
     "desktop:build": "node scripts/package-windows.mjs",
     "desktop:package": "node scripts/package-windows.mjs",
@@ -20,6 +20,7 @@
     "@tauri-apps/plugin-dialog": "^2.4.0",
     "@tauri-apps/plugin-opener": "^2.5.0",
     "lucide-react": "^0.468.0",
+    "opencc-js": "^1.0.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

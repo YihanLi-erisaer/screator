@@ -55,8 +55,10 @@ export interface Config {
   bili_tags: string;
   bili_line: string;
   youtube_max_height: number;
+  youtube_audio_language: "auto" | "original" | "zh" | "en" | "ja" | "ko" | "es" | "fr" | "de" | "hi";
   upload_gap_seconds: number;
   theme: "system" | "dark" | "light";
+  ui_language: "zh-CN" | "zh-HK" | "en";
   hwaccel: string;
   validation_cache: boolean;
   has_deepl_key: boolean;

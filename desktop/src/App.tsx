@@ -33,6 +33,7 @@ import {
   ShieldCheck,
   Sun,
   Upload,
+  UserRound,
   Video,
   X,
   Zap,
@@ -71,6 +72,7 @@ import TranslationPanel from "./TranslationPanel";
 import { StyledSelect } from "./StyledSelect";
 import { StatusBadge } from "./StatusBadge";
 import { ToastViewport, ReportError, useToast } from "./Toast";
+import { setUiLanguage, uiText } from "./i18n";
 
 type Page = "tasks" | "history" | "account" | "settings";
 const PAGE_SIZE = 20;
@@ -149,6 +151,8 @@ export default function App() {
   const [total, setTotal] = useState(0);
   const [allTotal, setAllTotal] = useState(0);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [todaySubmittedByAccount, setTodaySubmittedByAccount] =
+    useState<Record<string, number>>({});
   const [progress, setProgress] = useState<Record<string, Progress>>({});
   const [connected, setConnected] = useState(false);
   const [connectionError, setConnectionError] = useState("");
@@ -192,7 +196,11 @@ export default function App() {
     [showError, showSuccess],
   );
   const loadConfig = useCallback(
-    async () => setConfig(await request("settings.get")),
+    async () => {
+      const value: Config = await request("settings.get");
+      setUiLanguage(value.ui_language ?? "zh-CN");
+      setConfig(value);
+    },
     [],
   );
   const loadTasks = useCallback(async () => {
@@ -221,6 +229,7 @@ export default function App() {
     setTotal(result.total);
     setAllTotal(result.all_total ?? result.total);
     setCounts(result.counts);
+    setTodaySubmittedByAccount(result.today_submitted_by_account || {});
     setQueueActive(result.queue.active);
     setSelected((old) =>
       old
@@ -460,6 +469,9 @@ export default function App() {
       await loadTasks();
       setSelected(null);
     }, "本机投稿记录已删除。");
+  const activeAccounts = accountOptions.filter(
+    (account) => account.lifecycle === "active",
+  );
   const nav = [
     { id: "tasks", icon: ListVideo },
     { id: "history", icon: History },
@@ -610,38 +622,39 @@ export default function App() {
             {(page === "tasks" || page === "history") && (
               <>
                 {page === "tasks" && (
-                  <div className="stats-strip">
-                    {[
-                      {
-                        label: "下载中",
-                        value: counts.downloading,
-                        icon: ArrowDownToLine,
-                      },
-                      {
-                        label: "校验中",
-                        value: counts.validating,
-                        icon: ShieldCheck,
-                      },
-                      {
-                        label: "投稿中",
-                        value: counts.uploading,
-                        icon: Upload,
-                      },
-                      { label: "待预览", value: counts.ready, icon: Video },
-                    ].map((s, index) => (
-                      <div className="stat" key={s.label}>
-                        <span className="stat-icon">
-                          <s.icon size={18} />
-                        </span>
-                        <div>
-                          <span>{s.label}</span>
-                          <strong>
-                            {String(s.value || 0).padStart(2, "0")}
-                          </strong>
+                  <div>
+                    <div className="stats-heading">B 站账号 · 今日提交成功</div>
+                    <div
+                      className="stats-strip"
+                      style={{
+                        gridTemplateColumns: `repeat(${Math.max(activeAccounts.length, 1)}, minmax(0, 1fr))`,
+                      }}
+                    >
+                      {activeAccounts.length === 0 && (
+                        <div className="stat stat-empty">
+                          连接 B 站账号后，这里会显示各账号今日提交成功数。
                         </div>
-                        {index < 2 && <small>共享单路</small>}
-                      </div>
-                    ))}
+                      )}
+                      {activeAccounts.map((account) => (
+                        <div
+                          className="stat"
+                          key={account.account_id}
+                          title={accountLabel(account)}
+                        >
+                          <span className="stat-icon">
+                            <UserRound size={18} />
+                          </span>
+                          <div>
+                            <span>
+                              {account.remark || account.nickname || `UID ${account.uid}`}
+                            </span>
+                            <strong>
+                              {String(todaySubmittedByAccount[account.account_id] || 0).padStart(2, "0")}
+                            </strong>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
                 {config && !config.translation_ready && page === "tasks" && (
@@ -751,9 +764,9 @@ export default function App() {
                             </span>
                             <span>
                               <strong>
-                                {task.title_zh ||
-                                  task.title_orig ||
-                                  "等待读取视频信息"}
+                                {task.title_zh || task.title_orig
+                                  ? <span data-no-localize>{task.title_zh || task.title_orig}</span>
+                                  : "等待读取视频信息"}
                               </strong>
                               <small>
                                 {task.video_id} ·{" "}
@@ -1238,7 +1251,7 @@ function ImportedHistoryDetail({ task, busy, onDelete, close }: {
     <Modal title="导入的投稿记录" close={close} wide>
       <div className="section-body history-detail">
         <p className="help">这是一条只读历史记录，不包含登录凭据或视频素材，也不会加入投稿队列。</p>
-        <h3>{task.title_zh || task.title_orig || task.video_id}</h3>
+        <h3 data-no-localize>{task.title_zh || task.title_orig || task.video_id}</h3>
         <p><Status status={task.status} /> · {task.video_id}</p>
         <p>账号：{task.account_name_snapshot || "原账号"}{task.account_uid_snapshot ? ` · UID ${task.account_uid_snapshot}` : ""}</p>
         <p>创建：{task.created_at || "未知"} · 更新：{task.updated_at || "未知"}</p>
@@ -1248,12 +1261,12 @@ function ImportedHistoryDetail({ task, busy, onDelete, close }: {
             <strong>{platforms[pub.platform]} · {labels[pub.status] || pub.status}</strong>
             {pub.account_label && <p>投稿账号：{pub.account_label}</p>}
             {pub.remote_id && <p>稿件号：{pub.remote_id}</p>}
-            {pub.text && <p>投稿标题：{pub.text}</p>}
-            {pub.error && <p>备注：{pub.error}</p>}
+            {pub.text && <p>投稿标题：<span data-no-localize>{pub.text}</span></p>}
+            {pub.error && <p>备注：<span data-no-localize>{pub.error}</span></p>}
           </div>
         ))}
-        {task.desc_zh && <div><strong>中文简介</strong><pre>{task.desc_zh}</pre></div>}
-        {task.desc_orig && <div><strong>原始简介</strong><pre>{task.desc_orig}</pre></div>}
+        {task.desc_zh && <div><strong>中文简介</strong><pre data-no-localize>{task.desc_zh}</pre></div>}
+        {task.desc_orig && <div><strong>原始简介</strong><pre data-no-localize>{task.desc_orig}</pre></div>}
         {confirmDelete && <div className="confirm-box">
           <strong>确定从本机删除这条导入记录？不会删除平台上的稿件；重新导入原文件可以恢复。</strong>
           <div>
@@ -1360,7 +1373,7 @@ function TaskDetail({
         )}
         <div>
           <Status status={task.status} />
-          <h3>{task.title_zh || task.title_orig || task.video_id}</h3>
+          <h3 data-no-localize>{task.title_zh || task.title_orig || task.video_id}</h3>
           <p>
             {task.uploader || "等待读取作者"} · {task.video_id}
             <br />
@@ -1558,9 +1571,9 @@ function TaskDetail({
       )}
       {tab === "original" && (
         <div className="original-info">
-          <h3>{task.title_orig || "尚未读取"}</h3>
+          <h3>{task.title_orig ? <span data-no-localize>{task.title_orig}</span> : "尚未读取"}</h3>
           <p>{task.url}</p>
-          <pre>{task.desc_orig || "暂无原始简介"}</pre>
+          <pre>{task.desc_orig ? <span data-no-localize>{task.desc_orig}</span> : "暂无原始简介"}</pre>
         </div>
       )}
       {tab === "logs" && (
@@ -1885,6 +1898,7 @@ function Settings({
   const update = (key: keyof Config, value: unknown) =>
     setForm((old) => ({ ...old, [key]: value }));
   const unsaved = (...keys: (keyof Config)[]) => keys.some((key) => form[key] !== config[key]);
+  const supportsAudioLanguage = typeof config.youtube_audio_language === "string";
   const toolsReady = diagnostics &&
     ["ffmpeg", "ffprobe", "biliup"].every((name) => diagnostics.tools.some((tool: any) => tool.name === name && tool.available)) &&
     diagnostics.tools.some((tool: any) => ["deno", "node"].includes(tool.name) && tool.available);
@@ -1931,19 +1945,19 @@ function Settings({
           </label>
           <p className="help">
             更改后只影响新任务；已有素材保持原位。
-            {diagnostics && `当前可用空间 ${bytes(diagnostics.free_bytes)}。`}
+            {diagnostics && <span> {uiText("当前可用空间")} {bytes(diagnostics.free_bytes)}</span>}
           </p>
-          <p className="data-path">任务与设置：{config.data_dir}</p>
+          <p className="data-path">任务与设置：<span data-no-localize>{config.data_dir}</span></p>
         </div>
       </section>
       <section className="settings-card">
         <div className="section-title">
           <div>
             <h2>YouTube 下载</h2>
-            <p>选择新任务下载源视频时使用的最高分辨率。</p>
+            <p>选择新任务下载源视频时使用的最高分辨率和配音音轨。</p>
           </div>
-          <StatusBadge tone={unsaved("youtube_max_height") ? "error" : "success"}>
-            {unsaved("youtube_max_height") ? "待保存" : "已保存"}
+          <StatusBadge tone={unsaved("youtube_max_height", "youtube_audio_language") ? "error" : "success"}>
+            {unsaved("youtube_max_height", "youtube_audio_language") ? "待保存" : "已保存"}
           </StatusBadge>
         </div>
         <div className="section-body">
@@ -1961,7 +1975,31 @@ function Settings({
               ]}
             />
           </div>
-          <p className="help">视频没有所选档位时会选更低的可用画质；不会下载高于上限的格式。已有任务继续使用创建时的设置。</p>
+          {supportsAudioLanguage ? (
+            <div className="field">
+              配音音轨
+              <StyledSelect
+                label="YouTube 下载配音音轨"
+                value={form.youtube_audio_language}
+                onChange={(value) => update("youtube_audio_language", value)}
+                options={[
+                  { value: "auto", label: "自动（YouTube 默认）" },
+                  { value: "original", label: "原声" },
+                  { value: "zh", label: "中文" },
+                  { value: "en", label: "英语" },
+                  { value: "ja", label: "日语" },
+                  { value: "ko", label: "韩语" },
+                  { value: "es", label: "西班牙语" },
+                  { value: "fr", label: "法语" },
+                  { value: "de", label: "德语" },
+                  { value: "hi", label: "印地语" },
+                ]}
+              />
+            </div>
+          ) : (
+            <p className="help">后台尚未加载配音设置。关闭并重新启动桌面程序后即可选择配音。</p>
+          )}
+          <p className="help">分辨率不足时选更低画质；所选配音不存在时优先回退原声，再使用可用音轨。已有任务继续使用创建时的设置。</p>
         </div>
       </section>
       <section className="settings-card">
@@ -2022,14 +2060,30 @@ function Settings({
       <section className="settings-card">
         <div className="section-title">
           <div>
-            <h2>外观与校验</h2>
-            <p>沿用 StarDazz 的简洁界面，也保留可靠的素材检查。</p>
+            <h2>通用设置</h2>
+            <p>选择界面语言与主题，并设置素材校验方式。</p>
           </div>
-          <StatusBadge tone={unsaved("theme", "hwaccel", "validation_cache") ? "error" : "success"}>
-            {unsaved("theme", "hwaccel", "validation_cache") ? "待保存" : "已保存"}
+          <StatusBadge tone={unsaved("ui_language", "theme", "hwaccel", "validation_cache") ? "error" : "success"}>
+            {unsaved("ui_language", "theme", "hwaccel", "validation_cache") ? "待保存" : "已保存"}
           </StatusBadge>
         </div>
         <div className="section-body">
+          <div className="setting-row">
+            <div>
+              <strong>界面语言</strong>
+              <p>保存后切换应用的显示语言。</p>
+            </div>
+            <StyledSelect
+              label="界面语言"
+              value={form.ui_language}
+              onChange={(value) => update("ui_language", value)}
+              options={[
+                { value: "zh-CN", label: "简体中文" },
+                { value: "zh-HK", label: "繁體中文" },
+                { value: "en", label: "English" },
+              ]}
+            />
+          </div>
           <div className="setting-row">
             <div>
               <strong>界面主题</strong>
@@ -2091,8 +2145,10 @@ function Settings({
                 bili_tags,
                 bili_line,
                 youtube_max_height,
+                youtube_audio_language,
                 upload_gap_seconds,
                 theme,
+                ui_language,
                 hwaccel,
                 validation_cache,
               } = form;
@@ -2104,8 +2160,10 @@ function Settings({
                   bili_tags,
                   bili_line,
                   youtube_max_height,
+                  ...(supportsAudioLanguage ? { youtube_audio_language } : {}),
                   upload_gap_seconds,
                   theme,
+                  ui_language,
                   hwaccel,
                   validation_cache,
                 },

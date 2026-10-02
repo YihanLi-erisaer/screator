@@ -143,7 +143,8 @@ def download_video(
 
     opts = _base_opts(settings)
     max_height = getattr(settings, "youtube_max_height", 0)
-    video_format = "bv*+ba/b" if not max_height else f"bv*[height<={max_height}]+ba/b[height<={max_height}]"
+    audio_language = getattr(settings, "youtube_audio_language", "auto")
+    video_format = _video_format(max_height, audio_language)
     opts.update(
         {
             "outtmpl": str(work_dir / "source.%(ext)s"),
@@ -169,6 +170,7 @@ def download_video(
             logger.info("开始下载视频（第 %s/%s 次）", attempt, max_attempts)
             info = _download_with_slot(opts, url)
             _log_selected_format(info)
+            _log_selected_audio(info, audio_language)
             source = _find_source(work_dir)
             if source is None:
                 raise Yt2BiliError("下载完成但未找到视频文件。")
@@ -346,7 +348,7 @@ def _download_audio_only(url: str, work_dir: Path, settings: Settings) -> Path:
     opts.update(
         {
             "outtmpl": str(work_dir / "audio.%(ext)s"),
-            "format": "ba/bestaudio/b",
+            "format": _audio_format(getattr(settings, "youtube_audio_language", "auto")),
             "noplaylist": True,
             "overwrites": True,
             "retries": 10,
@@ -363,7 +365,8 @@ def _download_audio_only(url: str, work_dir: Path, settings: Settings) -> Path:
             return existing
         try:
             logger.info("开始下载音轨（第 %s/%s 次）", attempt, max_attempts)
-            _download_with_slot(opts, url)
+            info = _download_with_slot(opts, url)
+            _log_selected_audio(info, getattr(settings, "youtube_audio_language", "auto"))
             audio = _find_audio(work_dir)
             if audio is None:
                 raise Yt2BiliError("音频下载完成但未找到音轨文件。")
@@ -540,6 +543,44 @@ def _base_opts(settings: Settings) -> dict[str, Any]:
             browser,
         )
     return opts
+
+
+def _video_format(max_height: int, audio_language: str) -> str:
+    video = "bv" if not max_height else f"bv[height<={max_height}]"
+    combined = "b" if not max_height else f"b[height<={max_height}]"
+    fallback = "bv*+ba/b" if not max_height else f"bv*[height<={max_height}]+ba/b[height<={max_height}]"
+    if audio_language == "auto":
+        return fallback
+    original = f"{video}+ba[format_note*=original]/{combined}[format_note*=original]"
+    if audio_language == "original":
+        return f"{original}/{fallback}"
+    preferred = f"{video}+ba[language^={audio_language}]/{combined}[language^={audio_language}]"
+    return f"{preferred}/{original}/{fallback}"
+
+
+def _audio_format(audio_language: str) -> str:
+    fallback = "ba/bestaudio/b"
+    if audio_language == "auto":
+        return fallback
+    original = "ba[format_note*=original]"
+    if audio_language == "original":
+        return f"{original}/{fallback}"
+    return f"ba[language^={audio_language}]/{original}/{fallback}"
+
+
+def _log_selected_audio(info: dict[str, Any] | None, preference: str) -> None:
+    if not isinstance(info, dict):
+        return
+    requested = info.get("requested_formats")
+    items = requested if isinstance(requested, list) else [info]
+    audio = next((item for item in items if isinstance(item, dict) and item.get("acodec") not in (None, "none")), None)
+    if audio is None:
+        return
+    language = str(audio.get("language") or "未知")
+    note = str(audio.get("format_note") or "")
+    logger.info("下载音轨：语言=%s format=%s %s", language, audio.get("format_id"), note)
+    if preference not in ("auto", "original") and not language.lower().startswith(preference.lower()):
+        logger.warning("所选 %s 配音未被选中，已使用 %s 音轨。", preference, language)
 
 
 def _log_selected_format(info: dict[str, Any] | None) -> None:

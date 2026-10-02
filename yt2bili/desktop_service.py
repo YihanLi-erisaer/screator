@@ -14,6 +14,7 @@ import threading
 from collections import deque
 from contextlib import closing
 from dataclasses import asdict
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -452,8 +453,31 @@ class DesktopService:
                  {**{key: value for key, value in asdict(item).items() if key not in ("desc_orig", "desc_zh")},
                   "publications": publications.items(self.store, item.task_id),
                   "run_id": (self.store.get_job(item.task_id) or {}).get("run_id")} for item in page]
+        today = datetime.now().astimezone().date()
+        start = datetime.combine(today, time.min).astimezone(timezone.utc).isoformat()
+        end = datetime.combine(today + timedelta(days=1), time.min).astimezone(timezone.utc).isoformat()
+        # Manual confirmations and older records have no successful upload attempt.
+        with self.store._lock:
+            today_submitted = {
+                row["account_id"]: row["count"] for row in self.store._conn.execute("""
+                    SELECT p.account_id, COUNT(*) AS count
+                    FROM task_publications AS p
+                    JOIN tasks AS t ON t.task_id = p.task_id
+                    LEFT JOIN (
+                        SELECT task_id, MAX(ended_at) AS submitted_at
+                        FROM upload_attempts WHERE outcome = 'submitted'
+                        GROUP BY task_id
+                    ) AS receipt ON receipt.task_id = p.task_id
+                    WHERE p.platform = 'bilibili' AND p.status = 'submitted'
+                      AND p.account_id IS NOT NULL
+                      AND COALESCE(receipt.submitted_at, t.updated_at) >= ?
+                      AND COALESCE(receipt.submitted_at, t.updated_at) < ?
+                    GROUP BY p.account_id
+                """, (start, end))
+            }
         return {"items": items, "total": len(tasks),
                 "counts": {name: sum(t.status == name for t in all_tasks) for name in ("downloading", "validating", "uploading", "ready", "submitted", "failed")},
+                "today_submitted_by_account": today_submitted,
                 "queue": self.scheduler.snapshot(), "all_total": history_total if history else len(all_tasks)}
 
     def get_task(self, task_id):

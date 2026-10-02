@@ -32,8 +32,8 @@ class DesktopSettings:
         self.vault_service = "StarDazz.yt2bili:" + str(paths.root)
         self.translation_upgrade_notice = False
         self.values = dict(work_dir=str(paths.root / "work"), bili_tid=171, bili_tags="转载", acfun_channel_id=0,
-                           youtube_max_height=0,
-                           bili_line="tx", upload_gap_seconds=20, theme="system",
+                           youtube_max_height=0, youtube_audio_language="auto",
+                           bili_line="tx", upload_gap_seconds=20, theme="system", ui_language="zh-CN",
                            hwaccel="auto", validation_cache=True, douyin_broker_url="", **DEFAULTS)
         if self.path.exists():
             try:
@@ -94,8 +94,12 @@ class DesktopSettings:
                 raise Yt2BiliError(f"{name} 必须在 {lo}～{hi} 之间。")
         if type(merged["youtube_max_height"]) is not int or merged["youtube_max_height"] not in (0, 360, 480, 720, 1080, 1440, 2160):
             raise Yt2BiliError("请选择支持的 YouTube 下载分辨率。")
+        if merged["youtube_audio_language"] not in ("auto", "original", "zh", "en", "ja", "ko", "es", "fr", "de", "hi"):
+            raise Yt2BiliError("请选择支持的 YouTube 配音语言。")
         if merged["theme"] not in ("system", "dark", "light") or merged["hwaccel"] not in ("auto", "cpu"):
             raise Yt2BiliError("主题或校验模式无效。")
+        if merged["ui_language"] not in ("zh-CN", "zh-HK", "en"):
+            raise Yt2BiliError("请选择支持的界面语言。")
         if merged["bili_line"] not in ("tx", "bda2", "qn", "ws", "txa"):
             raise Yt2BiliError("请选择支持的上传线路。")
         if not isinstance(merged["bili_tags"], str) or not merged["bili_tags"].strip() or len(merged["bili_tags"]) > 200:
@@ -135,6 +139,7 @@ class DesktopSettings:
                         youtube_cookies=cookie if cookie.is_file() else None, youtube_cookies_from_browser=None,
                         bili_tid=value["bili_tid"], bili_tags=value["bili_tags"], bili_line=value["bili_line"],
                         youtube_max_height=value.get("youtube_max_height", 0),
+                        youtube_audio_language=value.get("youtube_audio_language", "auto"),
                         upload_gap_seconds=value["upload_gap_seconds"], work_dir=Path(value["work_dir"]),
                         data_dir=root / "data", bin_dir=self.paths.resources / "bin",
                         translation_root=root / "translation", **validate_translation(value))

@@ -7,8 +7,10 @@ const config = {
   acfun_channel_id: 90,
   bili_line: "tx",
   youtube_max_height: 0,
+  youtube_audio_language: "auto",
   upload_gap_seconds: 20,
   theme: "dark",
+  ui_language: "zh-CN",
   hwaccel: "auto",
   validation_cache: true,
   has_deepl_key: false,
@@ -195,8 +197,14 @@ export async function request(method: string, params: any): Promise<any> {
     return { queued: true };
   }
 
-  if (method === "settings.get") return { ...config };
+  if (method === "settings.get") {
+    const result: Record<string, unknown> = { ...config };
+    if (new URLSearchParams(location.search).has("legacyAudioSettings")) delete result.youtube_audio_language;
+    return result;
+  }
   if (method === "settings.update") {
+    if (new URLSearchParams(location.search).has("legacyAudioSettings") &&
+        "youtube_audio_language" in params.values) throw new Error("包含不支持的设置项。");
     Object.assign(config, params.values);
     return { ...config };
   }
@@ -278,6 +286,17 @@ export async function request(method: string, params: any): Promise<any> {
         ready: tasks.filter((t) => t.status === "ready").length,
         validating: tasks.filter((t) => t.status === "validating").length,
       },
+      today_submitted_by_account: Object.fromEntries(
+        accounts.map((account) => [
+          account.account_id,
+          tasks.filter(
+            (task) =>
+              task.account_id === account.account_id &&
+              task.status === "submitted" &&
+              new Date(task.updated_at).toDateString() === new Date().toDateString(),
+          ).length,
+        ]),
+      ),
       queue: {
         active: [],
         download: {},
