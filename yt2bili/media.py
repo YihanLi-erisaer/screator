@@ -20,7 +20,7 @@ from yt2bili.tools import find_tool
 
 logger = logging.getLogger(__name__)
 _validated: dict[tuple, dict] = {}
-_VALIDATION_VERSION = 1
+_VALIDATION_VERSION = 2
 
 
 def ffmpeg_tool(name: str) -> str:
@@ -226,10 +226,14 @@ def _decode_track(path: Path, stream: str, expected, acceleration: list[str]) ->
     # Keep their timestamps and input time base so the null muxer does not round
     # distinct frames to the same DTS and report a false decode failure.
     video_timing = ["-fps_mode", "passthrough", "-enc_time_base", "demux"] if stream == "v:0" else []
+    # FFmpeg can silently decode on the CPU when VideoToolbox is unavailable.
+    # Requiring hardware frames makes that attempt fail, so validate_media can
+    # restart a full CPU decode instead of reporting a false hardware success.
+    hardware_frames = ["-vf", "format=videotoolbox_vld"] if stream == "v:0" and "videotoolbox" in acceleration else []
     cmd = [
         ffmpeg_tool("ffmpeg"), "-nostdin", "-hide_banner", "-v", "error", "-xerror",
         "-err_detect", "explode", *acceleration, "-i", str(path), "-map", f"0:{stream}",
-        *video_timing, "-progress", "pipe:1", "-stats_period", "1", "-nostats", "-f", "null", "-",
+        *hardware_frames, *video_timing, "-progress", "pipe:1", "-stats_period", "1", "-nostats", "-f", "null", "-",
     ]
     with tempfile.TemporaryFile() as errors:
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errors, text=True, encoding="utf-8", errors="replace", **process_manager.creation_options())
@@ -314,7 +318,7 @@ def validate_media(
         except InvalidMediaError as exc:
             if not acceleration:
                 raise
-            logger.warning("GPU 校验不可用或失败，自动从头使用 CPU 复核：%s", exc)
+            logger.warning("硬件解码校验不可用或失败，自动从头使用 CPU 复核：%s", exc)
             actual = _decode_track(path, stream, expected, [])
         ends.append(actual)
     if len(ends) == 2 and not duration_looks_complete(ends[0], ends[1]):

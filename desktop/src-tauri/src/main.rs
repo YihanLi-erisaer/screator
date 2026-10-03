@@ -257,10 +257,13 @@ fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Er
 
 fn main() {
     std::panic::set_hook(Box::new(|info| log_shell(&format!("desktop panic: {info}"))));
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+    // A packaged smoke test must run even when the installed app is open.
+    let builder = if smoke_enabled() { tauri::Builder::default() } else {
+        tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
         }))
+    };
+    let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
