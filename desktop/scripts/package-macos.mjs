@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, mkdirSync, existsSync, chmodSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, existsSync, chmodSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -12,7 +12,7 @@ if (!existsSync(python))
 function run(executable, args, cwd = root) {
   const result = spawnSync(executable, args, { cwd, stdio: "inherit" });
   if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status ?? 1);
+  if (result.status !== 0) throw new Error(`${executable} exited with status ${result.status ?? "unknown"}`);
 }
 function output(executable, args) {
   const result = spawnSync(executable, args, { cwd: root, encoding: "utf8" });
@@ -38,6 +38,8 @@ for (const name of ["ffmpeg", "ffprobe", "biliup"]) {
   const source = path.join(root, "bin", name);
   if (!existsSync(source)) throw new Error(`Missing arm64 tool: ${source}`);
   checkNativeExecutable(name, source);
+  if (name === "ffmpeg" && !output(source, ["-hide_banner", "-hwaccels"]).split(/\r?\n/).includes("videotoolbox"))
+    throw new Error("Bundled FFmpeg must support VideoToolbox hardware decoding.");
   copyFileSync(source, path.join(tools, name));
   chmodSync(path.join(tools, name), 0o755);
 }
@@ -56,23 +58,27 @@ const app = path.join(built, "macos/yt2bili.app");
 if (!existsSync(app)) throw new Error(`Missing macOS application: ${app}`);
 const destination = path.join(root, "dist/macos");
 mkdirSync(destination, { recursive: true });
-const packagedApp = path.join(destination, "yt2bili.app");
-rmSync(packagedApp, { recursive: true, force: true });
-cpSync(app, packagedApp, { recursive: true, force: true });
-run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", packagedApp]);
-run("/usr/bin/codesign", ["--verify", "--deep", "--strict", packagedApp]);
-run(python, ["scripts/smoke_native.py", "--release", path.join(packagedApp, "Contents/MacOS/yt2bili-desktop")]);
+rmSync(path.join(destination, "yt2bili.app"), { recursive: true, force: true });
 const version = JSON.parse(readFileSync(path.join(root, "desktop/package.json"), "utf8")).version;
 const dmg = path.join(destination, `yt2bili_${version}_aarch64.dmg`);
 const dmgStage = path.join(root, "packaging/staging/macos-dmg");
 rmSync(dmgStage, { recursive: true, force: true });
 mkdirSync(dmgStage, { recursive: true });
 try {
-  cpSync(packagedApp, path.join(dmgStage, "yt2bili.app"), { recursive: true });
+  const packagedApp = path.join(dmgStage, "yt2bili.app");
+  cpSync(app, packagedApp, { recursive: true, force: true });
+  run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", packagedApp]);
+  run("/usr/bin/codesign", ["--verify", "--deep", "--strict", packagedApp]);
+  run(python, ["scripts/smoke_native.py", "--release", path.join(packagedApp, "Contents/MacOS/yt2bili-desktop")]);
   symlinkSync("/Applications", path.join(dmgStage, "Applications"));
   run("/usr/bin/hdiutil", ["create", "-ov", "-format", "UDZO", "-volname", "yt2bili", "-srcfolder", dmgStage, dmg]);
   run("/usr/bin/hdiutil", ["verify", dmg]);
 } finally {
   rmSync(dmgStage, { recursive: true, force: true });
+  rmSync(app, { recursive: true, force: true });
+  for (const name of readdirSync(path.dirname(app))) {
+    if (/^rw\.\d+\.yt2bili_.*\.dmg$/.test(name))
+      rmSync(path.join(path.dirname(app), name), { force: true });
+  }
 }
-console.log(`macOS arm64 application and DMG: ${destination}`);
+console.log(`macOS arm64 DMG: ${dmg}`);
