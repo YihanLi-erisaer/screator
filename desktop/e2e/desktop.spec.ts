@@ -45,7 +45,7 @@ test("local-first translation settings and fallback can be changed", async ({
   await page.getByRole("combobox", { name: "首选翻译服务" }).click();
   await page.getByRole("option", { name: "DeepL" }).click();
   await expect(page.getByRole("combobox", { name: "首选翻译服务" })).toContainText("DeepL");
-  await page.getByLabel("首选失败时使用另一服务").uncheck();
+  await page.getByLabel("首选失败时使用另一服务").click();
   await expect(page.getByLabel("首选失败时使用另一服务")).not.toBeChecked();
   await expect(page.getByText(/不自动切换/)).toBeVisible();
   await expect(page.getByLabel("大模型推理超时（秒）")).toHaveValue("300");
