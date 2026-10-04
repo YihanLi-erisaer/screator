@@ -437,12 +437,11 @@ test("select popups remain visible beyond clipped cards and inside dialogs", asy
   });
   expect(visibleBeyondCard).toBe(true);
   await select.evaluate((element) => element.closest("main")!.scrollBy(0, -30));
-  const alignedAfterScroll = await menu.evaluate((element) => {
+  await expect.poll(() => menu.evaluate((element) => {
     const button = element.parentElement!.querySelector(".styled-select-trigger")!.getBoundingClientRect();
     const list = element.getBoundingClientRect();
     return Math.abs(list.top - button.bottom - 5) < 2 || Math.abs(list.bottom - button.top + 5) < 2;
-  });
-  expect(alignedAfterScroll).toBe(true);
+  })).toBe(true);
   await menu.getByRole("option", { name: "测试分区 12（311）" }).click();
   await expect(select).toContainText("测试分区 12");
 
