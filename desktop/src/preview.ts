@@ -271,6 +271,20 @@ export async function request(method: string, params: any): Promise<any> {
       free_bytes: 128 * 1024 ** 3,
     };
   if (method === "tasks.list") {
+    const slowTasks = new URLSearchParams(location.search).get("slowTasks");
+    if (!params.history && slowTasks !== null) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(2000, Number(slowTasks) || 500)));
+    }
+    if (params.history && new URLSearchParams(location.search).has("slowHistory")) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const today = new Date();
+    const localDate = (day: Date) =>
+      `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    const trendDates = Array.from({ length: 30 }, (_, index) => {
+      const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29 + index);
+      return localDate(day);
+    });
     const items = tasks.filter(
       (t) =>
         (!params.account_id || t.account_id === params.account_id) &&
@@ -281,7 +295,9 @@ export async function request(method: string, params: any): Promise<any> {
     return {
       items: items.slice(params.offset ?? 0, (params.offset ?? 0) + (params.limit ?? 20)),
       total: items.length,
-      all_total: tasks.length,
+      all_total: params.history
+        ? tasks.filter((t) => ["submitted", "submission_unknown", "partial_success", "completed_with_abandon"].includes(t.status)).length
+        : tasks.length,
       counts: {
         ready: tasks.filter((t) => t.status === "ready").length,
         validating: tasks.filter((t) => t.status === "validating").length,
@@ -297,6 +313,17 @@ export async function request(method: string, params: any): Promise<any> {
           ).length,
         ]),
       ),
+      submission_trend: params.history ? {
+        dates: trendDates,
+        by_account: Object.fromEntries(accounts.map((account) => [
+          account.account_id,
+          trendDates.map((date) => tasks.filter((task) =>
+            !task.imported_history && task.account_id === account.account_id &&
+            task.status === "submitted" &&
+            localDate(new Date(task.updated_at)) === date,
+          ).length),
+        ])),
+      } : null,
       queue: {
         active: [],
         download: {},
@@ -327,6 +354,18 @@ export async function request(method: string, params: any): Promise<any> {
       throw new Error("投稿记录已变化，请刷新后重试。");
     tasks.splice(index, 1);
     return { deleted: true };
+  }
+  if (method === "history.delete_all") {
+    if (params.confirmed !== true) throw new Error("请先在弹窗中确认删除全部投稿记录。");
+    const historyStatuses = new Set(["submitted", "submission_unknown", "partial_success", "completed_with_abandon"]);
+    let deleted = 0;
+    for (let index = tasks.length - 1; index >= 0; index--) {
+      if (historyStatuses.has(tasks[index].status)) {
+        tasks.splice(index, 1);
+        deleted++;
+      }
+    }
+    return { deleted };
   }
   if (method === "tasks.cover") return { image: null };
   if (method === "logs.tail") return { items: [] };

@@ -139,6 +139,14 @@ def _receipts(record):
     return keys
 
 
+def _unresolved_identity(record):
+    """Match unresolved submissions only when neither copy has a platform receipt."""
+    if _receipts(record) or not record["video_id"] or not record["account_uid_snapshot"]:
+        return None
+    return (record["video_id"], record["account_uid_snapshot"],
+            tuple(sorted(p["platform"] for p in record["publications"])))
+
+
 def import_file(store, path):
     source = Path(path)
     if source.suffix.lower() != ".json" or not source.is_file() or source.stat().st_size > MAX_BYTES:
@@ -153,9 +161,6 @@ def import_file(store, path):
     if not isinstance(rows, list) or len(rows) > MAX_RECORDS:
         raise Yt2BiliError("投稿记录数量无效。")
     records = [_validated_record(row) for row in rows]
-    identities = [row["task_id"] for row in records]
-    if len(identities) != len(set(identities)):
-        raise Yt2BiliError("文件中存在重复的任务身份。")
     imported = skipped = 0
     with store.transaction() as db:
         existing_ids = {row[0] for row in db.execute("SELECT task_id FROM tasks")}
@@ -167,16 +172,66 @@ def import_file(store, path):
             receipts.add(("bilibili", row[0]))
         for row in db.execute("SELECT payload FROM imported_publishing_history"):
             receipts.update(_receipts(json.loads(row[0])))
+        unresolved = {_unresolved_identity(_local_record(store, task))
+                      for task in store.list_all() if task.status in HISTORY_STATUSES}
+        unresolved.update(_unresolved_identity(json.loads(row[0])) for row in db.execute(
+            "SELECT payload FROM imported_publishing_history"))
+        unresolved.discard(None)
         for record in records:
-            if record["task_id"] in existing_ids or receipts & _receipts(record):
+            identity = _unresolved_identity(record)
+            if (record["task_id"] in existing_ids or receipts & _receipts(record)
+                    or identity is not None and identity in unresolved):
                 skipped += 1
                 continue
             db.execute("INSERT INTO imported_publishing_history VALUES(?,?,?)",
                        (record["task_id"], json.dumps(record, ensure_ascii=False), _now()))
             existing_ids.add(record["task_id"])
             receipts.update(_receipts(record))
+            if identity is not None:
+                unresolved.add(identity)
             imported += 1
     return {"imported": imported, "skipped": skipped, "total": len(records)}
+
+
+def _delete_local_rows(db, task_id, tables):
+    if "acfun_attempts" in tables:
+        db.execute("DELETE FROM acfun_attempts WHERE publication_id IN (SELECT publication_id FROM task_publications WHERE task_id=?)", (task_id,))
+    db.execute("DELETE FROM task_publications WHERE task_id=?", (task_id,))
+    for table in ("desktop_jobs", "task_translation", "translation_attempts", "upload_attempts", "legacy_task_map"):
+        if table in tables:
+            db.execute(f"DELETE FROM {table} WHERE task_id=?", (task_id,))
+    if "import_conflicts" in tables:
+        db.execute("DELETE FROM import_conflicts WHERE existing_task_id=?", (task_id,))
+    db.execute("DELETE FROM tasks WHERE task_id=?", (task_id,))
+
+
+def delete_all_records(store):
+    """Atomically remove the history list while leaving task assets and unfinished tasks alone."""
+    with store.transaction() as db:
+        statuses = tuple(sorted(HISTORY_STATUSES))
+        placeholders = ",".join("?" for _ in statuses)
+        task_ids = [row[0] for row in db.execute(
+            f"SELECT task_id FROM tasks WHERE status IN ({placeholders})", statuses)]
+        if task_ids:
+            active_jobs = db.execute(
+                "SELECT j.payload FROM desktop_jobs AS j JOIN tasks AS t ON t.task_id=j.task_id "
+                f"WHERE t.status IN ({placeholders})", statuses).fetchall()
+            if any(json.loads(row["payload"]).get("execution_state") in {"queued", "running", "waiting"}
+                   for row in active_jobs):
+                raise Yt2BiliError("仍有投稿记录处于队列中，不能删除全部记录。")
+            active_publications = db.execute(
+                "SELECT 1 FROM task_publications AS p JOIN tasks AS t ON t.task_id=p.task_id "
+                f"WHERE t.status IN ({placeholders}) "
+                "AND p.status IN ('queued','waiting','uploading_media','creating') LIMIT 1", statuses).fetchone()
+            if active_publications:
+                raise Yt2BiliError("仍有平台投稿正在等待或执行，不能删除全部记录。")
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for task_id in task_ids:
+            _delete_local_rows(db, task_id, tables)
+        imported = db.execute("DELETE FROM imported_publishing_history").rowcount
+        if db.execute("PRAGMA foreign_key_check").fetchone():
+            raise Yt2BiliError("投稿记录引用检查失败，删除已回滚。")
+    return {"deleted": len(task_ids) + imported, "local": len(task_ids), "imported": imported}
 
 
 def delete_record(store, task_id, expected_revision):
@@ -213,15 +268,7 @@ def delete_record(store, task_id, expected_revision):
                 if other.task_id != task_id and other.work_dir and Path(other.work_dir).resolve() == resolved:
                     raise Yt2BiliError("素材目录还被其他任务使用，不能删除该记录。")
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        if "acfun_attempts" in tables:
-            db.execute("DELETE FROM acfun_attempts WHERE publication_id IN (SELECT publication_id FROM task_publications WHERE task_id=?)", (task_id,))
-        db.execute("DELETE FROM task_publications WHERE task_id=?", (task_id,))
-        for table in ("desktop_jobs", "task_translation", "translation_attempts", "upload_attempts", "legacy_task_map"):
-            if table in tables:
-                db.execute(f"DELETE FROM {table} WHERE task_id=?", (task_id,))
-        if "import_conflicts" in tables:
-            db.execute("DELETE FROM import_conflicts WHERE existing_task_id=?", (task_id,))
-        db.execute("DELETE FROM tasks WHERE task_id=?", (task_id,))
+        _delete_local_rows(db, task_id, tables)
         if db.execute("PRAGMA foreign_key_check").fetchone():
             raise Yt2BiliError("投稿记录引用检查失败，删除已回滚。")
         assets_deleted = bool(asset_dir and asset_dir.exists())

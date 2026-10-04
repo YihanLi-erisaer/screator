@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -32,6 +33,7 @@ import {
   Settings2,
   ShieldCheck,
   Sun,
+  Trash2,
   Upload,
   UserRound,
   Video,
@@ -51,6 +53,7 @@ import {
   onClose,
   closeApp,
   forceCloseApp,
+  setWindowTheme,
 } from "./bridge";
 import {
   active,
@@ -71,6 +74,7 @@ import { accountLabel, type BiliAccount } from "./types";
 import TranslationPanel from "./TranslationPanel";
 import { StyledSelect } from "./StyledSelect";
 import { StatusBadge } from "./StatusBadge";
+import { SubmissionTrend, type SubmissionTrendData } from "./SubmissionTrend";
 import { ToastViewport, ReportError, useToast } from "./Toast";
 import { setUiLanguage, uiText } from "./i18n";
 
@@ -142,22 +146,61 @@ function Status({ status }: { status: string }) {
   );
 }
 
+function ResizingList({ children }: { children: ReactNode }) {
+  const content = useRef<HTMLDivElement>(null);
+  const frame = useRef<number | null>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  const scheduleHeight = useCallback(() => {
+    if (!content.current) return;
+    const next = content.current.getBoundingClientRect().height;
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => {
+      setHeight((current) => current === null || Math.abs(current - next) > 1 ? next : current);
+      frame.current = null;
+    });
+  }, []);
+  useLayoutEffect(() => {
+    if (height === null && content.current) {
+      setHeight(content.current.getBoundingClientRect().height);
+    } else {
+      scheduleHeight();
+    }
+  });
+  useEffect(() => {
+    if (!content.current) return;
+    const observer = new ResizeObserver(scheduleHeight);
+    observer.observe(content.current);
+    return () => {
+      observer.disconnect();
+      if (frame.current !== null) cancelAnimationFrame(frame.current);
+    };
+  }, [scheduleHeight]);
+  return (
+    <div className="list-height-slot" style={{ height: height ?? undefined }}>
+      <div ref={content}>{children}</div>
+    </div>
+  );
+}
+
 export default function App() {
   const { showError, showSuccess } = useToast();
   const [page, setPage] = useState<Page>("tasks");
   const [config, setConfig] = useState<Config | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [loadedListKey, setLoadedListKey] = useState("");
   const [total, setTotal] = useState(0);
   const [allTotal, setAllTotal] = useState(0);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [todaySubmittedByAccount, setTodaySubmittedByAccount] =
     useState<Record<string, number>>({});
+  const [submissionTrend, setSubmissionTrend] = useState<SubmissionTrendData | null>(null);
   const [progress, setProgress] = useState<Record<string, Progress>>({});
   const [connected, setConnected] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [newTask, setNewTask] = useState(false);
+  const [confirmDeleteAllHistory, setConfirmDeleteAllHistory] = useState(false);
   const [setup, setSetup] = useState(false);
   const [selected, setSelected] = useState<Task | null>(null);
   const [query, setQuery] = useState("");
@@ -175,6 +218,11 @@ export default function App() {
   const [shutdownStarted, setShutdownStarted] = useState(false);
   const [shutdownStatus, setShutdownStatus] = useState<ShutdownStatus | null>(null);
   const taskRequest = useRef(0);
+  const listKey = JSON.stringify([page, accountFilter, query, filter, offset]);
+  const taskRowsByKey = useRef(new Map<string, number>());
+  const listLoading = (page === "tasks" || page === "history") && loadedListKey !== listKey;
+  const historyLoading = page === "history" && listLoading;
+  const taskOverviewLoading = page === "tasks" && !loadedListKey.startsWith('["tasks",');
   const latestTasks = useRef<Record<string, Task>>({});
   const [queueActive, setQueueActive] = useState<any[]>([]);
   const action = useCallback(
@@ -220,6 +268,7 @@ export default function App() {
       return value;
     });
     setTasks(result.items);
+    if (page === "tasks") taskRowsByKey.current.set(listKey, result.items.length);
     setQueue((old: any) =>
       !old || (result.queue.queue_revision || 0) >= (old.queue_revision || 0)
         ? result.queue
@@ -229,7 +278,9 @@ export default function App() {
     setAllTotal(result.all_total ?? result.total);
     setCounts(result.counts);
     setTodaySubmittedByAccount(result.today_submitted_by_account || {});
+    if (page === "history") setSubmissionTrend(result.submission_trend || null);
     setQueueActive(result.queue.active);
+    setLoadedListKey(listKey);
     setSelected((old) =>
       old
         ? {
@@ -238,7 +289,7 @@ export default function App() {
           }
         : null,
     );
-  }, [query, filter, offset, page, accountFilter]);
+  }, [query, filter, offset, page, accountFilter, listKey]);
   const refreshAccount = useCallback(async () => {
     setAuth(await request("auth.status"));
     setAccountOptions((await request("accounts.list")).items);
@@ -250,11 +301,11 @@ export default function App() {
       .then(async (result) => {
         if (result.protocol_version !== 2)
           throw new Error("桌面与后台协议版本不匹配。");
+        await Promise.all([loadConfig(), refreshAccount()]);
         if (alive) {
           setConnected(true);
           setConnectionError("");
         }
-        await Promise.all([loadConfig(), refreshAccount()]);
         request("system.diagnostics")
           .then((value) => {
             if (alive) setDiagnostics(value);
@@ -385,6 +436,9 @@ export default function App() {
 
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
+    void setWindowTheme(config?.theme ?? "system").catch((error) =>
+      console.error("Failed to update window theme", error),
+    );
     const apply = () => {
       document.documentElement.dataset.theme =
         config?.theme === "system" || !config
@@ -439,6 +493,7 @@ export default function App() {
 
   const navigate = (next: Page) => {
     setPage(next);
+    if (next !== page) setLoadedListKey("");
     setSelected(null);
     setOffset(0);
     setFilter("");
@@ -615,6 +670,13 @@ export default function App() {
                   >
                     <ArrowDownToLine size={16} /> 导出投稿记录
                   </button>
+                  <button
+                    className="secondary danger"
+                    disabled={!connected || busy || historyLoading || allTotal === 0}
+                    onClick={() => setConfirmDeleteAllHistory(true)}
+                  >
+                    <Trash2 size={16} /> 删除所有投稿记录
+                  </button>
                 </div>
               )}
             </div>
@@ -629,12 +691,20 @@ export default function App() {
                         gridTemplateColumns: `repeat(${Math.max(activeAccounts.length, 1)}, minmax(0, 1fr))`,
                       }}
                     >
-                      {activeAccounts.length === 0 && (
+                      {taskOverviewLoading ? Array.from({ length: Math.max(activeAccounts.length, 1) }, (_, index) => (
+                        <div className="stat stat-skeleton" key={index} aria-hidden="true">
+                          <span className="stat-icon skeleton-block" />
+                          <div>
+                            <span className="skeleton-block skeleton-stat-label" />
+                            <strong className="skeleton-block skeleton-stat-value" />
+                          </div>
+                        </div>
+                      )) : activeAccounts.length === 0 && (
                         <div className="stat stat-empty">
                           连接 B 站账号后，这里会显示各账号今日提交成功数。
                         </div>
                       )}
-                      {activeAccounts.map((account) => (
+                      {!taskOverviewLoading && activeAccounts.map((account) => (
                         <div
                           className="stat"
                           key={account.account_id}
@@ -676,7 +746,37 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                <QueueOverview queue={queue} accounts={auth.accounts || []} />
+                {page === "history"
+                  ? historyLoading
+                    ? <section className="submission-trend history-trend-skeleton" aria-label="正在加载投稿记录" role="status">
+                        <div className="submission-trend-heading" aria-hidden="true">
+                          <div className="submission-trend-identity">
+                            <span className="skeleton-block skeleton-trend-icon" />
+                            <span className="skeleton-trend-text">
+                              <span className="skeleton-block skeleton-trend-heading" />
+                              <span className="skeleton-block skeleton-trend-caption" />
+                            </span>
+                          </div>
+                          <span className="skeleton-block skeleton-trend-total" />
+                        </div>
+                        <div className="submission-trend-body" aria-hidden="true">
+                          <div className="submission-trend-chart skeleton-block skeleton-trend-chart" />
+                        </div>
+                        <div className="submission-trend-legend" aria-hidden="true">
+                          {activeAccounts.map((account) => <span className="skeleton-block skeleton-trend-legend" key={account.account_id} />)}
+                        </div>
+                      </section>
+                    : <SubmissionTrend trend={submissionTrend} accounts={accountOptions} />
+                  : taskOverviewLoading
+                    ? <div className="queue-overview queue-overview-skeleton" role="status" aria-label="正在加载任务">
+                        {Array.from({ length: 5 + activeAccounts.length }, (_, index) => (
+                          <div className="queue-card" key={index} aria-hidden="true">
+                            <strong className="skeleton-block skeleton-queue-title" />
+                            <small className="skeleton-block skeleton-queue-detail" />
+                          </div>
+                        ))}
+                      </div>
+                    : <QueueOverview queue={queue} accounts={auth.accounts || []} />}
                 <div className="field account-filter">
                   按账号筛选
                   <StyledSelect
@@ -699,7 +799,7 @@ export default function App() {
                           setOffset(0);
                         }}
                       >
-                        {page === "history" ? "全部记录" : "全部任务"} <span>{allTotal}</span>
+                        {page === "history" ? "全部记录" : "全部任务"} <span>{listLoading ? "…" : allTotal}</span>
                       </button>
                       {(page === "history"
                         ? [
@@ -741,7 +841,31 @@ export default function App() {
                     <span>最近更新</span>
                     <span />
                   </div>
-                  {tasks.length ? (
+                  <ResizingList key={page}>
+                  {listLoading && page === "tasks" && taskRowsByKey.current.get(listKey) === 0 ? (
+                    <div className="empty-state empty-state-skeleton" role="status" aria-label="正在加载任务">
+                      <span className="skeleton-block skeleton-empty-art" aria-hidden="true" />
+                      <span className="skeleton-block skeleton-empty-heading" aria-hidden="true" />
+                      <span className="skeleton-block skeleton-empty-copy" aria-hidden="true" />
+                    </div>
+                  ) : listLoading ? (
+                    <div className={`task-rows task-rows-skeleton ${page}-rows-skeleton`} role="status" aria-label={page === "history" ? "正在加载投稿记录" : "正在加载任务"}>
+                      {Array.from({ length: page === "tasks" ? taskRowsByKey.current.get(listKey) ?? 3 : 5 }, (_, index) => (
+                        <div className="task-row" key={index} aria-hidden="true">
+                          <span className="task-title">
+                            <span className="skeleton-block skeleton-video" />
+                            <span className="skeleton-title-lines">
+                              <strong className="skeleton-block skeleton-title-line" />
+                              <small className="skeleton-block skeleton-subtitle-line" />
+                            </span>
+                          </span>
+                          <span className="skeleton-block skeleton-status" />
+                          <time className="skeleton-block skeleton-time" />
+                          <span />
+                        </div>
+                      ))}
+                    </div>
+                  ) : tasks.length ? (
                     <div className="task-rows">
                       {tasks.map((task) => (
                         <button
@@ -853,6 +977,7 @@ export default function App() {
                       </div>
                     </div>
                   )}
+                  </ResizingList>
                   <div className="panel-footer">
                     <span>
                       {page === "tasks"
@@ -860,11 +985,11 @@ export default function App() {
                         : "已提交不代表通过平台审核"}
                     </span>
                     <div>
-                      <span>{total} 条记录</span>
+                      <span>{listLoading ? "…" : `${total} 条记录`}</span>
                       <button
                         aria-label="上一页"
                         className="icon-button"
-                        disabled={!offset}
+                        disabled={listLoading || !offset}
                         onClick={() => setOffset((v) => Math.max(0, v - PAGE_SIZE))}
                       >
                         <ChevronLeft size={15} />
@@ -872,7 +997,7 @@ export default function App() {
                       <button
                         aria-label="下一页"
                         className="icon-button"
-                        disabled={offset + PAGE_SIZE >= total}
+                        disabled={listLoading || offset + PAGE_SIZE >= total}
                         onClick={() => setOffset((v) => v + PAGE_SIZE)}
                       >
                         <ChevronRight size={15} />
@@ -945,6 +1070,24 @@ export default function App() {
               setDiagnostics={setDiagnostics}
               done={() => setSetup(false)}
             />
+          </Modal>
+        )}
+        {confirmDeleteAllHistory && (
+          <Modal title="删除所有投稿记录" close={() => { if (!busy) setConfirmDeleteAllHistory(false); }}>
+            <p className="modal-copy">
+              确定删除本机全部投稿记录？包括已提交、待核对和导入的记录。平台上的稿件、本机素材及未完成的任务不会删除；记录删除后只能从备份或导出的文件恢复。
+            </p>
+            <div className="modal-actions">
+              <button className="secondary" disabled={busy} onClick={() => setConfirmDeleteAllHistory(false)}>取消</button>
+              <button className="secondary danger" disabled={busy} onClick={() => void action(async () => {
+                await request("history.delete_all", { confirmed: true });
+                setConfirmDeleteAllHistory(false);
+                latestTasks.current = {};
+                setOffset(0);
+                await loadTasks();
+                showSuccess("投稿记录已全部删除。");
+              })}>确认删除所有投稿记录</button>
+            </div>
           </Modal>
         )}
         {newTask && (

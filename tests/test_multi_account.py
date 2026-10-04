@@ -57,6 +57,8 @@ class MultiAccountTests(unittest.TestCase):
         today = datetime.now().astimezone().date()
         today_at = datetime.combine(today, time(12)).astimezone(timezone.utc).isoformat()
         yesterday_at = datetime.combine(today - timedelta(days=1), time(12)).astimezone(timezone.utc).isoformat()
+        oldest_at = datetime.combine(today - timedelta(days=29), time(12)).astimezone(timezone.utc).isoformat()
+        outside_at = datetime.combine(today - timedelta(days=30), time(12)).astimezone(timezone.utc).isoformat()
 
         def record(number, account, status, completed_at=None, task_updated_at=None):
             task = Task(video_id=f"abcdefgh{number:03d}", url=f"https://youtu.be/abcdefgh{number:03d}",
@@ -82,10 +84,20 @@ class MultiAccountTests(unittest.TestCase):
         record(3, self.account, "submission_unknown", task_updated_at=today_at)
         record(4, other, "submitted", yesterday_at, today_at)
         record(5, other, "submitted", task_updated_at=today_at)  # manually confirmed result
+        record(6, other, "submitted", oldest_at)
+        record(7, self.account, "submitted", outside_at)
 
         counts = self.service.list_tasks(account_id=other["account_id"], search="no matches")["today_submitted_by_account"]
         self.assertEqual(counts[self.account["account_id"]], 2)
         self.assertEqual(counts[other["account_id"]], 1)
+        trend = self.service.list_tasks(history=True, account_id=other["account_id"], search="no matches")["submission_trend"]
+        self.assertEqual(len(trend["dates"]), 30)
+        self.assertEqual(trend["dates"][0], (today - timedelta(days=29)).isoformat())
+        self.assertEqual(trend["dates"][-1], today.isoformat())
+        self.assertEqual(trend["by_account"][self.account["account_id"]][-1], 2)
+        self.assertEqual(sum(trend["by_account"][self.account["account_id"]]), 2)
+        self.assertEqual(trend["by_account"][other["account_id"]][0], 1)
+        self.assertEqual(trend["by_account"][other["account_id"]][-2:], [1, 1])
 
     def test_capacity_archival_restore_and_database_constraints(self):
         accounts = [self.account] + [self.add_account(i) for i in range(124, 128)]

@@ -684,6 +684,31 @@ kbd {
 .task-row > svg {
   color: var(--faint);
 }
+.skeleton-block {
+  display: block;
+  border-radius: 6px;
+  background-color: var(--subtle);
+  background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--border) 70%, var(--panel)), transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: skeleton-shimmer 1.6s linear infinite;
+}
+.task-rows-skeleton .task-row { pointer-events: none; }
+.task-rows-skeleton .task-row:hover { background: transparent; }
+.list-height-slot { overflow: hidden; transition: height 180ms ease-out; }
+.skeleton-video { width: 47px; height: 34px; flex: none; }
+.skeleton-title-lines { width: min(260px, 100%); }
+.skeleton-title-line { width: 85%; height: 16px; }
+.skeleton-subtitle-line { width: 60%; height: 14px; }
+.skeleton-status { width: 68px; height: 22px; }
+.skeleton-time { width: 85px; height: 12px; }
+.skeleton-empty-art { width: 112px; height: 92px; margin-bottom: 16px; border-radius: 16px; }
+.skeleton-empty-heading { width: 180px; height: 19px; }
+.skeleton-empty-copy { width: min(300px, 80%); height: 14px; margin-top: 10px; }
+@keyframes skeleton-shimmer {
+  from { background-position-x: -100%; }
+  to { background-position-x: 200%; }
+}
 .status {
   display: inline-flex;
   gap: 6px;
@@ -1637,6 +1662,130 @@ pre {
 .queue-card { border:1px solid var(--border); border-radius:10px; padding:12px; min-width:0; }
 .queue-card strong,.queue-card small { display:block; overflow-wrap:anywhere; }
 .queue-card small { margin-top:6px; opacity:.7; }
+.stat-skeleton > div { flex: 1; }
+.skeleton-stat-label { width: min(105px, 80%); height: 14px; }
+.skeleton-stat-value { width: 32px; height: 28px; }
+.skeleton-queue-title { width: 70px; height: 19px; }
+.skeleton-queue-detail { width: 120px; max-width: 85%; height: 15px; }
+.submission-trend {
+  min-width: 0;
+  margin: 16px 0 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.submission-trend-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 19px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.submission-trend-identity { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.submission-trend-icon { color: var(--blue); }
+.submission-trend-identity .eyebrow { margin: 0 0 5px; }
+.submission-trend-heading h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.submission-trend-heading p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.submission-trend-summary {
+  display: grid;
+  justify-items: end;
+  flex: none;
+  padding-left: 23px;
+  border-left: 1px solid var(--border);
+}
+.submission-trend-summary > span { color: var(--muted); font-size: 11px; }
+.submission-trend-summary strong { margin-top: 2px; font-size: 25px; font-weight: 600; letter-spacing: -1px; line-height: 1.2; }
+.submission-trend-summary strong small { color: var(--muted); font-size: 11px; font-weight: 400; letter-spacing: 0; }
+.submission-trend-summary time { color: var(--faint); font-size: 10px; }
+.submission-trend-body { padding: 18px 24px 16px; }
+.submission-trend-chart {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--subtle);
+}
+.submission-trend-chart svg { display: block; width: 100%; height: 250px; }
+.submission-trend-chart svg:focus-visible { outline: 2px solid var(--blue); outline-offset: -3px; border-radius: 10px; }
+.trend-grid { stroke: var(--border); stroke-dasharray: 3 6; }
+.trend-axis { fill: var(--muted); font-size: 11px; font-weight: 500; }
+.trend-line { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .16)); }
+.trend-end-point { stroke: var(--subtle); stroke-width: 2; }
+.trend-crosshair { stroke: var(--faint); stroke-width: 1; stroke-dasharray: 3 4; }
+.trend-focus-point { stroke: var(--panel); stroke-width: 2.5; }
+.trend-tooltip {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  transform: translateX(-50%);
+  width: 204px;
+  max-width: calc(100% - 16px);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .18);
+  pointer-events: none;
+  font-size: 11px;
+}
+.trend-tooltip > strong { display: block; margin-bottom: 7px; font-size: 11px; }
+.trend-tooltip > div { display: flex; align-items: center; gap: 7px; margin-top: 5px; }
+.trend-tooltip i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.trend-tooltip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.trend-tooltip b { margin-left: auto; font-weight: 600; }
+.submission-trend-empty {
+  position: absolute;
+  top: 48%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+.submission-trend-unavailable { margin: 0; padding: 28px 24px; color: var(--muted); font-size: 12px; }
+.submission-trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 24px 18px;
+}
+.submission-trend-legend > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 11px;
+}
+.submission-trend-legend i { width: 16px; height: 3px; border-radius: 3px; flex: none; }
+.submission-trend-legend span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.submission-trend-legend strong { padding-left: 4px; color: var(--muted); white-space: nowrap; font-weight: 500; }
+.history-trend-skeleton .submission-trend-heading { min-height: 100px; }
+.skeleton-trend-icon { width: 36px; height: 36px; flex: none; }
+.skeleton-trend-text { display: flex; flex-direction: column; gap: 7px; }
+.skeleton-trend-heading { width: 110px; height: 15px; }
+.skeleton-trend-caption { width: min(250px, 45vw); height: 11px; }
+.skeleton-trend-total { width: 55px; height: 26px; }
+.history-trend-skeleton .skeleton-trend-chart { width: 100%; height: 252px; }
+.skeleton-trend-legend { width: 140px; height: 31px; }
+.submission-trend-legend small { font-size: inherit; }
+@media (max-width: 700px) {
+  .submission-trend-heading { align-items: flex-start; padding: 16px; gap: 12px; }
+  .submission-trend-summary { padding-left: 12px; }
+  .submission-trend-body { padding: 12px 12px 14px; }
+  .submission-trend-legend { padding: 0 12px 14px; }
+  .submission-trend-empty { white-space: normal; width: 75%; justify-content: center; }
+}
 .account-row { border-bottom:1px solid var(--border); padding:16px 0; margin-bottom:12px; }
 .account-row-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .account-row-heading strong { min-width:0; overflow-wrap:anywhere; }

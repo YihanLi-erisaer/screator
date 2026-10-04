@@ -25,7 +25,12 @@ test("display language is saved in general settings and updates the interface", 
 });
 
 test("task center shows today's successful submissions for each Bilibili account", async ({ page }) => {
-  await page.goto("/?preview&accounts=5&populated");
+  await page.goto("/?preview&accounts=5&populated&slowTasks");
+  await expect(page.locator(".queue-overview-skeleton .queue-card")).toHaveCount(10);
+  const loadingQueueHeight = await page.locator(".queue-overview").evaluate((element) => element.getBoundingClientRect().height);
+  await expect(page.locator(".queue-overview-skeleton")).toHaveCount(0);
+  const loadedQueueHeight = await page.locator(".queue-overview").evaluate((element) => element.getBoundingClientRect().height);
+  expect(Math.abs(loadingQueueHeight - loadedQueueHeight)).toBeLessThan(2);
   await expect(page.locator(".stats-heading")).toHaveText("B 站账号 · 今日提交成功");
   const cards = page.locator(".stats-strip .stat");
   await expect(cards).toHaveCount(5);
@@ -33,6 +38,90 @@ test("task center shows today's successful submissions for each Bilibili account
   await expect(cards.first().locator("strong")).toHaveText("01");
   await expect(cards.nth(1).locator("strong")).toHaveText("00");
   await expect(cards.last()).toContainText("账号 5");
+});
+
+test("task center shows skeletons while records are loading", async ({ page }) => {
+  await page.goto("/?preview&populated&accounts=1&slowTasks");
+  await expect(page.locator(".tasks-rows-skeleton .task-row")).toHaveCount(3);
+  await expect(page.locator(".stat-skeleton")).toHaveCount(1);
+  await expect(page.locator(".queue-overview-skeleton .queue-card")).toHaveCount(6);
+  const loadingStatsHeight = await page.locator(".stats-strip").evaluate((element) => element.getBoundingClientRect().height);
+  const loadingQueueHeight = await page.locator(".queue-overview").evaluate((element) => element.getBoundingClientRect().height);
+  const loadingPanelHeight = await page.locator(".task-panel").evaluate((element) => element.getBoundingClientRect().height);
+  await expect(page.getByText("你的下一条视频，从这里开始")).toHaveCount(0);
+  await expect(page.locator(".tasks-rows-skeleton")).toHaveCount(0);
+  await expect(page.locator(".task-row")).toHaveCount(3);
+  await expect(page.locator(".queue-overview-skeleton")).toHaveCount(0);
+  const loadedStatsHeight = await page.locator(".stats-strip").evaluate((element) => element.getBoundingClientRect().height);
+  const loadedQueueHeight = await page.locator(".queue-overview").evaluate((element) => element.getBoundingClientRect().height);
+  const loadedPanelHeight = await page.locator(".task-panel").evaluate((element) => element.getBoundingClientRect().height);
+  expect(Math.abs(loadingStatsHeight - loadedStatsHeight)).toBeLessThan(2);
+  expect(Math.abs(loadingQueueHeight - loadedQueueHeight)).toBeLessThan(2);
+  expect(Math.abs(loadingPanelHeight - loadedPanelHeight)).toBeLessThan(2);
+
+  await page.getByRole("button", { name: "待预览", exact: true }).click();
+  await expect(page.locator(".tasks-rows-skeleton .task-row")).toHaveCount(3);
+  await expect(page.locator(".stat-skeleton")).toHaveCount(0);
+  await expect(page.locator(".queue-overview-skeleton")).toHaveCount(0);
+  await expect(page.locator(".tasks-rows-skeleton")).toHaveCount(0);
+  await expect(page.locator(".task-row")).toHaveCount(1);
+});
+
+test("task list grows smoothly when more records arrive than the initial skeleton shows", async ({ page }) => {
+  await page.goto("/?preview&populated&manyTasks&slowTasks=1200");
+  await expect(page.locator(".tasks-rows-skeleton .task-row")).toHaveCount(3);
+  const heights = await page.evaluate(() => new Promise<number[]>((resolve) => {
+    const slot = document.querySelector(".list-height-slot")!;
+    const observer = new MutationObserver(() => {
+      if (slot.querySelectorAll(".task-rows:not(.task-rows-skeleton) .task-row").length !== 20) return;
+      observer.disconnect();
+      const samples: number[] = [];
+      const sample = () => {
+        samples.push(slot.getBoundingClientRect().height);
+        if (samples.length < 14) requestAnimationFrame(sample);
+        else resolve(samples);
+      };
+      requestAnimationFrame(sample);
+    });
+    observer.observe(slot, { childList: true, subtree: true });
+  }));
+  expect(heights.at(-1)!).toBeGreaterThan(heights[0] + 1000);
+  expect(new Set(heights.map(Math.round)).size).toBeGreaterThan(3);
+});
+
+test("publishing history shows a 30-day line for each Bilibili account", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 680 });
+  await page.goto("/?preview&accounts=3&populated");
+  await page.getByRole("button", { name: "投稿记录", exact: true }).click();
+  const chart = page.getByRole("region", { name: "近30天 Bilibili 投稿数量" });
+  await expect(chart).toBeVisible();
+  await expect(page.getByRole("region", { name: "队列概览" })).toHaveCount(0);
+  await expect(chart.locator("polyline")).toHaveCount(3);
+  await expect(chart.locator(".submission-trend-legend > div")).toHaveCount(3);
+  await expect(chart.locator(".submission-trend-legend > div").first()).toContainText("1 条");
+  await expect(chart.locator(".submission-trend-legend > div").nth(1)).toContainText("0 条");
+  const colors = await chart.locator("polyline").evaluateAll((lines) => lines.map((line) => line.getAttribute("stroke")));
+  expect(new Set(colors).size).toBe(3);
+  const svg = chart.locator(".submission-trend-chart svg");
+  await expect.poll(async () => svg.evaluate((element) => Math.abs(element.viewBox.baseVal.width - element.getBoundingClientRect().width))).toBeLessThan(2);
+  await svg.hover({ position: { x: 240, y: 120 } });
+  await expect(chart.locator(".trend-tooltip > div")).toHaveCount(3);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+});
+
+test("publishing history shows skeletons until its records finish loading", async ({ page }) => {
+  await page.goto("/?preview&populated&accounts=1&slowHistory");
+  await expect(page.locator(".task-row")).toHaveCount(3);
+  await page.getByRole("button", { name: "投稿记录", exact: true }).click();
+  await expect(page.locator(".history-rows-skeleton .task-row")).toHaveCount(5);
+  await expect(page.locator(".history-trend-skeleton")).toBeVisible();
+  const loadingTrendHeight = await page.locator(".history-trend-skeleton").evaluate((element) => element.getBoundingClientRect().height);
+  await expect(page.getByText("还没有投稿记录")).toHaveCount(0);
+  await expect(page.locator(".history-rows-skeleton")).toHaveCount(0);
+  await expect(page.locator(".task-row")).toHaveCount(1);
+  await expect(page.locator(".submission-trend-chart")).toBeVisible();
+  const loadedTrendHeight = await page.locator(".submission-trend").evaluate((element) => element.getBoundingClientRect().height);
+  expect(Math.abs(loadingTrendHeight - loadedTrendHeight)).toBeLessThan(20);
 });
 
 test("local-first translation settings and fallback can be changed", async ({
@@ -483,6 +572,26 @@ test("publishing history exposes transfer actions only in the desktop app", asyn
   await expect(page.getByRole("button", { name: "导入投稿记录" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "导出投稿记录" })).toBeDisabled();
   await expect(page.getByRole("button", { name: /全部记录/ })).toBeVisible();
+});
+
+test("delete all submission history requires a modal confirmation", async ({ page }) => {
+  await page.goto("/?preview&populated&importedHistory");
+  await page.getByRole("button", { name: "投稿记录", exact: true }).click();
+  const removeAll = page.getByRole("button", { name: "删除所有投稿记录", exact: true });
+  await expect(removeAll).toBeEnabled();
+  await removeAll.click();
+  const dialog = page.getByRole("dialog", { name: "删除所有投稿记录" });
+  await expect(dialog).toContainText("确定删除本机全部投稿记录？");
+  await dialog.getByRole("button", { name: "取消" }).click();
+  await expect(page.getByRole("button", { name: /迁移的投稿记录/ })).toBeVisible();
+
+  await removeAll.click();
+  await dialog.getByRole("button", { name: "确认删除所有投稿记录" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("还没有投稿记录")).toBeVisible();
+  await expect(removeAll).toBeDisabled();
+  await page.getByRole("button", { name: /^任务中心/ }).click();
+  await expect(page.getByRole("button", { name: /关于设计系统/ })).toBeVisible();
 });
 
 test("imported publishing history opens as read-only detail", async ({ page }) => {

@@ -111,6 +111,80 @@ class HistoryTransferTests(unittest.TestCase):
         result = second.dispatch("history.import", {"path": str(source_file)})
         self.assertEqual((result["imported"], result["skipped"]), (0, 1))
 
+    def test_import_adds_only_new_records_without_replacing_existing_history(self):
+        source = self.service("merge-source")
+        existing = self.task(source, "abcdefghijk", bv_id="BV1234567890")
+        added = Task(task_id=str(uuid.uuid4()), video_id="lmnopqrstuv", url="https://youtu.be/lmnopqrstuv",
+                     status="submitted", account_id=existing.account_id, account_uid_snapshot="23941395",
+                     bv_id="BV0987654321", title_zh="新增投稿")
+        source.store.upsert(added)
+        publications.ensure_bili(source.store, added)
+        file = self.root / "merge.json"
+        source.dispatch("history.export", {"path": str(file)})
+        payload = json.loads(file.read_text(encoding="utf-8"))
+        payload["records"].append(dict(next(row for row in payload["records"] if row["task_id"] == added.task_id)))
+        file.write_text(json.dumps(payload), encoding="utf-8")
+
+        target = self.service("merge-target")
+        original = self.task(target, "zyxwvutsrqpo", bv_id=existing.bv_id)
+        original_revision = target.store.require(original.task_id).revision
+        result = target.dispatch("history.import", {"path": str(file)})
+        self.assertEqual((result["imported"], result["skipped"], result["total"]), (1, 2, 3))
+        self.assertEqual(target.store.require(original.task_id).revision, original_revision)
+        self.assertEqual(target.dispatch("tasks.list", {"history": True})["total"], 2)
+        self.assertEqual(target.dispatch("tasks.get", {"task_id": added.task_id})["title_zh"], "新增投稿")
+        self.assertEqual(target.dispatch("history.import", {"path": str(file)})["imported"], 0)
+
+    def test_import_skips_unresolved_duplicate_with_different_task_id(self):
+        source = self.service("unknown-source")
+        self.task(source, "abcdefghijk", status="submission_unknown", bv_id="")
+        file = self.root / "unknown-duplicate.json"
+        source.dispatch("history.export", {"path": str(file)})
+        target = self.service("unknown-target")
+        self.task(target, "abcdefghijk", status="submission_unknown", bv_id="")
+        result = target.dispatch("history.import", {"path": str(file)})
+        self.assertEqual((result["imported"], result["skipped"]), (0, 1))
+        self.assertEqual(target.dispatch("tasks.list", {"history": True})["total"], 1)
+
+    def test_delete_all_history_keeps_unfinished_tasks_and_assets(self):
+        service = self.service("bulk")
+        submitted = self.task(service, "abcdefghijk")
+        asset = self.root / "bulk" / "work" / submitted.task_id
+        asset.mkdir(parents=True)
+        (asset / "source.mp4").write_bytes(b"video")
+        service.store.update(submitted.task_id, work_root=str(asset.parent), work_dir=str(asset))
+        unfinished = Task(task_id=str(uuid.uuid4()), video_id="lmnopqrstuv", url="https://youtu.be/lmnopqrstuv",
+                          status="failed", account_id=submitted.account_id, account_uid_snapshot="23941395")
+        service.store.upsert(unfinished)
+
+        other = self.service("bulk-import")
+        self.task(other, "zyxwvutsrqpo", bv_id="BV0987654321")
+        file = self.root / "bulk-import.json"
+        other.dispatch("history.export", {"path": str(file)})
+        service.dispatch("history.import", {"path": str(file)})
+        with self.assertRaises(Yt2BiliError):
+            service.dispatch("history.delete_all", {})
+        self.assertEqual(service.dispatch("tasks.list", {"history": True})["all_total"], 2)
+
+        result = service.dispatch("history.delete_all", {"confirmed": True})
+        self.assertEqual(result, {"deleted": 2, "local": 1, "imported": 1})
+        self.assertEqual(service.dispatch("tasks.list", {"history": True})["all_total"], 0)
+        self.assertIsNotNone(service.store.get(unfinished.task_id))
+        self.assertIsNone(service.store.get(submitted.task_id))
+        self.assertTrue((asset / "source.mp4").exists())
+        self.assertEqual(len(service.store.accounts(True)), 1)
+        with service.store._lock:
+            self.assertIsNone(service.store._conn.execute("PRAGMA foreign_key_check").fetchone())
+
+    def test_delete_all_history_rolls_back_when_submission_is_active(self):
+        service = self.service("bulk-active")
+        task = self.task(service, "abcdefghijk")
+        service.store.save_job(task.task_id, {"execution_state": "running"})
+        with self.assertRaises(Yt2BiliError):
+            service.dispatch("history.delete_all", {"confirmed": True})
+        self.assertIsNotNone(service.store.get(task.task_id))
+        self.assertEqual(service.dispatch("tasks.list", {"history": True})["all_total"], 1)
+
     def test_delete_local_record_removes_related_rows_but_keeps_assets_and_account(self):
         service = self.service("local")
         task = self.task(service, "abcdefghijk")

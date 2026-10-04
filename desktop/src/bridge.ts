@@ -1,5 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -7,6 +8,10 @@ export const preview =
   import.meta.env.DEV &&
   !isTauri() &&
   new URLSearchParams(location.search).has("preview");
+export async function setWindowTheme(theme: "system" | "dark" | "light") {
+  if (isTauri())
+    await getCurrentWindow().setTheme(theme === "system" ? null : theme);
+}
 export async function request<T = any>(
   method: string,
   params: Record<string, unknown> = {},

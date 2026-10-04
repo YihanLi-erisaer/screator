@@ -141,7 +141,7 @@ class DesktopService:
             "credentials.set": self.set_key, "credentials.test": self.test_key,
             "tasks.create": self.create, "tasks.list": self.list_tasks, "tasks.get": self.get_task,
             "history.export": self.export_history, "history.import": self.import_history,
-            "history.delete": self.delete_history,
+            "history.delete": self.delete_history, "history.delete_all": self.delete_all_history,
             "tasks.retry": self.retry, "tasks.cancel": self.cancel, "tasks.submit": self.submit,
             "tasks.repair": self.repair, "tasks.update_metadata": self.update_metadata,
             "tasks.resolve": self.resolve, "tasks.cover": self.cover,
@@ -463,9 +463,15 @@ class DesktopService:
         end = datetime.combine(today + timedelta(days=1), time.min).astimezone(timezone.utc).isoformat()
         # Manual confirmations and older records have no successful upload attempt.
         with self.store._lock:
-            today_submitted = {
-                row["account_id"]: row["count"] for row in self.store._conn.execute("""
-                    SELECT p.account_id, COUNT(*) AS count
+            submission_trend = None
+            if history:
+                first_day = today - timedelta(days=29)
+                trend_start = datetime.combine(first_day, time.min).astimezone(timezone.utc).isoformat()
+                trend_end = end
+                dates = [(first_day + timedelta(days=index)).isoformat() for index in range(30)]
+                counts_by_account = {}
+                for row in self.store._conn.execute("""
+                    SELECT p.account_id, COALESCE(receipt.submitted_at, t.updated_at) AS submitted_at
                     FROM task_publications AS p
                     JOIN tasks AS t ON t.task_id = p.task_id
                     LEFT JOIN (
@@ -477,12 +483,35 @@ class DesktopService:
                       AND p.account_id IS NOT NULL
                       AND COALESCE(receipt.submitted_at, t.updated_at) >= ?
                       AND COALESCE(receipt.submitted_at, t.updated_at) < ?
-                    GROUP BY p.account_id
-                """, (start, end))
-            }
+                """, (trend_start, trend_end)):
+                    day = datetime.fromisoformat(row["submitted_at"]).astimezone().date()
+                    index = (day - first_day).days
+                    if 0 <= index < 30:
+                        counts_by_account.setdefault(row["account_id"], [0] * 30)[index] += 1
+                submission_trend = {"dates": dates, "by_account": counts_by_account}
+                today_submitted = {account_id: values[-1] for account_id, values in counts_by_account.items() if values[-1]}
+            else:
+                today_submitted = {
+                    row["account_id"]: row["count"] for row in self.store._conn.execute("""
+                        SELECT p.account_id, COUNT(*) AS count
+                        FROM task_publications AS p
+                        JOIN tasks AS t ON t.task_id = p.task_id
+                        LEFT JOIN (
+                            SELECT task_id, MAX(ended_at) AS submitted_at
+                            FROM upload_attempts WHERE outcome = 'submitted'
+                            GROUP BY task_id
+                        ) AS receipt ON receipt.task_id = p.task_id
+                        WHERE p.platform = 'bilibili' AND p.status = 'submitted'
+                          AND p.account_id IS NOT NULL
+                          AND COALESCE(receipt.submitted_at, t.updated_at) >= ?
+                          AND COALESCE(receipt.submitted_at, t.updated_at) < ?
+                        GROUP BY p.account_id
+                    """, (start, end))
+                }
         return {"items": items, "total": len(tasks),
                 "counts": {name: sum(t.status == name for t in all_tasks) for name in ("downloading", "validating", "uploading", "ready", "submitted", "failed")},
                 "today_submitted_by_account": today_submitted,
+                "submission_trend": submission_trend,
                 "queue": self.scheduler.snapshot(), "all_total": history_total if history else len(all_tasks)}
 
     def get_task(self, task_id):
@@ -518,6 +547,22 @@ class DesktopService:
                 raise Yt2BiliError("任务仍在执行，不能删除投稿记录。")
             result = history_transfer.delete_record(self.store, task_id, expected_revision)
         self.emit("history.changed", {"deleted_task_id": task_id})
+        return result
+
+    def delete_all_history(self, confirmed=False):
+        if confirmed is not True:
+            raise Yt2BiliError("请先在弹窗中确认删除全部投稿记录。")
+        with self.mutation, self.scheduler.guard:
+            if self.scheduler.closing:
+                raise Yt2BiliError("应用正在退出，不能删除投稿记录。")
+            with self.store._lock:
+                active_history = {task.task_id for task in self.store.list_all()
+                                  if task.status in history_transfer.HISTORY_STATUSES}
+            if active_history.intersection(self.scheduler.active):
+                raise Yt2BiliError("仍有投稿记录正在执行，不能删除全部记录。")
+            result = history_transfer.delete_all_records(self.store)
+        if result["deleted"]:
+            self.emit("history.changed", {"deleted": result["deleted"]})
         return result
 
     def retry(self, task_id, operation_id, use_current_translation_settings=False):
