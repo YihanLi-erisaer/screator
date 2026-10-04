@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Image as TauriImage } from "@tauri-apps/api/image";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -11,6 +12,31 @@ export const preview =
 export async function setWindowTheme(theme: "system" | "dark" | "light") {
   if (isTauri())
     await getCurrentWindow().setTheme(theme === "system" ? null : theme);
+}
+export async function setWindowIcon(theme: "dark" | "light") {
+  if (!isTauri()) return;
+  const response = await fetch(theme === "dark" ? "/brand-dark.png" : "/brand.png");
+  if (!response.ok) throw new Error(`Icon request failed: ${response.status}`);
+  const bitmap = await createImageBitmap(await response.blob());
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Cannot create icon canvas");
+    context.drawImage(bitmap, 0, 0);
+    const rgba = new Uint8Array(
+      context.getImageData(0, 0, bitmap.width, bitmap.height).data,
+    );
+    const icon = await TauriImage.new(rgba, bitmap.width, bitmap.height);
+    try {
+      await getCurrentWindow().setIcon(icon);
+    } finally {
+      await icon.close();
+    }
+  } finally {
+    bitmap.close();
+  }
 }
 export async function request<T = any>(
   method: string,

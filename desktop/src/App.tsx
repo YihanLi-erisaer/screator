@@ -54,6 +54,7 @@ import {
   closeApp,
   forceCloseApp,
   setWindowTheme,
+  setWindowIcon,
 } from "./bridge";
 import {
   active,
@@ -440,12 +441,20 @@ export default function App() {
       console.error("Failed to update window theme", error),
     );
     const apply = () => {
-      document.documentElement.dataset.theme =
+      const theme =
         config?.theme === "system" || !config
           ? media.matches
             ? "dark"
             : "light"
           : config.theme;
+      document.documentElement.dataset.theme = theme;
+      document.querySelector<HTMLLinkElement>('link[rel="icon"]')?.setAttribute(
+        "href",
+        theme === "dark" ? "/brand-dark.png" : "/brand.png",
+      );
+      void setWindowIcon(theme).catch((error) =>
+        console.error("Failed to update window icon", error),
+      );
     };
     apply();
     media.addEventListener("change", apply);
@@ -544,7 +553,8 @@ export default function App() {
               navigate("tasks");
             }}
           >
-            <img src="/brand.png" alt="" />
+            <img className="brand-icon-light" src="/brand.png" alt="" />
+            <img className="brand-icon-dark" src="/brand-dark.png" alt="" />
             <span>
               yt2bili<small>by StarDazz</small>
             </span>

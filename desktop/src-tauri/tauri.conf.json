@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src ipc: http://ipc.localhost; frame-src https://captcha.zt.kuaishou.com https://captcha.kuaishou.com https://passport.kuaishou.com https://app.m.kuaishou.com; object-src 'none'; base-uri 'self'"
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; frame-src https://captcha.zt.kuaishou.com https://captcha.kuaishou.com https://passport.kuaishou.com https://app.m.kuaishou.com; object-src 'none'; base-uri 'self'"
     }
   },
   "bundle": { "active": false, "icon": ["icons/icon.ico", "icons/icon.png"] }

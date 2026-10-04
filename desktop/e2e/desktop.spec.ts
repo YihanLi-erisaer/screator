@@ -477,12 +477,13 @@ test("no account cannot create and historical task requires binding", async ({
 test("five copies of one video keep separate edits and fifth-account filter", async ({
   page,
 }) => {
+  const taskRows = page.locator("button.task-row");
   await page.goto("/?preview&populated&accounts=5&samevideo");
-  await expect(page.locator(".task-row")).toHaveCount(5);
+  await expect(taskRows).toHaveCount(5);
   await page.getByRole("combobox", { name: "按账号筛选" }).click();
   await page.getByRole("option", { name: /UID 10005/ }).click();
-  await expect(page.locator(".task-row")).toHaveCount(1);
-  await page.locator(".task-row").click();
+  await expect(taskRows).toHaveCount(1);
+  await taskRows.click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("UID 10005");
   await dialog.getByLabel(/中文标题/).fill("仅第五账号的标题");
@@ -490,7 +491,7 @@ test("five copies of one video keep separate edits and fifth-account filter", as
   await page.getByRole("button", { name: "关闭对话框" }).click();
   await page.getByRole("combobox", { name: "按账号筛选" }).click();
   await page.getByRole("option", { name: /UID 10001/ }).click();
-  await expect(page.locator(".task-row")).toContainText("用更少的工具");
+  await expect(taskRows).toContainText("用更少的工具");
 });
 
 test("account dropdown supports keyboard selection and dismissal", async ({ page }) => {
@@ -505,7 +506,7 @@ test("account dropdown supports keyboard selection and dismissal", async ({ page
   await filter.press("ArrowDown");
   await filter.press("Enter");
   await expect(filter).toContainText("UID 10001");
-  await expect(page.locator(".task-row")).toHaveCount(1);
+  await expect(page.locator("button.task-row")).toHaveCount(1);
 });
 
 test("select popups remain visible beyond clipped cards and inside dialogs", async ({ page }) => {

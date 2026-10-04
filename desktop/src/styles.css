@@ -207,6 +207,13 @@ button svg {
   height: 37px;
   border-radius: 10px;
 }
+.brand-icon-dark,
+:root[data-theme="dark"] .brand-icon-light {
+  display: none;
+}
+:root[data-theme="dark"] .brand-icon-dark {
+  display: block;
+}
 .brand > span {
   font-size: 20px;
   font-weight: 650;
