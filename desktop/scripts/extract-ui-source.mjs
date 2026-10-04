@@ -25,7 +25,7 @@ const serialized = JSON.stringify([...phrases].sort(), null, 2) + "\n";
 if (process.argv.includes("--check")) {
   const english = JSON.parse(fs.readFileSync(path.join(root, "messagesEn.json"), "utf8"));
   const missing = [...phrases].filter((phrase) => !english[phrase]);
-  if (fs.readFileSync(destination, "utf8") !== serialized || missing.length) {
+  if (fs.readFileSync(destination, "utf8").replace(/\r\n/g, "\n") !== serialized || missing.length) {
     console.error("UI source list is stale or English translations are missing:", missing);
     process.exitCode = 1;
   }
