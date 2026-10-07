@@ -28,6 +28,7 @@ from yt2bili.exceptions import Yt2BiliError
 from yt2bili.process_manager import creation_options
 from yt2bili.scheduler import Scheduler
 from yt2bili.accounts import AccountService
+from yt2bili.data_center import DataCenter
 from yt2bili.identity import VIDEO_ID, parse_single_video_url
 from yt2bili.locking import FileLock, account_guard, coordination_dir, work_lock
 from dataclasses import replace
@@ -53,6 +54,7 @@ class DesktopService:
             self.store = TaskStore(paths.root / "data/tasks.sqlite", self.emit)
             history_transfer.initialize(self.store)
             self.accounts = AccountService(paths.root, self.store, self.emit)
+            self.data_center = DataCenter(self.store, self.accounts)
             from yt2bili.douyin import DouyinService
             from yt2bili.acfun import AcfunService
             self.douyin = DouyinService(self.store, self.config, self.emit)
@@ -140,6 +142,7 @@ class DesktopService:
             "translation.jobs.cancel": self.translation_jobs.cancel, "tasks.retranslate": self.retranslate,
             "credentials.set": self.set_key, "credentials.test": self.test_key,
             "tasks.create": self.create, "tasks.list": self.list_tasks, "tasks.get": self.get_task,
+            "data_center.list": self.data_center.list,
             "history.export": self.export_history, "history.import": self.import_history,
             "history.delete": self.delete_history, "history.delete_all": self.delete_all_history,
             "tasks.retry": self.retry, "tasks.cancel": self.cancel, "tasks.submit": self.submit,

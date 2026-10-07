@@ -20,6 +20,7 @@ import {
   FileText,
   FolderOpen,
   History,
+  ChartNoAxesCombined,
   KeyRound,
   Link2,
   ListVideo,
@@ -77,9 +78,10 @@ import { StyledSelect } from "./StyledSelect";
 import { StatusBadge } from "./StatusBadge";
 import { SubmissionTrend, type SubmissionTrendData } from "./SubmissionTrend";
 import { ToastViewport, ReportError, useToast } from "./Toast";
+import { DataCenter } from "./DataCenter";
 import { setUiLanguage, uiText } from "./i18n";
 
-type Page = "tasks" | "history" | "account" | "settings";
+type Page = "tasks" | "history" | "data" | "account" | "settings";
 const PAGE_SIZE = 20;
 type ShutdownStatus = {
   ready: boolean;
@@ -89,6 +91,7 @@ type ShutdownStatus = {
 const titles = {
   tasks: "任务中心",
   history: "投稿记录",
+  data: "数据中心",
   account: "账号与连接",
   settings: "设置",
 };
@@ -413,7 +416,7 @@ export default function App() {
   }, [loadConfig, refreshAccount, showSuccess]);
 
   useEffect(() => {
-    if (!connected) return;
+    if (!connected || page === "data") return;
     let disposed = false;
     let loading = false;
     const update = async () => {
@@ -433,7 +436,7 @@ export default function App() {
       disposed = true;
       clearInterval(interval);
     };
-  }, [connected, loadTasks]);
+  }, [connected, loadTasks, page]);
 
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
@@ -538,6 +541,7 @@ export default function App() {
   const nav = [
     { id: "tasks", icon: ListVideo },
     { id: "history", icon: History },
+    { id: "data", icon: ChartNoAxesCombined },
     { id: "account", icon: KeyRound },
     { id: "settings", icon: Settings2 },
   ] as const;
@@ -624,6 +628,8 @@ export default function App() {
                     ? "YOUR LOCAL WORKFLOW"
                     : page === "history"
                       ? "PUBLISHING HISTORY"
+                      : page === "data"
+                        ? "CREATOR ANALYTICS"
                       : page === "account"
                         ? "CONNECTED SERVICES"
                         : "MAKE IT YOURS"}
@@ -634,6 +640,8 @@ export default function App() {
                     ? "从链接到投稿，每一步都清晰可见。"
                     : page === "history"
                       ? "所有已提交稿件，以及需要你核对的结果。"
+                      : page === "data"
+                        ? "查看账号和稿件表现，以及平台审核结果。"
                       : page === "account"
                         ? "连接你的账号，开始本地创作流程。"
                         : "按你的习惯设置工作目录与投稿默认值。"}
@@ -690,6 +698,9 @@ export default function App() {
                 </div>
               )}
             </div>
+            {page === "data" && <DataCenter accounts={accountOptions} onOpenTask={(taskId) => {
+              void action(async () => setSelected(await request("tasks.get", { task_id: taskId })));
+            }} />}
             {(page === "tasks" || page === "history") && (
               <>
                 {page === "tasks" && (

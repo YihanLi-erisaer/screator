@@ -259,6 +259,24 @@ export async function request(method: string, params: any): Promise<any> {
     };
   }
   if (method === "accounts.list") return { items: accounts, limit: 5 };
+  if (method === "data_center.list") {
+    const all = tasks.flatMap((task) => (task.publications?.length ? task.publications : task.status === "submitted" ? [{
+      publication_id: task.task_id + "-bili", platform: "bilibili" as const, account_id: task.account_id || "", account_label: "",
+      status: "submitted", remote_id: task.bv_id,
+    }] : []).filter((pub) => ["submitted", "submission_unknown"].includes(pub.status)).map((pub) => ({
+      ...pub, task_id: task.task_id, title_zh: task.title_zh, title_orig: task.title_orig,
+      account_name: pub.account_label || task.account_name_snapshot,
+      review_status: pub.platform === "bilibili" ? "审核通过" : null,
+      views: pub.platform === "bilibili" ? 1234 : null, likes: pub.platform === "bilibili" ? 62 : null,
+      comments: pub.platform === "bilibili" ? 8 : null, favorites: pub.platform === "bilibili" ? 17 : null,
+    })));
+    const filtered = all.filter((item) => (!params.platform || item.platform === params.platform)
+      && (!params.account_id || item.account_id === params.account_id));
+    if (new URLSearchParams(location.search).has("slowData")) await new Promise((resolve) => setTimeout(resolve, 500));
+    return { items: filtered.slice(params.offset || 0, (params.offset || 0) + (params.limit || 20)), total: filtered.length,
+      accounts: accounts.map((account) => ({ account_id: account.account_id, uid: account.uid, name: account.nickname,
+        followers: 12345, views: 987654, publications: 27 })), updated_at: Date.now() / 1000 };
+  }
   if (method === "auth.login.cancel") return { cancelled: true };
   if (method === "system.diagnostics")
     return {

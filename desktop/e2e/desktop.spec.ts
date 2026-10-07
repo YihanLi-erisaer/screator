@@ -1,5 +1,52 @@
 import { test, expect } from "@playwright/test";
 
+test("data center loads account metrics and pages through recorded submissions", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 680 });
+  await page.goto("/?preview&accounts=2&populated&manyTasks&slowData");
+  const nav = page.getByRole("navigation", { name: "主导航" }).getByRole("button");
+  await expect(nav).toHaveText(["任务中心", "投稿记录", "数据中心", "账号与连接", "设置"]);
+  await page.getByRole("button", { name: "数据中心", exact: true }).click();
+  await expect(page.getByRole("status", { name: "正在加载稿件数据" })).toBeVisible();
+  await expect(page.locator(".data-account-card")).toHaveCount(2);
+  await expect(page.locator(".data-row")).toHaveCount(20);
+  await expect(page.getByText("45 条稿件")).toBeVisible();
+  await expect(page.locator(".data-row").first()).toContainText("审核通过");
+  await expect(page.locator(".data-row").first()).toContainText("1,234");
+  await page.getByRole("button", { name: "下一页" }).click();
+  await expect(page.locator(".data-row")).toHaveCount(20);
+  await page.getByRole("button", { name: "下一页" }).click();
+  await expect(page.locator(".data-row")).toHaveCount(5);
+  await page.getByRole("button", { name: "AcFun", exact: true }).click();
+  await expect(page.getByText("还没有稿件数据")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+});
+
+test("data center account filter stays aligned with tabs and clear of the table", async ({ page }) => {
+  await page.goto("/?preview&accounts=2&populated");
+  await page.getByRole("button", { name: "数据中心", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "按账号筛选" })).toBeVisible();
+  for (const width of [1024, 600]) {
+    await page.setViewportSize({ width, height: 680 });
+    const positions = await page.evaluate(() => {
+      const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect().toJSON();
+      return {
+        label: box(".data-account-filter > span"),
+        select: box(".data-account-filter .styled-select"),
+        toolbar: box(".data-toolbar"),
+        table: box(".data-table-head"),
+      };
+    });
+    expect(Math.abs((positions.label.top + positions.label.bottom) / 2 - (positions.select.top + positions.select.bottom) / 2)).toBeLessThan(3);
+    expect(positions.toolbar.bottom).toBeLessThanOrEqual(positions.table.top + 1);
+    await page.getByRole("combobox", { name: "按账号筛选" }).click();
+    const menu = await page.getByRole("listbox", { name: "按账号筛选" }).boundingBox();
+    expect(menu).not.toBeNull();
+    expect(menu!.x).toBeGreaterThanOrEqual(0);
+    expect(menu!.x + menu!.width).toBeLessThanOrEqual(width + 1);
+    await page.keyboard.press("Escape");
+  }
+});
+
 test("display language is saved in general settings and updates the interface", async ({ page }) => {
   await page.goto("/?preview");
   await page.getByRole("button", { name: "设置", exact: true }).click();
