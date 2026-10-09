@@ -1,4 +1,4 @@
-# Screator AcFun 同步投稿 PRD
+# screator AcFun 同步投稿 PRD
 
 版本：v1.4 安全验证与失败重试更新
 
@@ -153,4 +153,4 @@ Bilibili 目标账号     [ 选择一个账号                     ]
 4. 在当前版本、当前账号完成真实投稿与故障注入前，持续标识网页会话适配器的实验性状态；新建任务的同步选项默认不勾选。平台改变接口时暂停相关队列并保留未完成记录。
 5. Y2A-Auto 采用 [GPL-3.0 许可证](https://github.com/fqscfqj/Y2A-Auto/blob/main/LICENSE)。本方案仅参考其流程与可观察字段；如要复制代码或引入依赖，先完成许可证兼容性评估。
 
-资料核对日期：2026-09-26。项目内现状以 `main` 的 `yt2bili/scheduler.py`、`publications.py`、`desktop_service.py` 和 `desktop/src/App.tsx` 为依据；网页上传流程以 Y2A-Auto 当前公开源码为参考，平台投稿规范以 AcFun 官方页面为依据。参考代码没有在本项目执行或接入。
+资料核对日期：2026-09-26。项目内现状以 `main` 的 `screator/scheduler.py`、`publications.py`、`desktop_service.py` 和 `desktop/src/App.tsx` 为依据；网页上传流程以 Y2A-Auto 当前公开源码为参考，平台投稿规范以 AcFun 官方页面为依据。参考代码没有在本项目执行或接入。

@@ -1,4 +1,4 @@
-# Screator 桌面端 · 第一期
+# screator 桌面端 · 第一期
 
 版本：`v1.0.0alpha`。提供 React + Tauri 原生桌面应用，连接现有 Python 视频业务。Windows 安装包和免安装应用的使用及构建见 [Windows 安装与打包](../docs/Windows安装与打包.md)；Apple Silicon 原生运行与 DMG 构建见 [macOS 安装与打包](../docs/macOS安装与打包.md)。
 
@@ -59,7 +59,7 @@ npm run desktop
 
 ## 数据、凭据与旧项目
 
-Windows 默认用户数据目录是 `%LOCALAPPDATA%/StarDazz/yt2bili/`：
+Windows 默认用户数据目录是 `%LOCALAPPDATA%/StarDazz/screator/`：
 
 - `settings.json`：非敏感设置。
 - `data/tasks.sqlite`：任务、配置快照及操作去重记录。
@@ -85,9 +85,9 @@ DeepL 密钥保存到系统凭据存储，不写入普通设置或任务快照�
 
 ### 应用资源监控
 
-“设置”页顶部显示 Screator 的总 CPU、总驻留内存、当前监控进程数量，以及可展开的 PID / 进程名称 / CPU / 内存明细。页面可见时每两秒采样，可暂停和恢复；离开设置页、隐藏应用页面或开始退出后停止刷新。
+“设置”页顶部显示 screator 的总 CPU、总驻留内存、当前监控进程数量，以及可展开的 PID / 进程名称 / CPU / 内存明细。页面可见时每两秒采样，可暂停和恢复；离开设置页、隐藏应用页面或开始退出后停止刷新。
 
-原生主程序通过 `YT2BILI_APP_PID` 告知后台进程所有者，后台验证其为自己的祖先进程后追踪整个应用进程树，因此包含主程序、WebView2、Python 后台、FFmpeg / ffprobe、上传工具以及应用启动的翻译服务。外部已有的 Ollama 服务及远程翻译服务不计入。独立启动后台时仅显示后台进程树，界面会说明范围；更新开发版后需重启主程序以启用完整范围。
+原生主程序通过 `SCREATOR_APP_PID` 告知后台进程所有者，后台验证其为自己的祖先进程后追踪整个应用进程树，因此包含主程序、WebView2、Python 后台、FFmpeg / ffprobe、上传工具以及应用启动的翻译服务。外部已有的 Ollama 服务及远程翻译服务不计入。独立启动后台时仅显示后台进程树，界面会说明范围；更新开发版后需重启主程序以启用完整范围。
 
 CPU 以相邻采样的进程用户态与内核态时间差计算，再除以逻辑 CPU 数，采用整机 0–100% 标度，不重复加入子进程 CPU 时间。首次采样、新进程或长时间暂停后的首轮 CPU 显示为未知；部分数据不可读时明确说明合计不完整。内存为各进程 RSS / Windows 工作集之和，共享页面可能重复计算，与任务管理器默认内存列口径不一定相同。两次采样间启动并退出的短进程可能无法捕获；曾观察到的子进程即使重设父进程仍持续跟踪，使用 PID 与启动时间防止误算复用的 PID。
 
@@ -96,14 +96,14 @@ CPU 以相邻采样的进程用户态与内核态时间差计算，再除以逻�
 ```text
 desktop/src/                 React 页面、品牌主题、配置向导、Tauri 通信桥
 desktop/src-tauri/           原生窗口、管道通信、单实例、子进程生命周期
-yt2bili/desktop_worker.py    JSON Lines 协议入口与脱敏日志
-yt2bili/desktop_service.py   受限方法、任务/账号/配置/导入服务
-yt2bili/scheduler.py         三个长期运行的 FIFO 阶段队列
-yt2bili/desktop_auth.py      biliup BiliTV 扫码协议适配
-yt2bili/desktop_settings.py  非敏感配置与系统密钥存储
-yt2bili/events.py            任务进度与取消令牌
-yt2bili/locking.py           进程锁与跨进程投稿间隔
-yt2bili/pipeline.py          GUI / CLI 共用的视频处理和投稿核心
+screator/desktop_worker.py    JSON Lines 协议入口与脱敏日志
+screator/desktop_service.py   受限方法、任务/账号/配置/导入服务
+screator/scheduler.py         三个长期运行的 FIFO 阶段队列
+screator/desktop_auth.py      biliup BiliTV 扫码协议适配
+screator/desktop_settings.py  非敏感配置与系统密钥存储
+screator/events.py            任务进度与取消令牌
+screator/locking.py           进程锁与跨进程投稿间隔
+screator/pipeline.py          GUI / CLI 共用的视频处理和投稿核心
 scripts/                    后台冻结、源代码/冻结后台/原生窗口烟雾测试
 ```
 
@@ -117,7 +117,7 @@ scripts/                    后台冻结、源代码/冻结后台/原生窗口�
 
 ```powershell
 $env:PYTHONIOENCODING = 'utf-8'
-$env:YT2BILI_BIN_DIR = Join-Path (Get-Location) 'bin'
+$env:SCREATOR_BIN_DIR = Join-Path (Get-Location) 'bin'
 .desktop-venv/Scripts/python.exe -m unittest discover -s tests -v
 .desktop-venv/Scripts/python.exe scripts/smoke_worker.py
 .desktop-venv/Scripts/python.exe scripts/build_worker.py
@@ -139,7 +139,7 @@ npm run test:launcher
 
 启动测量：在仓库根目录运行 `python scripts/benchmark_startup.py`，或用 `--samples 5 --tasks 0 1000 10000` 指定样本数和历史数量。脚本使用临时数据及空凭据存储，测量源码 worker 就绪、已完成历史任务下的后台初始化、健康查询、列表查询和队列快照；不操作真实账号，不包含原生窗口绘制、系统冷启动或真实服务检测。`scripts/smoke_worker.py --protocol-only` 可在未安装 FFmpeg 时单独检查源码或冻结后台通信。
 
-原生通信检查：先启动 `npm run dev`，用已安装的 Rust 工具链运行 `cargo build --manifest-path desktop/src-tauri/Cargo.toml`，然后在仓库根目录运行 `scripts/smoke_native.py`。脚本使用独立临时数据目录，在隐藏窗口验证 React → Tauri → Python → React 后自动退出。发布版检查使用 `scripts/smoke_native.py --release dist/windows/Screator/Screator.exe`，不需要 Vite；仅在显式传入 `--smoke-test` 且指定独立数据和报告环境变量时启用测试钩子。
+原生通信检查：先启动 `npm run dev`，用已安装的 Rust 工具链运行 `cargo build --manifest-path desktop/src-tauri/Cargo.toml`，然后在仓库根目录运行 `scripts/smoke_native.py`。脚本使用独立临时数据目录，在隐藏窗口验证 React → Tauri → Python → React 后自动退出。发布版检查使用 `scripts/smoke_native.py --release dist/windows/screator/screator.exe`，不需要 Vite；仅在显式传入 `--smoke-test` 且指定独立数据和报告环境变量时启用测试钩子。
 
 退出验证：`python scripts/smoke_native.py --shutdown graceful` 和 `--shutdown forced` 分别走真实正常退出、强制退出命令。`python scripts/benchmark_shutdown.py` 使用独立临时数据测量空闲后台退出、长重试等待的取消响应，以及一万条历史记录下新旧关闭状态查询的耗时和查询次数；不包含窗口关闭交互、在途上传或真实网络等待。
 

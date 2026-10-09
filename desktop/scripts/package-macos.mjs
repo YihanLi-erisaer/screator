@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 if (process.platform !== "darwin" || process.arch !== "arm64")
   throw new Error("Run the macOS package build with native arm64 Node.js on Apple Silicon.");
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const python = process.env.YT2BILI_BUILD_PYTHON || path.join(root, ".desktop-venv/bin/python");
+const python = process.env.SCREATOR_BUILD_PYTHON || path.join(root, ".desktop-venv/bin/python");
 if (!existsSync(python))
   throw new Error("Create .desktop-venv with native arm64 Python 3.11+ and install requirements-desktop.txt.");
 function run(executable, args, cwd = root) {
@@ -54,30 +54,30 @@ run(python, ["scripts/smoke_worker.py", "--frozen", frozen]);
 run(process.execPath, ["desktop/scripts/tauri.mjs", "build", "--no-bundle", "--config", "src-tauri/tauri.macos-release.conf.json", "--", "--locked"]);
 run(process.execPath, ["desktop/scripts/tauri.mjs", "bundle", "--bundles", "app", "--config", "src-tauri/tauri.macos-release.conf.json"]);
 const built = path.join(root, "desktop/src-tauri/target/release/bundle");
-const app = path.join(built, "macos/Screator.app");
+const app = path.join(built, "macos/screator.app");
 if (!existsSync(app)) throw new Error(`Missing macOS application: ${app}`);
 const destination = path.join(root, "dist/macos");
 mkdirSync(destination, { recursive: true });
-rmSync(path.join(destination, "Screator.app"), { recursive: true, force: true });
+rmSync(path.join(destination, "screator.app"), { recursive: true, force: true });
 const version = JSON.parse(readFileSync(path.join(root, "desktop/package.json"), "utf8")).version;
-const dmg = path.join(destination, `Screator_${version}_aarch64.dmg`);
+const dmg = path.join(destination, `screator_${version}_aarch64.dmg`);
 const dmgStage = path.join(root, "packaging/staging/macos-dmg");
 rmSync(dmgStage, { recursive: true, force: true });
 mkdirSync(dmgStage, { recursive: true });
 try {
-  const packagedApp = path.join(dmgStage, "Screator.app");
+  const packagedApp = path.join(dmgStage, "screator.app");
   cpSync(app, packagedApp, { recursive: true, force: true });
   run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", packagedApp]);
   run("/usr/bin/codesign", ["--verify", "--deep", "--strict", packagedApp]);
   run(python, ["scripts/smoke_native.py", "--release", path.join(packagedApp, "Contents/MacOS/screator-desktop")]);
   symlinkSync("/Applications", path.join(dmgStage, "Applications"));
-  run("/usr/bin/hdiutil", ["create", "-ov", "-format", "UDZO", "-volname", "Screator", "-srcfolder", dmgStage, dmg]);
+  run("/usr/bin/hdiutil", ["create", "-ov", "-format", "UDZO", "-volname", "screator", "-srcfolder", dmgStage, dmg]);
   run("/usr/bin/hdiutil", ["verify", dmg]);
 } finally {
   rmSync(dmgStage, { recursive: true, force: true });
   rmSync(app, { recursive: true, force: true });
   for (const name of readdirSync(path.dirname(app))) {
-    if (/^rw\.\d+\.Screator_.*\.dmg$/.test(name))
+    if (/^rw\.\d+\.screator_.*\.dmg$/.test(name))
       rmSync(path.join(path.dirname(app), name), { force: true });
   }
 }

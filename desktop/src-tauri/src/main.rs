@@ -162,11 +162,11 @@ async fn force_close(app: tauri::AppHandle, worker: State<'_, Worker>) -> Result
 #[tauri::command]
 fn frontend_ready(app: tauri::AppHandle, health: Value) {
     if smoke_enabled() {
-        if let Some(report) = std::env::var_os("YT2BILI_NATIVE_SMOKE_REPORT") {
+        if let Some(report) = std::env::var_os("SCREATOR_NATIVE_SMOKE_REPORT") {
             let value = json!({"ok":health["protocol_version"] == 2,"webview_loaded":true,
                 "frontend_ipc":true,"protocol_version":health["protocol_version"]});
             let _ = std::fs::write(report, value.to_string());
-            if let Ok(mode) = std::env::var("YT2BILI_NATIVE_SMOKE_SHUTDOWN") {
+            if let Ok(mode) = std::env::var("SCREATOR_NATIVE_SMOKE_SHUTDOWN") {
                 let handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     let worker = handle.state::<Worker>();
@@ -193,8 +193,8 @@ fn frontend_ready(app: tauri::AppHandle, health: Value) {
 
 fn record_shutdown_smoke(mode: &str, elapsed: Duration) {
     if !smoke_enabled() { return; }
-    if std::env::var("YT2BILI_NATIVE_SMOKE_SHUTDOWN").ok().as_deref() != Some(mode) { return; }
-    if let Some(report) = std::env::var_os("YT2BILI_NATIVE_SMOKE_REPORT") {
+    if std::env::var("SCREATOR_NATIVE_SMOKE_SHUTDOWN").ok().as_deref() != Some(mode) { return; }
+    if let Some(report) = std::env::var_os("SCREATOR_NATIVE_SMOKE_REPORT") {
         if let Ok(data) = std::fs::read_to_string(&report) {
             if let Ok(mut value) = serde_json::from_str::<Value>(&data) {
                 value["shutdown"] = json!({"mode":mode,"completed":true,"elapsed_ms":elapsed.as_millis()});
@@ -205,8 +205,8 @@ fn record_shutdown_smoke(mode: &str, elapsed: Duration) {
 }
 
 fn smoke_enabled() -> bool {
-    std::env::var_os("YT2BILI_NATIVE_SMOKE_REPORT").is_some()
-        && std::env::var_os("YT2BILI_DESKTOP_DATA").is_some()
+    std::env::var_os("SCREATOR_NATIVE_SMOKE_REPORT").is_some()
+        && std::env::var_os("SCREATOR_DESKTOP_DATA").is_some()
         && (cfg!(debug_assertions) || std::env::args().any(|arg| arg == "--smoke-test"))
 }
 
@@ -230,34 +230,37 @@ fn attach_job(child: &Child) -> Result<usize, String> {
 }
 
 fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Error>> {
-    let project = std::env::var_os("YT2BILI_PROJECT_ROOT").map(PathBuf::from)
+    let project = std::env::var_os("SCREATOR_PROJECT_ROOT").map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf());
     let resources = if cfg!(debug_assertions) {
-        std::env::var_os("YT2BILI_RESOURCES").map(PathBuf::from).unwrap_or_else(|| project.clone())
+        std::env::var_os("SCREATOR_RESOURCES").map(PathBuf::from).unwrap_or_else(|| project.clone())
     } else {
         app.path().resource_dir()?
     };
-    let data = std::env::var_os("YT2BILI_DESKTOP_DATA").map(PathBuf::from)
-        .unwrap_or(app.path().local_data_dir()?.join("StarDazz").join("yt2bili"));
+    let data_parent = app.path().local_data_dir()?.join("StarDazz");
+    let current_data = data_parent.join("screator");
+    let legacy_data = data_parent.join("yt2bili");
+    let data = std::env::var_os("SCREATOR_DESKTOP_DATA").map(PathBuf::from)
+        .unwrap_or_else(|| if !current_data.exists() && legacy_data.exists() { legacy_data } else { current_data });
     let log_dir = data.join("logs");
     std::fs::create_dir_all(&log_dir)?;
     let _ = SHELL_LOG.set(log_dir.join("desktop-shell.log"));
     log_shell("desktop starting");
     let mut command = if !cfg!(debug_assertions) {
         Command::new(resources.join("worker").join(if cfg!(windows) { "screator-worker.exe" } else { "screator-worker" }))
-    } else if let Some(frozen) = std::env::var_os("YT2BILI_WORKER") {
+    } else if let Some(frozen) = std::env::var_os("SCREATOR_WORKER") {
         Command::new(frozen)
     } else {
-        let python = std::env::var_os("YT2BILI_PYTHON").map(PathBuf::from).unwrap_or_else(|| {
+        let python = std::env::var_os("SCREATOR_PYTHON").map(PathBuf::from).unwrap_or_else(|| {
             project.join(if cfg!(windows) { ".desktop-venv/Scripts/python.exe" } else { ".desktop-venv/bin/python" })
         });
         let mut cmd = Command::new(python);
-        cmd.args(["-u", "-m", "yt2bili.desktop_worker"]);
+        cmd.args(["-u", "-m", "screator.desktop_worker"]);
         cmd
     };
     command.arg("--data-dir").arg(data).arg("--resources").arg(&resources)
         .current_dir(if cfg!(debug_assertions) { &project } else { &resources }).env("PYTHONIOENCODING", "utf-8")
-        .env("YT2BILI_APP_PID", std::process::id().to_string())
+        .env("SCREATOR_APP_PID", std::process::id().to_string())
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)] {
         use std::os::windows::process::CommandExt;

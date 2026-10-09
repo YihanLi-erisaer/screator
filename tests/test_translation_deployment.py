@@ -11,11 +11,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, Mock
 
-from yt2bili.translation.config import DEFAULTS
-from yt2bili.translation.deployment import download_runtime, install, install_runtime, safe_extract_tar, uninstall_model
-from yt2bili.translation.runtime import local_session, model_manifest_path, runtime_path, runtime_spec, sha256
-from yt2bili.translation.jobs import TranslationJobs
-from yt2bili.translation.types import TranslationError
+from screator.translation.config import DEFAULTS
+from screator.translation.deployment import download_runtime, install, install_runtime, safe_extract_tar, uninstall_model
+from screator.translation.runtime import local_session, model_manifest_path, runtime_path, runtime_spec, sha256
+from screator.translation.jobs import TranslationJobs
+from screator.translation.types import TranslationError
 
 
 class Response(io.BytesIO):
@@ -39,7 +39,7 @@ class DeploymentTests(unittest.TestCase):
     def test_download_resumes_only_when_content_range_matches(self):
         (self.root / "downloads/runtime.part").write_bytes(self.payload[:4])
         response = Response(self.payload[4:], 206, f"bytes 4-{len(self.payload)-1}/{len(self.payload)}")
-        with patch("yt2bili.translation.deployment.manifest", return_value=self.spec), patch("yt2bili.translation.deployment.urlopen", return_value=response) as request:
+        with patch("screator.translation.deployment.manifest", return_value=self.spec), patch("screator.translation.deployment.urlopen", return_value=response) as request:
             path = download_runtime(self.root)
         self.assertEqual(path.read_bytes(), self.payload)
         self.assertEqual(request.call_args.args[0].headers["Range"], "bytes=4-")
@@ -53,11 +53,11 @@ class DeploymentTests(unittest.TestCase):
 
     def test_ignored_range_restarts_download_without_appending(self):
         (self.root / "downloads/runtime.part").write_bytes(b"stale")
-        with patch("yt2bili.translation.deployment.manifest", return_value=self.spec), patch("yt2bili.translation.deployment.urlopen", return_value=Response(self.payload,200)):
+        with patch("screator.translation.deployment.manifest", return_value=self.spec), patch("screator.translation.deployment.urlopen", return_value=Response(self.payload,200)):
             self.assertEqual(download_runtime(self.root).read_bytes(), self.payload)
 
     def test_invalid_checksum_is_not_installed(self):
-        with patch("yt2bili.translation.deployment.manifest", return_value=self.spec), patch("yt2bili.translation.deployment.urlopen", return_value=Response(b"x"*len(self.payload),200)):
+        with patch("screator.translation.deployment.manifest", return_value=self.spec), patch("screator.translation.deployment.urlopen", return_value=Response(b"x"*len(self.payload),200)):
             with self.assertRaises(TranslationError) as raised:
                 download_runtime(self.root)
         self.assertEqual(raised.exception.code,"CHECKSUM_FAILED")
@@ -65,20 +65,20 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse((self.root/'downloads/runtime.part').exists())
 
     def test_busy_port_does_not_take_ownership_or_kill_service(self):
-        with patch('yt2bili.translation.runtime.sys.platform','win32'), \
-             patch('yt2bili.translation.runtime.platform.machine', return_value='AMD64'):
+        with patch('screator.translation.runtime.sys.platform','win32'), \
+             patch('screator.translation.runtime.platform.machine', return_value='AMD64'):
             binary=runtime_path(self.root)
         binary.parent.mkdir(parents=True);binary.write_bytes(b"fixture")
         (binary.parent/'installed.json').write_text(json.dumps({'binary_sha256':sha256(binary)}))
-        with patch('yt2bili.translation.runtime.sys.platform','win32'), patch('yt2bili.translation.runtime.platform.machine',return_value='AMD64'), patch('yt2bili.translation.runtime.request_json',return_value={'version':'other'}), patch('yt2bili.translation.runtime.subprocess.Popen') as launch:
+        with patch('screator.translation.runtime.sys.platform','win32'), patch('screator.translation.runtime.platform.machine',return_value='AMD64'), patch('screator.translation.runtime.request_json',return_value={'version':'other'}), patch('screator.translation.runtime.subprocess.Popen') as launch:
             with self.assertRaises(TranslationError) as raised:
                 with local_session(DEFAULTS,self.root):pass
         self.assertEqual(raised.exception.code,'PORT_IN_USE')
         launch.assert_not_called()
 
     def test_slow_runtime_start_is_reported_separately_from_inference_timeout(self):
-        with patch('yt2bili.translation.runtime.sys.platform','win32'), \
-             patch('yt2bili.translation.runtime.platform.machine', return_value='AMD64'):
+        with patch('screator.translation.runtime.sys.platform','win32'), \
+             patch('screator.translation.runtime.platform.machine', return_value='AMD64'):
             binary = runtime_path(self.root)
         binary.parent.mkdir(parents=True)
         binary.write_bytes(b"fixture")
@@ -86,12 +86,12 @@ class DeploymentTests(unittest.TestCase):
         process = Mock()
         process.poll.side_effect = [None, 1]
         clock = SimpleNamespace(monotonic=Mock(side_effect=[0, 0, 61]), sleep=Mock())
-        with patch("yt2bili.translation.runtime.sys.platform", "win32"), \
-             patch("yt2bili.translation.runtime.platform.machine", return_value="AMD64"), \
-             patch("yt2bili.translation.runtime.request_json", side_effect=TranslationError("LOCAL_UNAVAILABLE", "not ready")), \
-             patch("yt2bili.translation.runtime.subprocess.Popen", return_value=process), \
-             patch("yt2bili.translation.runtime.ProcessTree"), \
-             patch("yt2bili.translation.runtime.time", clock):
+        with patch("screator.translation.runtime.sys.platform", "win32"), \
+             patch("screator.translation.runtime.platform.machine", return_value="AMD64"), \
+             patch("screator.translation.runtime.request_json", side_effect=TranslationError("LOCAL_UNAVAILABLE", "not ready")), \
+             patch("screator.translation.runtime.subprocess.Popen", return_value=process), \
+             patch("screator.translation.runtime.ProcessTree"), \
+             patch("screator.translation.runtime.time", clock):
             with self.assertRaises(TranslationError) as raised:
                 with local_session(DEFAULTS, self.root):
                     self.fail("runtime must not be ready")
@@ -107,9 +107,9 @@ class DeploymentTests(unittest.TestCase):
             bundle.addfile(item, io.BytesIO(self.payload))
         spec = {"runtime_macos_arm64": {"version": "0.34.3", "archive": "tgz",
                                          "sha256": hashlib.sha256(archive.read_bytes()).hexdigest()}}
-        with patch("yt2bili.translation.deployment.manifest", return_value=spec), \
-             patch("yt2bili.translation.deployment.runtime_spec", return_value=spec["runtime_macos_arm64"]), \
-             patch("yt2bili.translation.deployment.runtime_path", return_value=self.root / "runtime/0.34.3/ollama"):
+        with patch("screator.translation.deployment.manifest", return_value=spec), \
+             patch("screator.translation.deployment.runtime_spec", return_value=spec["runtime_macos_arm64"]), \
+             patch("screator.translation.deployment.runtime_path", return_value=self.root / "runtime/0.34.3/ollama"):
             install_runtime(self.root, archive)
         binary = self.root / "runtime/0.34.3/ollama"
         self.assertEqual(binary.read_bytes(), self.payload)
@@ -118,11 +118,11 @@ class DeploymentTests(unittest.TestCase):
 
     def test_platform_runtime_selection(self):
         spec = {"runtime": {"version": "windows"}, "runtime_macos_arm64": {"version": "mac"}}
-        with patch("yt2bili.translation.runtime.sys.platform", "darwin"), \
-             patch("yt2bili.translation.runtime.platform.machine", return_value="arm64"):
+        with patch("screator.translation.runtime.sys.platform", "darwin"), \
+             patch("screator.translation.runtime.platform.machine", return_value="arm64"):
             self.assertEqual(runtime_spec(spec)["version"], "mac")
-        with patch("yt2bili.translation.runtime.sys.platform", "win32"), \
-             patch("yt2bili.translation.runtime.platform.machine", return_value="AMD64"):
+        with patch("screator.translation.runtime.sys.platform", "win32"), \
+             patch("screator.translation.runtime.platform.machine", return_value="AMD64"):
             self.assertEqual(runtime_spec(spec)["version"], "windows")
 
     def test_macos_runtime_archive_rejects_path_escape(self):

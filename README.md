@@ -1,8 +1,8 @@
-# Screator
+# screator
 
-项目已由 yt2bili 更名为 Screator。GitHub 仓库当前为 [YihanLi-erisaer/yt2bili](https://github.com/YihanLi-erisaer/yt2bili)，计划同步更名为 `Screator`。
+项目名称统一为小写 `screator`。项目仓库为 [YihanLi-erisaer/screator](https://github.com/YihanLi-erisaer/screator)。
 
-为兼容已有安装，内部 Python 包 `yt2bili`、`YT2BILI_*` 环境变量、应用标识和用户数据目录继续沿用；已有任务、设置和系统凭据无需迁移。CLI 支持 `python -m screator`，安装项目后也可使用 `screator` 命令，旧命令仍然可用。
+Python 包和命令均为 `screator`；桌面应用、安装包和配置项也采用小写名称。已有安装的数据目录及系统凭据会继续使用，避免改名后丢失任务和设置。CLI 支持 `python -m screator`，安装项目后也可使用 `screator` 命令。
 
 把**你有权转载**的 YouTube 视频下载下来，默认用本地开源大模型把标题和简介译成中文（也可优先使用 DeepL），再投稿到 B 站。
 
@@ -140,11 +140,11 @@ python -m screator repair TASK_ID
 
 完整校验在 Windows 上默认先尝试 D3D11VA（Intel / AMD / NVIDIA），失败后尝试适用的 CUDA 解码；Linux 先尝试适用的 CUDA，再尝试各 DRM render 节点的 VAAPI（Intel / AMD）；macOS 对 H.264/HEVC/AV1 尝试 VideoToolbox。D3D11VA/VAAPI 支持普通 8/10-bit 4:2:0 的 H.264/HEVC/AV1/VP9，实际能力取决于显卡、驱动和 FFmpeg 构建。每次硬件尝试必须输出硬件帧；失败会从头尝试下一方式，最后用 CPU 复核。其它格式、HDR 和音频使用 CPU（macOS VideoToolbox 的既有 HDR 路径保留）。CPU 处理 AV1 时建议使用包含 `libdav1d` 的 FFmpeg full 构建。
 
-可在桌面设置选择校验后端，或设置 `YT2BILI_HWACCEL=auto|cpu|cuda|d3d11va|vaapi|videotoolbox`。显式选择只尝试该硬件后端，失败仍从头用 CPU 复核。多卡可设置 `YT2BILI_HWACCEL_DEVICE`：Windows 使用 D3D11 适配器索引（如 `1`），Linux VAAPI 使用 render 节点（如 `/dev/dri/renderD129`），显式 CUDA 模式使用 CUDA 设备索引。设备设置参与校验缓存指纹；修改后重新解码。后端和设备选项参考 [FFmpeg 文档](https://ffmpeg.org/ffmpeg.html#Advanced-Video-options)。
+可在桌面设置选择校验后端，或设置 `SCREATOR_HWACCEL=auto|cpu|cuda|d3d11va|vaapi|videotoolbox`。显式选择只尝试该硬件后端，失败仍从头用 CPU 复核。多卡可设置 `SCREATOR_HWACCEL_DEVICE`：Windows 使用 D3D11 适配器索引（如 `1`），Linux VAAPI 使用 render 节点（如 `/dev/dri/renderD129`），显式 CUDA 模式使用 CUDA 设备索引。设备设置参与校验缓存指纹；修改后重新解码。后端和设备选项参考 [FFmpeg 文档](https://ffmpeg.org/ffmpeg.html#Advanced-Video-options)。
 
 完整校验成功后，会在视频旁写入 `<文件名>.validation.json` 缓存，程序重启后仍可复用。每次先检查轨道信息并计算**整文件 SHA-256**，只有内容、文件状态、预期时长、解码模式、校验规则版本及 FFmpeg/ffprobe 工具状态均匹配才跳过重复解码；仍需顺序读取整个文件，但无需再次逐帧解码。文件中间内容变化（即使大小和修改时间不变）也会使缓存失效。失败或中断的校验不写成功缓存；缓存损坏时重新校验，缓存写入失败不影响已通过的结果。上传后清理任务目录时缓存一并删除。
 
-需要强制重新完整校验时，设置 `$env:YT2BILI_VALIDATION_CACHE='0'`；恢复默认缓存用 `Remove-Item Env:YT2BILI_VALIDATION_CACHE`。以上设置也可写入 `.env`。这只影响校验方式，完整 MP4 仍直接上传，不会重新转码。
+需要强制重新完整校验时，设置 `$env:SCREATOR_VALIDATION_CACHE='0'`；恢复默认缓存用 `Remove-Item Env:SCREATOR_VALIDATION_CACHE`。以上设置也可写入 `.env`。这只影响校验方式，完整 MP4 仍直接上传，不会重新转码。
 
 `.part` 文件只由 yt-dlp 续传、完成后改名，程序不再根据文件头的时长把它提前当作成品。分片下载失败、解码报错、音视频长度不匹配会阻止上传。FFmpeg 可安装到 PATH，也可将 `ffmpeg.exe` 和 `ffprobe.exe` 放在项目 `bin/` 中。
 

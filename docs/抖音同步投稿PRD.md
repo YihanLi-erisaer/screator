@@ -1,4 +1,4 @@
-# Screator 抖音同步投稿 PRD
+# screator 抖音同步投稿 PRD
 
 版本：v1.0 评审稿  
 日期：2026-09-25  

@@ -11,12 +11,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from yt2bili import events
-from yt2bili.translation.config import DEFAULTS, validate, from_env
-from yt2bili.translation.service import translate, isolated_request, execution_slot
-from yt2bili.translation.types import TranslationError
-from yt2bili.translation.runtime import manifest
-from yt2bili.translation import deepl_provider
+from screator import events
+from screator.translation.config import DEFAULTS, validate, from_env
+from screator.translation.service import translate, isolated_request, execution_slot
+from screator.translation.types import TranslationError
+from screator.translation.runtime import manifest
+from screator.translation import deepl_provider
 
 
 class TranslationTests(unittest.TestCase):

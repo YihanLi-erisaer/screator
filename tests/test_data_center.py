@@ -4,10 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from yt2bili import history_transfer, publications
-from yt2bili.data_center import DataCenter
-from yt2bili.db import Task, TaskStore, _now
-from yt2bili.exceptions import Yt2BiliError
+from screator import history_transfer, publications
+from screator.data_center import DataCenter
+from screator.db import Task, TaskStore, _now
+from screator.exceptions import AppError
 
 
 def credentials():
@@ -111,7 +111,7 @@ class DataCenterTests(unittest.TestCase):
 
     def test_rejects_unbounded_pages_and_unknown_platform(self):
         for kwargs in ({"limit": 21}, {"offset": -1}, {"platform": "other"}):
-            with self.assertRaises(Yt2BiliError):
+            with self.assertRaises(AppError):
                 self.center.list(**kwargs)
 
 

@@ -7,11 +7,11 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-from yt2bili import publications
-from yt2bili.db import Task
-from yt2bili.desktop_service import DesktopService
-from yt2bili.exceptions import Yt2BiliError
-from yt2bili.paths import AppPaths
+from screator import publications
+from screator.db import Task
+from screator.desktop_service import DesktopService
+from screator.exceptions import AppError
+from screator.paths import AppPaths
 
 
 class Vault:
@@ -69,7 +69,7 @@ class HistoryTransferTests(unittest.TestCase):
         self.assertEqual({p["platform"]: p["remote_id"] for p in row["publications"]},
                          {"bilibili": "BV1234567890", "acfun": "123456"})
         self.assertEqual(target.dispatch("tasks.get", {"task_id": task.task_id})["desc_zh"], "中文简介")
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             target.dispatch("tasks.retry", {"task_id": task.task_id, "operation_id": str(uuid.uuid4())})
         second = self.root / "second.json"
         target.dispatch("history.export", {"path": str(second)})
@@ -85,7 +85,7 @@ class HistoryTransferTests(unittest.TestCase):
         data["records"].append(bad)
         file.write_text(json.dumps(data), encoding="utf-8")
         target = self.service("target")
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             target.dispatch("history.import", {"path": str(file)})
         self.assertEqual(target.dispatch("tasks.list", {"history": True})["total"], 0)
 
@@ -162,7 +162,7 @@ class HistoryTransferTests(unittest.TestCase):
         file = self.root / "bulk-import.json"
         other.dispatch("history.export", {"path": str(file)})
         service.dispatch("history.import", {"path": str(file)})
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             service.dispatch("history.delete_all", {})
         self.assertEqual(service.dispatch("tasks.list", {"history": True})["all_total"], 2)
 
@@ -180,7 +180,7 @@ class HistoryTransferTests(unittest.TestCase):
         service = self.service("bulk-active")
         task = self.task(service, "abcdefghijk")
         service.store.save_job(task.task_id, {"execution_state": "running"})
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             service.dispatch("history.delete_all", {"confirmed": True})
         self.assertIsNotNone(service.store.get(task.task_id))
         self.assertEqual(service.dispatch("tasks.list", {"history": True})["all_total"], 1)
@@ -205,9 +205,9 @@ class HistoryTransferTests(unittest.TestCase):
             db.execute("INSERT INTO legacy_task_map VALUES(?,?,?)", ("source", "old-id", task.task_id))
             db.execute("INSERT INTO import_conflicts VALUES(?,?,?,?)", ("source", "conflict", "{}", task.task_id))
         revision = service.store.require(task.task_id).revision
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             service.dispatch("history.delete", {"task_id": task.task_id, "expected_revision": revision})
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             service.dispatch("history.delete", {"task_id": task.task_id, "expected_revision": revision - 1, "confirmed": True})
         result = service.dispatch("history.delete", {"task_id": task.task_id, "expected_revision": revision, "confirmed": True})
         self.assertEqual(result["kind"], "local")
@@ -250,7 +250,7 @@ class HistoryTransferTests(unittest.TestCase):
         (outside / "video.mp4").write_bytes(b"keep")
         service.store.update(task.task_id, work_root=str(self.root / "safety" / "work"), work_dir=str(outside))
         revision = service.store.require(task.task_id).revision
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             service.dispatch("history.delete", {"task_id": task.task_id,
                               "expected_revision": revision, "confirmed": True})
         self.assertTrue((outside / "video.mp4").exists())
@@ -265,7 +265,7 @@ class HistoryTransferTests(unittest.TestCase):
                      status="ready", work_root=str(folder.parent), work_dir=str(folder))
         service.store.upsert(other)
         revision = service.store.require(task.task_id).revision
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             service.dispatch("history.delete", {"task_id": task.task_id,
                               "expected_revision": revision, "confirmed": True})
         self.assertTrue((folder / "video.mp4").exists())
@@ -274,7 +274,7 @@ class HistoryTransferTests(unittest.TestCase):
     def test_delete_record_rejects_active_status_even_without_job(self):
         service = self.service("active")
         task = self.task(service, "abcdefghijk", status="uploading", bv_id="")
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             service.dispatch("history.delete", {"task_id": task.task_id,
                               "expected_revision": service.store.require(task.task_id).revision, "confirmed": True})
         self.assertIsNotNone(service.store.get(task.task_id))
@@ -303,8 +303,8 @@ class HistoryTransferTests(unittest.TestCase):
         (folder / "video.mp4").write_bytes(b"video")
         service.store.update(task.task_id, work_root=str(folder.parent), work_dir=str(folder),
                              video_path=str(folder / "video.mp4"))
-        with patch("yt2bili.history_transfer.shutil.rmtree", side_effect=OSError("locked")):
-            with self.assertRaises(Yt2BiliError):
+        with patch("screator.history_transfer.shutil.rmtree", side_effect=OSError("locked")):
+            with self.assertRaises(AppError):
                 service.dispatch("history.delete", {"task_id": task.task_id,
                                   "expected_revision": service.store.require(task.task_id).revision, "confirmed": True})
         self.assertIsNotNone(service.store.get(task.task_id))
@@ -319,12 +319,12 @@ class HistoryTransferTests(unittest.TestCase):
         target.dispatch("history.import", {"path": str(file)})
         self.assertEqual(target.dispatch("history.delete", {"task_id": task.task_id, "expected_revision": 1, "confirmed": True})["kind"], "imported")
         self.assertEqual(target.dispatch("tasks.list", {"history": True})["total"], 0)
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             target.dispatch("history.delete", {"task_id": task.task_id, "expected_revision": 1, "confirmed": True})
 
         source.store.save_job(task.task_id, {"execution_state": "queued"})
         revision = source.store.require(task.task_id).revision
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             source.dispatch("history.delete", {"task_id": task.task_id, "expected_revision": revision, "confirmed": True})
         self.assertIsNotNone(source.store.get(task.task_id))
 

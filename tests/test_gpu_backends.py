@@ -6,11 +6,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from yt2bili import media, events
-from yt2bili.exceptions import InvalidMediaError, Yt2BiliError
-from yt2bili.translation.config import DEFAULTS, from_env, snapshot, validate
-from yt2bili.translation.runtime import local_session, runtime_environment, sha256
-from yt2bili.translation.types import TranslationError
+from screator import media, events
+from screator.exceptions import InvalidMediaError, AppError
+from screator.translation.config import DEFAULTS, from_env, snapshot, validate
+from screator.translation.runtime import local_session, runtime_environment, sha256
+from screator.translation.types import TranslationError
 
 
 class InferenceBackendTests(unittest.TestCase):
@@ -50,9 +50,9 @@ class InferenceBackendTests(unittest.TestCase):
         from types import SimpleNamespace
         self.assertEqual(snapshot(SimpleNamespace())["local_llm_backend"], "auto")
         for invalid in (None, "rocm", True, ["vulkan"]):
-            with self.subTest(value=invalid), self.assertRaises(Yt2BiliError):
+            with self.subTest(value=invalid), self.assertRaises(AppError):
                 validate({"local_llm_backend": invalid})
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             validate({"local_llm_mode": "external", "local_llm_base_url": "http://127.0.0.1:11434",
                       "local_llm_backend": "vulkan"})
 
@@ -66,18 +66,18 @@ class InferenceBackendTests(unittest.TestCase):
             # First readiness probe refuses the port; next probe sees our runtime.
             process.poll.side_effect = [None, 0]
             with patch("sys.platform", "win32"), patch.dict(os.environ, {}, clear=True), \
-                 patch("yt2bili.translation.runtime.runtime_spec", return_value={"version": "fixture"}), \
-                 patch("yt2bili.translation.runtime.runtime_path", return_value=binary), \
-                 patch("yt2bili.translation.runtime.request_json", side_effect=[TranslationError("LOCAL_UNAVAILABLE", "not running"), {"version": "fixture"}]), \
-                 patch("yt2bili.translation.runtime.subprocess.Popen", return_value=process) as launch, \
-                 patch("yt2bili.translation.runtime.ProcessTree"):
+                 patch("screator.translation.runtime.runtime_spec", return_value={"version": "fixture"}), \
+                 patch("screator.translation.runtime.runtime_path", return_value=binary), \
+                 patch("screator.translation.runtime.request_json", side_effect=[TranslationError("LOCAL_UNAVAILABLE", "not running"), {"version": "fixture"}]), \
+                 patch("screator.translation.runtime.subprocess.Popen", return_value=process) as launch, \
+                 patch("screator.translation.runtime.ProcessTree"):
                 with local_session(DEFAULTS, folder):
                     pass
             self.assertEqual(launch.call_args.kwargs["env"]["OLLAMA_IGPU_ENABLE"], "1")
 
     def test_external_session_never_launches_or_changes_server(self):
         config = {**DEFAULTS, "local_llm_mode": "external", "local_llm_base_url": "http://127.0.0.1:11434"}
-        with patch("yt2bili.translation.runtime.subprocess.Popen") as launch:
+        with patch("screator.translation.runtime.subprocess.Popen") as launch:
             with local_session(config, "components") as address:
                 self.assertEqual(address, config["local_llm_base_url"])
         launch.assert_not_called()
@@ -88,8 +88,8 @@ class ValidationBackendTests(unittest.TestCase):
         self.info = {"vcodec": "av1", "pix_fmt": "yuv420p", "color_transfer": None,
                      "has_video": True, "has_audio": True, "duration": 3,
                      "video_duration": 3, "audio_duration": 3}
-        self.env = patch.dict(os.environ, {"YT2BILI_HWACCEL": "auto", "YT2BILI_HWACCEL_DEVICE": "",
-                                           "YT2BILI_VALIDATION_CACHE": "0"})
+        self.env = patch.dict(os.environ, {"SCREATOR_HWACCEL": "auto", "SCREATOR_HWACCEL_DEVICE": "",
+                                           "SCREATOR_VALIDATION_CACHE": "0"})
         self.env.start()
         self.addCleanup(self.env.stop)
 
@@ -112,7 +112,7 @@ class ValidationBackendTests(unittest.TestCase):
         for system, backend, device in (("Windows", "d3d11va", "1"), ("Linux", "vaapi", "/dev/dri/renderD129"),
                                         ("Windows", "cuda", "1")):
             with self.subTest(backend=backend), patch.object(media.platform, "system", return_value=system), \
-                 patch.dict(os.environ, {"YT2BILI_HWACCEL": backend, "YT2BILI_HWACCEL_DEVICE": device}):
+                 patch.dict(os.environ, {"SCREATOR_HWACCEL": backend, "SCREATOR_HWACCEL_DEVICE": device}):
                 candidates = media._validation_decode_candidates(self.info)
                 self.assertEqual(len(candidates), 1)
                 self.assertEqual(candidates[0][1], backend)

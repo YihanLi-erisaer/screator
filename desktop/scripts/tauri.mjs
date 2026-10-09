@@ -23,11 +23,11 @@ const python = path.join(
   ".desktop-venv",
   process.platform === "win32" ? "Scripts/python.exe" : "bin/python",
 );
-if (!env.YT2BILI_PYTHON && existsSync(python)) env.YT2BILI_PYTHON = python;
-env.YT2BILI_PROJECT_ROOT = root;
-if (process.argv[2] === "dev" && !env.YT2BILI_WORKER) {
+if (!env.SCREATOR_PYTHON && existsSync(python)) env.SCREATOR_PYTHON = python;
+env.SCREATOR_PROJECT_ROOT = root;
+if (process.argv[2] === "dev" && !env.SCREATOR_WORKER) {
   const check = spawnSync(
-    env.YT2BILI_PYTHON || python,
+    env.SCREATOR_PYTHON || python,
     [
       "-c",
       "import sqlite3, yt_dlp, deepl, keyring, qrcode, psutil; from PIL import _imaging",

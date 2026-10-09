@@ -13,8 +13,8 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root))
-from yt2bili.translation.config import DEFAULTS
-from yt2bili.translation.runtime import manifest
+from screator.translation.config import DEFAULTS
+from screator.translation.runtime import manifest
 
 
 def main():
@@ -45,7 +45,7 @@ def main():
             payload={"provider":"local_llm","root":folder,"config":{**DEFAULTS,"local_llm_mode":"external",
                 "local_llm_base_url":f"http://127.0.0.1:{server.server_port}"},
                 "source":{"title":"Workflow","description":"Example","source_lang":"en"}}
-            command = [str(args.frozen.resolve()),"--translation-request"] if args.frozen else [sys.executable,"-m","yt2bili.translation.worker"]
+            command = [str(args.frozen.resolve()),"--translation-request"] if args.frozen else [sys.executable,"-m","screator.translation.worker"]
             reply=subprocess.run(command,input=json.dumps(payload),encoding="utf-8",capture_output=True,timeout=30,
                                  cwd=folder,env={**os.environ,"PYTHONPATH":str(root)})
             if reply.returncode:raise RuntimeError(reply.stderr[-1500:])

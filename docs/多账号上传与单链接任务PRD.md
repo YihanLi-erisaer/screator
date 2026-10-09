@@ -1,4 +1,4 @@
-# Screator 多账号上传与单链接任务 PRD（最多 5 个账号）
+# screator 多账号上传与单链接任务 PRD（最多 5 个账号）
 
 版本：v1.1 草案
 
@@ -50,14 +50,14 @@
 ### 2.2 当前入口与账号限制
 
 - `desktop/src/App.tsx` 的 `NewTask` 使用多行输入框，支持 TXT 导入，创建请求为 `tasks.create(text, mode, operation_id)`，没有目标账号字段。
-- `yt2bili/desktop_service.py::parse_urls` 按行解析、按视频 ID 去重，每批允许 1～200 条。`create` 对已有视频任务直接跳过。
-- `yt2bili/cli.py` 的 `run` 支持多个 URL 和 `--file`；单条、批量分别进入 `pipeline.run` 与 `pipeline.run_many`。
+- `screator/desktop_service.py::parse_urls` 按行解析、按视频 ID 去重，每批允许 1～200 条。`create` 对已有视频任务直接跳过。
+- `screator/cli.py` 的 `run` 支持多个 URL 和 `--file`；单条、批量分别进入 `pipeline.run` 与 `pipeline.run_many`。
 - `desktop_service.py` 只有一个登录会话和一份账号状态；`desktop_settings.py::build` 固定使用 `secrets/bili_cookies.json`。
 - 修改或登录账号调用全局 `ensure_idle`，任意任务运行时均可能阻止账号操作。多账号场景下须细化这一限制。
 
 ### 2.3 当前队列与上传限制
 
-- `yt2bili/scheduler.py::Scheduler` 创建 `download`、`validate`、`upload` 三个 FIFO 队列，每队列一个线程；不同阶段可以并行。
+- `screator/scheduler.py::Scheduler` 创建 `download`、`validate`、`upload` 三个 FIFO 队列，每队列一个线程；不同阶段可以并行。
 - 校验成功后，封面处理和翻译在上传阶段执行；预览任务在素材准备完成后进入 `ready` 并离开调度，不长期占住队列等待人工确认。
 - `tasks.submit` 会先重新进入共享校验队列，再投稿，避免编辑或文件变化绕过校验。
 - `pipeline.py` 存在全局 `_upload_lock`、`_last_upload_monotonic`；`locking.py::upload_guard` 还使用当前系统用户范围的固定 `account.lock` 与 `last-upload.json`。
@@ -379,15 +379,15 @@ python -m screator repair <task_id>
 - `desktop/src/App.tsx`：新建单链接与账号选择、任务列表/详情/历史、队列视图、账号操作、退出等待。
 - `desktop/src/SetupWizard.tsx`：首次账号绑定与后续账号添加入口（最多 5 个）。
 - `desktop/src/types.ts`、`preview.ts`、`bridge.ts`：任务身份、多账号类型、示例数据与协议；检查 Rust 外壳中的版本与退出处理。
-- `yt2bili/desktop_service.py`：单 URL 服务校验、账号门禁、任务去重、归属校验、旧库导入与幂等操作。
-- `yt2bili/desktop_auth.py`、`desktop_settings.py`、`config.py`：账号注册与 UID 校验、独立 Cookie、会话回调隔离、按账号构建运行设置。
-- `yt2bili/db.py`：账号表、task_id、唯一约束、作业/操作引用、迁移与备份。
-- `yt2bili/scheduler.py`：保留 download/validate 单通道，上传按账号分流，活动任务以 task_id 管理，按账号动态建立/回收最多 5 条上传队列，等待、取消与关闭遍历所有账号队列。
-- `yt2bili/pipeline.py`：消除按 video_id 查任务/目录的隐含假设、任务级日志、账号上传锁及尝试时点；不能只修改桌面 Scheduler 而保留核心按 video_id 覆盖任务。
-- `yt2bili/locking.py`：UID 级跨进程锁与间隔文件，账号凭据修改保护。
-- `yt2bili/bili_upload.py`：仍以显式 Cookie 路径调用 biliup；续期与上传的凭据必须指向同一已验证 UID，异常需保留可判断的调用阶段。
-- `yt2bili/events.py`、`desktop_worker.py`：task_id/account_id 事件与日志上下文、脱敏、协议兼容。
-- `yt2bili/cli.py`：单链接、显式选账号、历史任务定位及帮助。
+- `screator/desktop_service.py`：单 URL 服务校验、账号门禁、任务去重、归属校验、旧库导入与幂等操作。
+- `screator/desktop_auth.py`、`desktop_settings.py`、`config.py`：账号注册与 UID 校验、独立 Cookie、会话回调隔离、按账号构建运行设置。
+- `screator/db.py`：账号表、task_id、唯一约束、作业/操作引用、迁移与备份。
+- `screator/scheduler.py`：保留 download/validate 单通道，上传按账号分流，活动任务以 task_id 管理，按账号动态建立/回收最多 5 条上传队列，等待、取消与关闭遍历所有账号队列。
+- `screator/pipeline.py`：消除按 video_id 查任务/目录的隐含假设、任务级日志、账号上传锁及尝试时点；不能只修改桌面 Scheduler 而保留核心按 video_id 覆盖任务。
+- `screator/locking.py`：UID 级跨进程锁与间隔文件，账号凭据修改保护。
+- `screator/bili_upload.py`：仍以显式 Cookie 路径调用 biliup；续期与上传的凭据必须指向同一已验证 UID，异常需保留可判断的调用阶段。
+- `screator/events.py`、`desktop_worker.py`：task_id/account_id 事件与日志上下文、脱敏、协议兼容。
+- `screator/cli.py`：单链接、显式选账号、历史任务定位及帮助。
 - `youtube.py`、`media.py`：原则上保持媒体算法，仅适配调用方提供的任务目录/上下文；任何逻辑变化须单独说明并回归。
 - `tests/`、`desktop/e2e/`、现有 smoke 脚本及 README/桌面方案：更新新契约和回归依据，不把旧验收结果作为本次结果。
 
@@ -477,7 +477,7 @@ python -m screator repair <task_id>
 
 文档：`README.md`、`三期桌面端实现方案.md`、`第一期开发与验收记录.md`、`desktop/README.md`。
 
-核心：`yt2bili/desktop_service.py`、`scheduler.py`、`pipeline.py`、`db.py`、`locking.py`、`desktop_auth.py`、`desktop_settings.py`、`config.py`、`bili_upload.py`、`cli.py`、`events.py`、`desktop_worker.py`。
+核心：`screator/desktop_service.py`、`scheduler.py`、`pipeline.py`、`db.py`、`locking.py`、`desktop_auth.py`、`desktop_settings.py`、`config.py`、`bili_upload.py`、`cli.py`、`events.py`、`desktop_worker.py`。
 
 界面与测试：`desktop/src/App.tsx`、`types.ts`、`bridge.ts`，以及 `tests/test_stage_queues.py`、`test_pipeline_concurrency.py`、`test_media_safety.py`、`test_desktop.py` 的现有测试覆盖点。
 

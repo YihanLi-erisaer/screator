@@ -595,7 +595,7 @@ export default function App() {
             <img className="brand-icon-light" src="/brand.png" alt="" />
             <img className="brand-icon-dark" src="/brand-dark.png" alt="" />
             <span>
-              Screator<small>by StarDazz</small>
+              screator<small>by StarDazz</small>
             </span>
           </a>
           <div className="nav-label">工作空间</div>
@@ -1107,7 +1107,7 @@ export default function App() {
         </div>
         {setup && config && (
           <Modal
-            title="欢迎使用 Screator"
+            title="欢迎使用 screator"
             close={() => {
               if (!busy)
                 action(async () => {
@@ -1190,7 +1190,7 @@ export default function App() {
         ))}
         {closing && (
           <Modal
-            title="退出 Screator"
+            title="退出 screator"
             close={() => {
               if (!shutdownStarted) setClosing(false);
             }}

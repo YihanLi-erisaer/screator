@@ -9,14 +9,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from yt2bili.db import Task, TaskStore
-from yt2bili import publications
-from yt2bili.desktop_settings import DesktopSettings
-from yt2bili.paths import AppPaths
-from yt2bili.translation import tasks
-from yt2bili.translation.config import DEFAULTS
-from yt2bili.translation.types import TranslationResult, TranslationError
-from yt2bili.translation.deployment import safe_extract
+from screator.db import Task, TaskStore
+from screator import publications
+from screator.desktop_settings import DesktopSettings
+from screator.paths import AppPaths
+from screator.translation import tasks
+from screator.translation.config import DEFAULTS
+from screator.translation.types import TranslationResult, TranslationError
+from screator.translation.deployment import safe_extract
 
 
 class StorageTests(unittest.TestCase):

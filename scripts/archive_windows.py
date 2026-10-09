@@ -7,11 +7,11 @@ import shutil
 root = Path(__file__).resolve().parent.parent
 output = root / "dist/windows"
 version = json.loads((root / "desktop/package.json").read_text(encoding="utf-8"))["version"]
-installer = output / f"Screator_{version}_x64-setup.exe"
+installer = output / f"screator_{version}_x64-setup.exe"
 if not installer.is_file():
     raise FileNotFoundError(f"Installer is missing: {installer}")
 shutil.copy2(root / "docs/Windows安装与打包.md", output / "使用说明.md")
-archive = Path(shutil.make_archive(str(output / f"Screator_{version}_x64-portable"), "zip", output, "Screator"))
+archive = Path(shutil.make_archive(str(output / f"screator_{version}_x64-portable"), "zip", output, "screator"))
 files = [installer, archive]
 lines = []
 for file in files:

@@ -15,10 +15,10 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from yt2bili.config import load_settings
-from yt2bili.translation.service import translate
-from yt2bili.translation.runtime import manifest
-from yt2bili.exceptions import Yt2BiliError
+from screator.config import load_settings
+from screator.translation.service import translate
+from screator.translation.runtime import manifest
+from screator.exceptions import AppError
 
 
 def main():
@@ -36,7 +36,7 @@ def main():
         try:
             result=translate(settings,sample['title'],sample.get('description',''),sample.get('source_lang'),80,1800)
             row={'index':index,'ok':True,'result':asdict(result)}
-        except Yt2BiliError as exc:
+        except AppError as exc:
             row={'index':index,'ok':False,'error':str(exc)}
         row['wall_ms']=round((time.monotonic()-started)*1000)
         records.append(row)

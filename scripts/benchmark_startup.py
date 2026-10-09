@@ -31,7 +31,7 @@ def worker_ready(profile):
     messages = queue.Queue()
     with tempfile.TemporaryFile(mode="w+") as errors:
         started = time.perf_counter()
-        process = subprocess.Popen([sys.executable, "-u", "-m", "yt2bili.desktop_worker",
+        process = subprocess.Popen([sys.executable, "-u", "-m", "screator.desktop_worker",
             "--data-dir", str(profile), "--resources", str(ROOT)], cwd=ROOT,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors, text=True,
             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
@@ -78,9 +78,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix="screator-startup-") as temporary:
         base = Path(temporary)
         samples = [worker_ready(base / f"worker-{index}") for index in range(args.samples)]
-        from yt2bili.db import TaskStore
-        from yt2bili.desktop_service import DesktopService
-        from yt2bili.paths import AppPaths
+        from screator.db import TaskStore
+        from screator.desktop_service import DesktopService
+        from screator.paths import AppPaths
         scale = []
         for index, count in enumerate(args.tasks):
             paths = AppPaths.default(str(base / f"scale-{index}"), str(ROOT))

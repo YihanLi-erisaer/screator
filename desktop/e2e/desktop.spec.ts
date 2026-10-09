@@ -388,7 +388,7 @@ test("retranslation clears the old text and enters the queue after confirmation"
 test("first-run guide starts with storage selection", async ({ page }) => {
   await page.goto("/?preview");
   await page.getByRole("button", { name: "开始配置" }).click();
-  await expect(page.getByRole("dialog")).toContainText("欢迎使用 Screator");
+  await expect(page.getByRole("dialog")).toContainText("欢迎使用 screator");
   await expect(page.getByLabel("素材工作目录")).toHaveValue(/work/);
   await expect(page.getByRole("dialog")).toContainText("运行环境");
   await page.getByRole("button", { name: "关闭对话框" }).click();

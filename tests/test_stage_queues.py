@@ -8,10 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from yt2bili import bili_upload, media, pipeline, youtube
-from yt2bili.config import Settings
-from yt2bili.db import Task, TaskStore
-from yt2bili.exceptions import InvalidMediaError, Yt2BiliError
+from screator import bili_upload, media, pipeline, youtube
+from screator.config import Settings
+from screator.db import Task, TaskStore
+from screator.exceptions import InvalidMediaError, AppError
 
 
 class StageQueueTests(unittest.TestCase):
@@ -165,7 +165,7 @@ class StageQueueTests(unittest.TestCase):
     def test_download_failure_does_not_stop_other_jobs(self):
         def download(url, *args, **kwargs):
             if url == "A":
-                raise Yt2BiliError("network failed")
+                raise AppError("network failed")
             return self.download(url, *args, **kwargs)
 
         _, failures = self.run_batch("AB", download=download)
@@ -176,7 +176,7 @@ class StageQueueTests(unittest.TestCase):
     def test_upload_failure_preserves_files_and_queue_continues(self):
         def upload(settings, log, video, *args):
             if video.parent.name == "A":
-                raise Yt2BiliError("upload failed")
+                raise AppError("upload failed")
             return self.upload(settings, log, video, *args)
 
         _, failures = self.run_batch("AB", upload=upload)
@@ -211,7 +211,7 @@ class StageQueueTests(unittest.TestCase):
 
     def test_old_upload_entry_cannot_bypass_account_coordinator(self):
         self.assertEqual(Settings.__dataclass_fields__["upload_gap_seconds"].default, 20)
-        with patch.object(bili_upload, "upload") as upload, self.assertRaises(Yt2BiliError):
+        with patch.object(bili_upload, "upload") as upload, self.assertRaises(AppError):
             pipeline._upload_serialized(self.settings, logging.getLogger(), Path("video"), Path("cover"), "title", "desc", "url")
         upload.assert_not_called()
 

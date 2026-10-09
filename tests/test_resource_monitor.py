@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import psutil
 
-from yt2bili.exceptions import Yt2BiliError
-from yt2bili.resource_monitor import ResourceMonitor
+from screator.exceptions import AppError
+from screator.resource_monitor import ResourceMonitor
 
 
 class Process:
@@ -23,7 +23,7 @@ class Process:
     def create_time(self): return self.created
     def is_running(self): return self.running
     def status(self): return psutil.STATUS_RUNNING
-    def name(self): return "ffmpeg.exe" if self.pid != 1 else "Screator.exe"
+    def name(self): return "ffmpeg.exe" if self.pid != 1 else "screator.exe"
     def ppid(self): return 1
     def children(self, recursive=False):
         assert recursive
@@ -47,7 +47,7 @@ class ResourceMonitorTests(unittest.TestCase):
         self.monitor.application_scope = True
         self.clock = 100.0
         self.addCleanup(patch.stopall)
-        patch("yt2bili.resource_monitor.time.monotonic", side_effect=lambda: self.clock).start()
+        patch("screator.resource_monitor.time.monotonic", side_effect=lambda: self.clock).start()
         patch.object(psutil, "cpu_count", return_value=4).start()
         patch.object(psutil, "virtual_memory", return_value=SimpleNamespace(total=4096)).start()
 
@@ -116,21 +116,21 @@ class ResourceMonitorTests(unittest.TestCase):
         first = self.monitor.snapshot()
         self.assertIs(self.monitor.snapshot(), first)
         self.root.running = False
-        with self.assertRaises(Yt2BiliError): self.monitor.snapshot()
+        with self.assertRaises(AppError): self.monitor.snapshot()
 
     def test_arbitrary_owner_pid_is_rejected(self):
         current = SimpleNamespace(parent=lambda: None)
-        with patch.dict(os.environ, {"YT2BILI_APP_PID": "987654"}), patch.object(psutil, "Process", return_value=current):
-            with self.assertRaises(Yt2BiliError): ResourceMonitor().snapshot()
+        with patch.dict(os.environ, {"SCREATOR_APP_PID": "987654"}), patch.object(psutil, "Process", return_value=current):
+            with self.assertRaises(AppError): ResourceMonitor().snapshot()
 
     def test_missing_component_has_actionable_error(self):
         with patch.dict(sys.modules, {"psutil": None}):
-            with self.assertRaisesRegex(Yt2BiliError, "组件缺失"):
+            with self.assertRaisesRegex(AppError, "组件缺失"):
                 ResourceMonitor().snapshot()
 
     def test_system_process_enumeration_denial_is_actionable(self):
         with patch.object(self.root, "children", side_effect=PermissionError("sysctl denied")):
-            with self.assertRaisesRegex(Yt2BiliError, "暂时无法读取"):
+            with self.assertRaisesRegex(AppError, "暂时无法读取"):
                 self.monitor.snapshot()
 
 
@@ -148,8 +148,8 @@ worker = None
 try:
     assert load.stdout.readline().strip() == "ready"
     with tempfile.TemporaryDirectory() as folder:
-        env = {**os.environ, "YT2BILI_APP_PID": str(os.getpid()), "YT2BILI_COORDINATION_DIR": folder}
-        command = [os.environ["YT2BILI_TEST_FROZEN_WORKER"]] if os.environ.get("YT2BILI_TEST_FROZEN_WORKER") else [sys.executable, "-u", "-m", "yt2bili.desktop_worker"]
+        env = {**os.environ, "SCREATOR_APP_PID": str(os.getpid()), "SCREATOR_COORDINATION_DIR": folder}
+        command = [os.environ["SCREATOR_TEST_FROZEN_WORKER"]] if os.environ.get("SCREATOR_TEST_FROZEN_WORKER") else [sys.executable, "-u", "-m", "screator.desktop_worker"]
         worker = subprocess.Popen(command + ["--data-dir", folder, "--resources", root], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         def sample(ident):
             worker.stdin.write(json.dumps({"protocol_version":2,"request_id":ident,"method":"system.resources","params":{}})+"\n")
@@ -174,7 +174,7 @@ finally:
         external = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         self.addCleanup(lambda: (external.kill(), external.wait()) if external.poll() is None else None)
         environment = dict(os.environ)
-        environment.pop("YT2BILI_APP_PID", None)
+        environment.pop("SCREATOR_APP_PID", None)
         root = Path(__file__).resolve().parent.parent
         result = subprocess.run([sys.executable, "-c", owner_code], cwd=root, env=environment,
                                 capture_output=True, text=True, timeout=40)

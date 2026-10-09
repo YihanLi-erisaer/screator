@@ -6,10 +6,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from yt2bili import history_transfer, publications
-from yt2bili.db import Task
-from yt2bili.desktop_service import DesktopService
-from yt2bili.paths import AppPaths
+from screator import history_transfer, publications
+from screator.db import Task
+from screator.desktop_service import DesktopService
+from screator.paths import AppPaths
 
 
 class Vault:
@@ -34,12 +34,12 @@ class StartupTests(unittest.TestCase):
 
     def test_base_settings_and_health_do_not_wait_for_service_detection(self):
         with patch.object(self.service.config.vault, "get_password", side_effect=AssertionError("vault accessed")), \
-             patch("yt2bili.translation.runtime.status", side_effect=AssertionError("runtime probed")), \
+             patch("screator.translation.runtime.status", side_effect=AssertionError("runtime probed")), \
              patch.object(self.service.scheduler, "snapshot", side_effect=AssertionError("queue scanned")):
             config = self.service.dispatch("settings.get", {"check_services": False})
             self.assertTrue(config["readiness_pending"])
             self.assertEqual(self.service.health()["protocol_version"], 2)
-        with patch("yt2bili.translation.runtime.status", return_value={"state": "ready"}):
+        with patch("screator.translation.runtime.status", return_value={"state": "ready"}):
             status = self.service.dispatch("settings.status", {})
             self.assertTrue(status["translation_ready"])
             self.assertTrue(status["has_deepl_key"])
@@ -65,7 +65,7 @@ class StartupTests(unittest.TestCase):
             db.execute("INSERT INTO imported_publishing_history VALUES(?,?,?)", ("imported", json.dumps(record), stamp))
             db.execute("INSERT INTO bilibili_accounts(account_id,uid,slot,created_at,updated_at) VALUES('account','123',1,?,?)", (stamp, stamp))
         with patch.object(self.service.store, "list_all", side_effect=AssertionError("full history loaded")), \
-             patch("yt2bili.history_transfer.list_imported", side_effect=AssertionError("all imports decoded")):
+             patch("screator.history_transfer.list_imported", side_effect=AssertionError("all imports decoded")):
             first = self.service.list_tasks(history=True, limit=1, search="ä title")
             second = self.service.list_tasks(history=True, limit=1, offset=1)
             self.assertEqual(first["items"][0]["task_id"], "local")
@@ -86,7 +86,7 @@ class StartupTests(unittest.TestCase):
         self.service.store.save_job(settled.task_id, {"execution_state": "complete"})
         before = self.service.store.require(settled.task_id)
         self.service.close()
-        with patch("yt2bili.db.TaskStore.list_all", side_effect=AssertionError("full history loaded")):
+        with patch("screator.db.TaskStore.list_all", side_effect=AssertionError("full history loaded")):
             service = DesktopService(self.paths, lambda *_: None, vault=Vault())
         self.addCleanup(service.close)
         after = service.store.require(settled.task_id)
@@ -111,7 +111,7 @@ class StartupTests(unittest.TestCase):
     def test_desktop_import_defers_downloader_deepl_and_image_modules(self):
         root = Path(__file__).resolve().parent.parent
         result = subprocess.run([sys.executable, "-c",
-            "import sys; import yt2bili.desktop_service; "
+            "import sys; import screator.desktop_service; "
             "assert not any(name in sys.modules for name in ('yt_dlp','deepl','PIL.Image'))"],
             cwd=root, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)

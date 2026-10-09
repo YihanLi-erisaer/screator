@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from yt2bili import bili_upload, events
+from screator import bili_upload, events
 
 
 class UploadArgumentTests(unittest.TestCase):
@@ -16,7 +16,7 @@ class UploadArgumentTests(unittest.TestCase):
             executable = bili_upload.find_biliup(
                 SimpleNamespace(biliup_bin=None, root=root, bin_dir=root / "bin")
             )
-        except bili_upload.Yt2BiliError:
+        except bili_upload.AppError:
             self.skipTest("Local biliup executable is required for parser regression")
 
         def parse_only(cmd, **kwargs):

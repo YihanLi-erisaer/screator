@@ -1,4 +1,4 @@
-# Screator AcFun 同步投稿技术实现方案
+# screator AcFun 同步投稿技术实现方案
 
 版本：v1.4 安全验证与素材复用实现记录
 
@@ -25,7 +25,7 @@
 
 ## 实施现状（2026-09-26）
 
-代码已接入 `yt2bili/acfun.py`、数据库 v5、`acfun_accounts`/`acfun_attempts`、AcFun lane、桌面 RPC、账号与新建任务界面、CLI 和模拟测试。新建任务的 AcFun 同步选项默认不勾选，扫码 Cookie 留在系统凭据库；最终 `createDouga` 发送前先记录意图，只有有效 `dougaId` 记为已提交。`createVideo` 或最终创建响应不确定时保留素材并转待核对；确认未提交后才允许手动继续。预览和自动模式均可选 AcFun，自动模式创建时要求 AcFun 默认分区 ID。
+代码已接入 `screator/acfun.py`、数据库 v5、`acfun_accounts`/`acfun_attempts`、AcFun lane、桌面 RPC、账号与新建任务界面、CLI 和模拟测试。新建任务的 AcFun 同步选项默认不勾选，扫码 Cookie 留在系统凭据库；最终 `createDouga` 发送前先记录意图，只有有效 `dougaId` 记为已提交。`createVideo` 或最终创建响应不确定时保留素材并转待核对；确认未提交后才允许手动继续。预览和自动模式均可选 AcFun，自动模式创建时要求 AcFun 默认分区 ID。
 
 本次更新：设置新增 `acfun_channel_id`，不沿用 Bilibili 的 `bili_tid`；创建任务时将该值及 Bilibili 标签写入 AcFun 快照。翻译阶段在同一源标题上分别执行 Bilibili 标题/简介翻译与 AcFun 50 字标题翻译，后者记录为 `acfun_title`；共用简介按 1000 字上限生成。预览编辑共用简介时同步更新 AcFun 快照，AcFun 投稿卡只单独编辑标题和分区。自动模式经独立 lane 提交，最终回执仍以 `dougaId` 为准。
 
@@ -56,13 +56,13 @@
 
 | 位置 | 当前行为 | 实施改动 |
 |---|---|---|
-| `yt2bili/db.py` | schema v4；任务以 `task_id` 隔离，父任务绑定一个 Bilibili 账号 | 新增明确的 v4→v5 迁移；父任务继续持有素材，不复制父任务 |
-| `yt2bili/publications.py` | 平台 CHECK 只接受 `bilibili/douyin`；`dual()` 以存在抖音判断多目标；`account_label` 二选一 | 支持 `acfun`，增加 `multi_target()`，用平台注册表解析账号标签与目标状态 |
-| `yt2bili/scheduler.py` | `douyin_lane` 单列；`fanout()` 非抖音一律进入 Bilibili；快照、唤醒和退出遍历写死 | 注册 `acfun_lane`，按 `(platform, account_id)` 路由；所有目标共用父工作锁、各持取消事件 |
-| `yt2bili/desktop_service.py` | `tasks.create` 仅有 `sync_douyin`；抖音创建/去重路径写死 | 增加 AcFun 目标的前置校验和同一事务创建；保留旧请求兼容 |
-| `yt2bili/douyin.py` / `douyin_broker.py` | 抖音特定 OAuth、接口与单账号服务 | 不复用抖音 OAuth 或 broker；仅借鉴状态和投稿台账边界，AcFun 本机适配独立 |
+| `screator/db.py` | schema v4；任务以 `task_id` 隔离，父任务绑定一个 Bilibili 账号 | 新增明确的 v4→v5 迁移；父任务继续持有素材，不复制父任务 |
+| `screator/publications.py` | 平台 CHECK 只接受 `bilibili/douyin`；`dual()` 以存在抖音判断多目标；`account_label` 二选一 | 支持 `acfun`，增加 `multi_target()`，用平台注册表解析账号标签与目标状态 |
+| `screator/scheduler.py` | `douyin_lane` 单列；`fanout()` 非抖音一律进入 Bilibili；快照、唤醒和退出遍历写死 | 注册 `acfun_lane`，按 `(platform, account_id)` 路由；所有目标共用父工作锁、各持取消事件 |
+| `screator/desktop_service.py` | `tasks.create` 仅有 `sync_douyin`；抖音创建/去重路径写死 | 增加 AcFun 目标的前置校验和同一事务创建；保留旧请求兼容 |
+| `screator/douyin.py` / `douyin_broker.py` | 抖音特定 OAuth、接口与单账号服务 | 不复用抖音 OAuth 或 broker；仅借鉴状态和投稿台账边界，AcFun 本机适配独立 |
 | `desktop/src/App.tsx` / `Douyin.tsx` / `types.ts` | 新建弹窗只有抖音开关，Publication 平台联合类型只含两个值 | 增 AcFun 状态、开关、账号卡片、元数据编辑与分平台进度 |
-| `yt2bili/desktop_settings.py`、CLI、`desktop/src/preview.ts` | 抖音设置和模拟状态专用 | 加 AcFun 分区设置、CLI 选项与前端预览模拟；旧版全局实验开关在加载设置时忽略 |
+| `screator/desktop_settings.py`、CLI、`desktop/src/preview.ts` | 抖音设置和模拟状态专用 | 加 AcFun 分区设置、CLI 选项与前端预览模拟；旧版全局实验开关在加载设置时忽略 |
 
 当前 `publications.project()` 已依据所有目标状态聚合，不要求固定两个目标；`can_cleanup()` 也按全部目标判断。这两处保留原语义，但需要三目标乱序测试。当前 `scheduler._recover()` 只通过 `dual()` 进入多目标恢复路径，必须改为“目标数 > 1”或统一按 publication 恢复，否则仅选 AcFun 的任务会走旧单平台恢复逻辑。
 

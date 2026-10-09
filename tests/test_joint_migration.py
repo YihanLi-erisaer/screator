@@ -7,10 +7,10 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from yt2bili.db import Task, TaskStore
-from yt2bili.translation import tasks
-from yt2bili.translation.config import DEFAULTS
-from yt2bili.translation.types import TranslationResult
+from screator.db import Task, TaskStore
+from screator.translation import tasks
+from screator.translation.config import DEFAULTS
+from screator.translation.types import TranslationResult
 from types import SimpleNamespace
 
 

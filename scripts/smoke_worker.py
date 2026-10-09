@@ -13,8 +13,8 @@ parser.add_argument("--resources", type=Path)
 parser.add_argument("--protocol-only", action="store_true", help="Skip the FFmpeg media self-test")
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
-with tempfile.TemporaryDirectory(prefix="yt2bili-smoke-") as folder:
-    command = [str(Path(args.frozen).resolve())] if args.frozen else [sys.executable, "-u", "-m", "yt2bili.desktop_worker"]
+with tempfile.TemporaryDirectory(prefix="screator-smoke-") as folder:
+    command = [str(Path(args.frozen).resolve())] if args.frozen else [sys.executable, "-u", "-m", "screator.desktop_worker"]
     command += ["--data-dir", folder, "--resources", str(args.resources.resolve() if args.resources else root)]
     environment = {**os.environ, "PYTHONPATH": str(root) + os.pathsep + os.environ.get("PYTHONPATH", ""), "PYTHONIOENCODING": "utf-8"}
     methods = ["system.health", "settings.get", "tasks.list", "system.diagnostics", "system.resources"]

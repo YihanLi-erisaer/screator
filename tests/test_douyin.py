@@ -9,10 +9,10 @@ from unittest.mock import patch
 
 import test_desktop as desktop_tests
 from test_multi_account import credentials
-from yt2bili import bili_upload, publications
-from yt2bili.db import TaskStore
-from yt2bili.douyin import BrokerError
-from yt2bili.exceptions import Yt2BiliError
+from screator import bili_upload, publications
+from screator.db import TaskStore
+from screator.douyin import BrokerError
+from screator.exceptions import AppError
 
 
 class DouyinTests(unittest.TestCase):
@@ -40,12 +40,12 @@ class DouyinTests(unittest.TestCase):
 
     def test_not_logged_in_cannot_create_sync_task(self):
         with patch.object(self.service.douyin, "request", return_value={"account": None}):
-            with self.assertRaises(Yt2BiliError): self.create_dual()
+            with self.assertRaises(AppError): self.create_dual()
         self.assertEqual(self.service.store.list_all(), [])
 
     def test_auto_requires_approved_capability(self):
         with patch.object(self.service.douyin, "request", return_value={"account": {"client_key": "a", "open_id": "u"}, "capabilities": {"auto_publish": False}}):
-            with self.assertRaises(Yt2BiliError): self.create_dual(mode="auto")
+            with self.assertRaises(AppError): self.create_dual(mode="auto")
         self.assertEqual(self.service.store.list_all(), [])
 
     def test_preview_confirms_both_once_and_uses_independent_text(self):
@@ -121,8 +121,8 @@ class DouyinTests(unittest.TestCase):
             self.wait_idle()
             self.assertEqual(self.service.task(identity).status, "submission_unknown")
             p = publications.for_platform(self.service.store, identity, "douyin")
-            with self.assertRaises(Yt2BiliError): self.service.retry_publication(p["publication_id"], "no-unknown-retry")
-            with self.assertRaises(Yt2BiliError): self.service.abandon_publication(p["publication_id"])
+            with self.assertRaises(AppError): self.service.retry_publication(p["publication_id"], "no-unknown-retry")
+            with self.assertRaises(AppError): self.service.abandon_publication(p["publication_id"])
             self.assertTrue(Path(self.service.task(identity).video_path).is_file())
             self.assertEqual(sum(path.endswith("/submit") for _, path in calls), 1)
 
@@ -131,7 +131,7 @@ class DouyinTests(unittest.TestCase):
         with self.mocks(), patch.object(self.service.douyin, "request", side_effect=self.broker):
             self.create_dual()
             self.wait_idle()
-            with self.assertRaises(Yt2BiliError): self.create_dual(account=second["account_id"])
+            with self.assertRaises(AppError): self.create_dual(account=second["account_id"])
             self.assertEqual(len(self.service.store.list_all()), 1)
             self.service.create("https://youtu.be/abcdefghijk", "bili-only-second", second["account_id"])
             self.wait_idle()
@@ -141,7 +141,7 @@ class DouyinTests(unittest.TestCase):
         with self.mocks(), patch.object(self.service.douyin, "request", side_effect=self.broker):
             identity = self.create_dual()
             self.wait_idle()
-            with self.assertRaises(Yt2BiliError): self.service.douyin.archive()
+            with self.assertRaises(AppError): self.service.douyin.archive()
             original = self.service.douyin.account()
             with self.assertRaises(sqlite3.IntegrityError), self.service.store.transaction() as db:
                 db.execute("UPDATE douyin_accounts SET open_id='other'")
@@ -158,7 +158,7 @@ class DouyinTests(unittest.TestCase):
             pubs = publications.items(self.service.store, identity)
             revisions = {p["publication_id"]: p["revision"] for p in pubs}
             self.service.update_publication(pubs[1]["publication_id"], "new text", pubs[1]["revision"])
-            with self.assertRaises(Yt2BiliError): self.service.submit(identity, "stale-submit", list(revisions), revisions)
+            with self.assertRaises(AppError): self.service.submit(identity, "stale-submit", list(revisions), revisions)
             self.assertEqual(len(self.uploads), 0)
 
     def test_douyin_fifo_does_not_block_next_shared_preparation(self):
@@ -205,7 +205,7 @@ class DouyinTests(unittest.TestCase):
             self.assertEqual(self.service.task(identity).status, "submitted")
 
     def test_shutdown_waiting_target_preserves_success_and_material(self):
-        from yt2bili.douyin import AuthRequired
+        from screator.douyin import AuthRequired
         with self.mocks(), patch.object(self.service.douyin, "request", side_effect=self.broker), patch.object(self.service.douyin, "publish", side_effect=AuthRequired("expired")):
             identity = self.create_dual(mode="auto")
             self.wait_until(lambda: bool(self.service.task(identity).bv_id), "Bili receipt")
@@ -217,7 +217,7 @@ class DouyinTests(unittest.TestCase):
             self.assertTrue(Path(self.service.task(identity).video_path).is_file())
 
     def test_douyin_validation_failure_does_not_block_bili(self):
-        with self.mocks(), patch.object(self.service.douyin, "request", side_effect=self.broker), patch.object(self.service.douyin, "validate_assets", side_effect=Yt2BiliError("视频超过 15 分钟")):
+        with self.mocks(), patch.object(self.service.douyin, "request", side_effect=self.broker), patch.object(self.service.douyin, "validate_assets", side_effect=AppError("视频超过 15 分钟")):
             identity = self.create_dual(mode="auto")
             self.wait_idle()
             pubs = publications.items(self.service.store, identity)
@@ -227,7 +227,7 @@ class DouyinTests(unittest.TestCase):
 
     def test_v3_migration_backs_up_and_does_not_create_douyin_targets(self):
         path = Path(self.tmp.name) / "migration" / "tasks.sqlite"
-        from yt2bili.db import Task
+        from screator.db import Task
         store = TaskStore(path)
         task = Task("abcdefghijk", "url", "submitted", bv_id="BV1234567890")
         store.upsert(task)
@@ -249,7 +249,7 @@ class BrokerTests(unittest.TestCase):
     def setUp(self):
         import tempfile
         from cryptography.fernet import Fernet
-        from yt2bili.douyin_broker import Broker
+        from screator.douyin_broker import Broker
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.calls = []
@@ -274,7 +274,7 @@ class BrokerTests(unittest.TestCase):
         self.broker.update(self.identity, media_id="video", cover_id="cover")
 
     def test_oauth_state_one_use_and_tokens_encrypted(self):
-        from yt2bili.douyin_broker import Rejected
+        from screator.douyin_broker import Rejected
         with self.assertRaises(Rejected): self.broker.callback_code("code", "wrong-state")
         self.assertNotIn("secret-access", self.broker.value("token"))
         self.assertEqual(self.broker.token()["open_id"], "o")
@@ -293,7 +293,7 @@ class BrokerTests(unittest.TestCase):
             self.assertEqual(api.call_count, 1)
 
     def test_restart_creating_is_unknown(self):
-        from yt2bili.douyin_broker import Broker
+        from screator.douyin_broker import Broker
         self.registered()
         self.broker.update(self.identity, status="creating")
         reopened = Broker(self.tmp.name, "app", "secret", "https://test.example/oauth/callback", "x"*32, self.key)
@@ -301,13 +301,13 @@ class BrokerTests(unittest.TestCase):
         finally: reopened.db.close()
 
     def test_explicit_business_error_is_failed_not_success(self):
-        from yt2bili.douyin_broker import Rejected
+        from screator.douyin_broker import Rejected
         self.registered()
         with patch.object(self.broker.api, "call", side_effect=Rejected("error_code=28001018", code="28001018")):
             self.assertEqual(self.broker.submit(self.identity)["status"], "failed")
 
     def test_platform_internal_network_error_is_uncertain(self):
-        from yt2bili.douyin_broker import Rejected
+        from screator.douyin_broker import Rejected
         self.registered()
         with patch.object(self.broker.api, "call", side_effect=Rejected("internal network error", code="28001006")):
             self.assertEqual(self.broker.submit(self.identity)["status"], "submission_unknown")

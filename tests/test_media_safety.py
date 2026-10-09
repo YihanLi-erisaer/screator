@@ -8,9 +8,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from yt2bili import media, pipeline, youtube
-from yt2bili.db import Task
-from yt2bili.exceptions import InvalidMediaError, Yt2BiliError
+from screator import media, pipeline, youtube
+from screator.db import Task
+from screator.exceptions import InvalidMediaError, AppError
 
 
 class MediaSafetyTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class MediaSafetyTests(unittest.TestCase):
     def setUpClass(cls):
         try:
             media.require_ffmpeg()
-        except Yt2BiliError as exc:
+        except AppError as exc:
             raise unittest.SkipTest(str(exc))
         encoders = subprocess.run(
             [media.ffmpeg_tool("ffmpeg"), "-hide_banner", "-encoders"],
@@ -89,7 +89,7 @@ class MediaSafetyTests(unittest.TestCase):
 
     def test_oversize_mp4_is_not_silently_transcoded(self):
         with patch.object(media, "ensure_bilibili_mp4") as convert:
-            with self.assertRaises(Yt2BiliError):
+            with self.assertRaises(AppError):
                 media.prepare_upload_video(self.av1, self.root / "oversize.mp4", 3, max_size_gb=0.000001)
             convert.assert_not_called()
 
@@ -148,8 +148,8 @@ class MediaSafetyTests(unittest.TestCase):
     def test_failed_conversion_preserves_destination(self):
         dest = self.root / "preserved.mp4"
         dest.write_bytes(b"old incomplete output")
-        with patch.object(media, "_run_ffmpeg", side_effect=Yt2BiliError("encoder failed")):
-            with self.assertRaises(Yt2BiliError):
+        with patch.object(media, "_run_ffmpeg", side_effect=AppError("encoder failed")):
+            with self.assertRaises(AppError):
                 media.ensure_bilibili_mp4(self.av1, dest, 3)
         self.assertEqual(dest.read_bytes(), b"old incomplete output")
 
@@ -162,7 +162,7 @@ class MediaSafetyTests(unittest.TestCase):
 
     def test_impossible_size_budget_does_not_create_output(self):
         dest = self.root / "too-small.mp4"
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             media.ensure_bilibili_mp4(self.av1, dest, 3, max_size_gb=0.000001)
         self.assertFalse(dest.exists())
 
@@ -199,7 +199,7 @@ class MediaSafetyTests(unittest.TestCase):
         ], capture_output=True)
         if check.returncode:
             self.skipTest("AV1 NVIDIA decoder unavailable")
-        with patch.dict(os.environ, {"YT2BILI_HWACCEL": "cuda"}):
+        with patch.dict(os.environ, {"SCREATOR_HWACCEL": "cuda"}):
             dest = self.root / "cuda.mp4"
             media.ensure_bilibili_mp4(source, dest, 3, encoder="h264_nvenc")
             self.assertTrue(media._upload_compatible(media.validate_media(dest, 3)))
@@ -218,7 +218,7 @@ class ValidationAccelerationCacheTests(unittest.TestCase):
             "-c:a", "aac", str(self.source),
         )
         media._validated.clear()
-        self.environment = patch.dict(os.environ, {"YT2BILI_HWACCEL": "auto", "YT2BILI_VALIDATION_CACHE": "1"})
+        self.environment = patch.dict(os.environ, {"SCREATOR_HWACCEL": "auto", "SCREATOR_VALIDATION_CACHE": "1"})
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
@@ -252,7 +252,7 @@ class ValidationAccelerationCacheTests(unittest.TestCase):
         self.assertFalse(media._validation_cache_path(self.source).exists())
 
     def test_force_cpu_never_tries_cuda(self):
-        with patch.dict(os.environ, {"YT2BILI_HWACCEL": "cpu"}), \
+        with patch.dict(os.environ, {"SCREATOR_HWACCEL": "cpu"}), \
              patch.object(media, "_decode_track", return_value=3.0) as decode:
             media.validate_media(self.source, 3)
         self.assertTrue(all(not call.args[3] for call in decode.call_args_list))
@@ -269,7 +269,7 @@ class ValidationAccelerationCacheTests(unittest.TestCase):
         media.validate_media(self.source, 3)
         code = (
             "import sys; from pathlib import Path; from unittest.mock import patch; "
-            "from yt2bili import media; "
+            "from screator import media; "
             "p=patch.object(media, '_decode_track', side_effect=AssertionError('unexpected decode')); "
             "p.start(); media.validate_media(Path(sys.argv[1]), 3)"
         )
@@ -325,7 +325,7 @@ class ValidationAccelerationCacheTests(unittest.TestCase):
     def test_changed_hardware_device_invalidates_cache(self):
         with patch.object(media, "_decode_track", return_value=3.0):
             media.validate_media(self.source, 3)
-        with patch.dict(os.environ, {"YT2BILI_HWACCEL_DEVICE": "1"}), \
+        with patch.dict(os.environ, {"SCREATOR_HWACCEL_DEVICE": "1"}), \
              patch.object(media, "_decode_track", return_value=3.0) as decode:
             media.validate_media(self.source, 3)
         self.assertEqual(decode.call_count, 2)
@@ -349,7 +349,7 @@ class ValidationAccelerationCacheTests(unittest.TestCase):
                 media.validate_media(self.source, 3, require_audio=True)
 
     def test_cache_can_be_disabled(self):
-        with patch.dict(os.environ, {"YT2BILI_VALIDATION_CACHE": "0"}), \
+        with patch.dict(os.environ, {"SCREATOR_VALIDATION_CACHE": "0"}), \
              patch.object(media, "_decode_track", return_value=3.0) as decode:
             media.validate_media(self.source, 3)
             media.validate_media(self.source, 3)
@@ -375,7 +375,7 @@ class ValidationAccelerationCacheTests(unittest.TestCase):
                 stream.write(b"new data")
             return 3.0
         with patch.object(media, "_decode_track", side_effect=changed):
-            with self.assertRaises(Yt2BiliError):
+            with self.assertRaises(AppError):
                 media.validate_media(self.source, 3)
         self.assertFalse(media._validation_cache_path(self.source).exists())
 
@@ -475,7 +475,7 @@ class UploadCleanupTests(unittest.TestCase):
              patch.object(media, "prepare_upload_video", return_value=source), \
              patch.object(pipeline, "_upload_serialized", return_value=bv, side_effect=failure) as upload:
             if failure:
-                with self.assertRaises(Yt2BiliError):
+                with self.assertRaises(AppError):
                     pipeline._execute(SimpleNamespace(work_dir=root), MagicMock(), task, meta, work, dry_run=dry_run)
             else:
                 pipeline._execute(SimpleNamespace(work_dir=root), MagicMock(), task, meta, work, dry_run=dry_run)
@@ -498,7 +498,7 @@ class UploadCleanupTests(unittest.TestCase):
 
     def test_failed_upload_retains_files(self):
         with tempfile.TemporaryDirectory() as folder:
-            work, _ = self.run_pipeline(Path(folder), failure=Yt2BiliError("upload failed"))
+            work, _ = self.run_pipeline(Path(folder), failure=AppError("upload failed"))
             self.assertTrue((work / "source.mp4").exists())
 
     def test_dry_run_retains_files(self):

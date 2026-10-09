@@ -1,6 +1,6 @@
 # 抖音官方授权与投稿服务
 
-此服务为单用户/单租户、单实例部署，桌面应用保留调度权。不要把同一配对密钥提供给不同用户，也不要横向启动多个服务实例。`python -m yt2bili.douyin_broker` 持有数据目录进程锁，拒绝重复实例。
+此服务为单用户/单租户、单实例部署，桌面应用保留调度权。不要把同一配对密钥提供给不同用户，也不要横向启动多个服务实例。`python -m screator.douyin_broker` 持有数据目录进程锁，拒绝重复实例。
 
 ## 必要前提
 
@@ -33,7 +33,7 @@ python -m pip install '.[douyin-broker]'
 启动命令（`--data-dir` 使用专用目录）：
 
 ```text
-python -m yt2bili.douyin_broker --data-dir /srv/yt2bili-douyin --port 8787
+python -m screator.douyin_broker --data-dir /srv/screator-douyin --port 8787
 ```
 
 进程仅监听 `127.0.0.1:8787`。必须在同一主机部署 HTTPS 反向代理并提供认证、请求速率、连接数和存储容量防护。外部只开放 HTTPS，不开放内部 HTTP 端口。代理不得记录 Authorization、OAuth code/state 或请求正文；OAuth 回调访问日志同样须禁用/脱敏。对 `/v1/*` 不启用跨域 CORS。

@@ -19,16 +19,16 @@ from unittest.mock import patch
 
 import test_desktop as desktop_tests
 from test_desktop import MemoryVault, login_fixture
-from yt2bili import bili_upload, desktop_auth, events, media, pipeline, publications
-from yt2bili.cli import _build_parser
-from yt2bili.db import Task, TaskStore
-from yt2bili.desktop_service import DesktopService
-from yt2bili.desktop_settings import atomic_json
-from yt2bili.exceptions import Yt2BiliError
-from yt2bili.identity import parse_single_video_url
-from yt2bili.locking import account_guard, coordination_dir
-from yt2bili.paths import AppPaths
-from yt2bili.process_manager import process_alive
+from screator import bili_upload, desktop_auth, events, media, pipeline, publications
+from screator.cli import _build_parser
+from screator.db import Task, TaskStore
+from screator.desktop_service import DesktopService
+from screator.desktop_settings import atomic_json
+from screator.exceptions import AppError
+from screator.identity import parse_single_video_url
+from screator.locking import account_guard, coordination_dir
+from screator.paths import AppPaths
+from screator.process_manager import process_alive
 
 
 def credentials(uid):
@@ -101,10 +101,10 @@ class MultiAccountTests(unittest.TestCase):
 
     def test_capacity_archival_restore_and_database_constraints(self):
         accounts = [self.account] + [self.add_account(i) for i in range(124, 128)]
-        with self.assertRaises(Yt2BiliError): self.add_account(128)
-        with self.assertRaises(Yt2BiliError): self.add_account(123)
+        with self.assertRaises(AppError): self.add_account(128)
+        with self.assertRaises(AppError): self.add_account(123)
         self.service.accounts.clear(self.account["account_id"])
-        with self.assertRaises(Yt2BiliError): self.add_account(128)
+        with self.assertRaises(AppError): self.add_account(128)
         self.service.accounts.archive(self.account["account_id"])
         restored = self.add_account(123)
         self.assertEqual(restored["account_id"], self.account["account_id"])
@@ -118,7 +118,7 @@ class MultiAccountTests(unittest.TestCase):
         def add(uid):
             barrier.wait()
             try: return self.add_account(uid)
-            except Yt2BiliError: return None
+            except AppError: return None
         with ThreadPoolExecutor(2) as pool:
             result = list(pool.map(add, [127, 128]))
         self.assertEqual(sum(r is not None for r in result), 1)
@@ -127,12 +127,12 @@ class MultiAccountTests(unittest.TestCase):
 
     def test_wrong_uid_cannot_replace_credentials(self):
         original = self.service.store.account(self.account["account_id"])
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             self.service.accounts.bind(credentials(999), self.account["account_id"], verify=False)
         self.assertEqual(self.service.store.account(self.account["account_id"])["credential_ref"], original["credential_ref"])
         info = credentials(123)
         info["token_info"]["mid"] = 124
-        with self.assertRaises(Yt2BiliError): self.service.accounts.bind(info, verify=False)
+        with self.assertRaises(AppError): self.service.accounts.bind(info, verify=False)
 
     def test_identity_same_video_five_accounts_and_cleanup_isolated(self):
         accounts = [self.account] + [self.add_account(i) for i in range(124, 128)]
@@ -143,14 +143,14 @@ class MultiAccountTests(unittest.TestCase):
             self.assertEqual(len(set(ids)), 5)
             tasks = [self.service.task(t) for t in ids]
             self.assertEqual(len({t.work_dir for t in tasks}), 5)
-            with self.assertRaises(Yt2BiliError): self.service.task("abcdefghijk")
+            with self.assertRaises(AppError): self.service.task("abcdefghijk")
             self.service.update_metadata(ids[0], "独立标题", "独立简介")
             self.assertEqual(self.service.task(ids[1]).title_zh, "翻译标题")
             self.service.submit(ids[0], "submit-one")
             self.wait_idle()
             self.assertFalse(Path(tasks[0].work_dir).exists())
             self.assertTrue(all(Path(t.video_path).exists() for t in tasks[1:]))
-            with self.assertRaises(Yt2BiliError): self.service.bind_legacy(ids[1], accounts[2]["account_id"])
+            with self.assertRaises(AppError): self.service.bind_legacy(ids[1], accounts[2]["account_id"])
             with self.assertRaises(sqlite3.IntegrityError):
                 self.service.store.update(ids[1], account_id=accounts[2]["account_id"], account_uid_snapshot=accounts[2]["uid"])
 
@@ -216,7 +216,7 @@ class MultiAccountTests(unittest.TestCase):
         with self.mocks():
             result = self.create()
             self.wait_idle()
-            with self.assertRaises(Yt2BiliError):
+            with self.assertRaises(AppError):
                 self.service.create("https://youtu.be/12345678901", "create-abcdefghijk", self.account["account_id"])
             original = self.service.store.operation
             def fail(op, method, result=None, **kwargs):
@@ -256,19 +256,19 @@ class MultiAccountTests(unittest.TestCase):
         item = SimpleNamespace(task_id=tid, settings=replace(self.service.config.build(), upload_gap_seconds=20))
         marker = coordination_dir("123") / "attempt-state.json"
         atomic_json(marker, {"ended": 100})
-        with patch("yt2bili.upload_coordinator.time.time", return_value=105), patch("yt2bili.upload_coordinator.time.monotonic", return_value=20):
+        with patch("screator.upload_coordinator.time.time", return_value=105), patch("screator.upload_coordinator.time.monotonic", return_value=20):
             self.assertEqual(self.service.scheduler.uploader.try_submit(item), ("cooldown", 35))
         marker.write_text("invalid", encoding="utf-8")
-        with patch("yt2bili.upload_coordinator.time.time", return_value=105), patch("yt2bili.upload_coordinator.time.monotonic", return_value=20):
+        with patch("screator.upload_coordinator.time.time", return_value=105), patch("screator.upload_coordinator.time.monotonic", return_value=20):
             self.assertEqual(self.service.scheduler.uploader.try_submit(item), ("cooldown", 40))
         atomic_json(marker, {"inflight": "crash", "owner_pid": os.getpid()})
-        with self.assertRaises(Yt2BiliError): self.service.resume_uploads(self.account["account_id"], True)
+        with self.assertRaises(AppError): self.service.resume_uploads(self.account["account_id"], True)
 
     def test_shared_profile_rejects_second_executor(self):
-        with self.assertRaises(Yt2BiliError): DesktopService(self.paths, lambda *args: None, MemoryVault())
+        with self.assertRaises(AppError): DesktopService(self.paths, lambda *args: None, MemoryVault())
 
     def test_persisted_download_jobs_are_dispatched_in_fifo_order(self):
-        from yt2bili import youtube
+        from screator import youtube
         order = []
         def download(url, *args, **kwargs):
             order.append(parse_single_video_url(url)[0])
@@ -326,7 +326,7 @@ class MultiAccountTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "Windows release process ownership")
     def test_parent_termination_reaps_real_windows_child(self):
-        code = "from yt2bili.process_manager import own_children\nimport subprocess,sys,time\nwith own_children():\n p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n print(p.pid,flush=True)\n time.sleep(60)"
+        code = "from screator.process_manager import own_children\nimport subprocess,sys,time\nwith own_children():\n p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n print(p.pid,flush=True)\n time.sleep(60)"
         parent = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         child = None
         try:
@@ -342,11 +342,11 @@ class MultiAccountTests(unittest.TestCase):
             parent.communicate(timeout=10)
 
     def test_real_process_uid_lock_different_uid_and_release(self):
-        code = "from yt2bili.locking import account_guard\nimport sys\nwith account_guard(sys.argv[1]): print('locked', flush=True); sys.stdin.readline()"
+        code = "from screator.locking import account_guard\nimport sys\nwith account_guard(sys.argv[1]): print('locked', flush=True); sys.stdin.readline()"
         process = subprocess.Popen([sys.executable, "-c", code, "123"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             self.assertEqual(process.stdout.readline().strip(), "locked")
-            with self.assertRaises(Yt2BiliError):
+            with self.assertRaises(AppError):
                 with account_guard("123"): pass
             with account_guard("124"): pass
         finally:
@@ -359,7 +359,7 @@ class InputAndMigrationTests(unittest.TestCase):
         for path in ("https://youtu.be/abcdefghijk", "https://youtube.com/watch?v=abcdefghijk&list=foo", "https://youtube.com/shorts/abcdefghijk", "https://youtube.com/live/abcdefghijk"):
             self.assertEqual(parse_single_video_url(path)[0], "abcdefghijk")
         for value in ("https://youtu.be/abcdefghijk\nhttps://youtu.be/abcdefghijk", "https://youtube.com/watch?v=abcdefghijk&v=12345678901", "https://youtube.com.evil/watch?v=abcdefghijk", "abcdefghijk", "https://youtube.com/playlist?list=foo"):
-            with self.assertRaises(Yt2BiliError): parse_single_video_url(value)
+            with self.assertRaises(AppError): parse_single_video_url(value)
 
     def test_cli_rejects_missing_account_batch_force_and_file(self):
         parser = _build_parser()
@@ -384,6 +384,6 @@ class InputAndMigrationTests(unittest.TestCase):
                 self.assertIsNone(task.account_id)
                 self.assertEqual((task.title_zh, task.bv_id), ("手工标题", "BV1234567890"))
                 self.assertEqual(store.get_job(task.task_id)["mode"], "auto")
-                with self.assertRaises(Yt2BiliError): store.operation("old-op", "tasks.create", request_hash="new")
+                with self.assertRaises(AppError): store.operation("old-op", "tasks.create", request_hash="new")
                 self.assertTrue(Path(str(path)+".pre-v3.bak").is_file())
             finally: store.close()

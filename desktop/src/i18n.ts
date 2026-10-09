@@ -87,13 +87,13 @@ function translateTree(root: Node) {
 export function setUiLanguage(value: Language) {
   language = value;
   document.documentElement.lang = value;
-  try { localStorage.setItem("yt2bili.uiLanguage", value); } catch { /* Backend setting remains authoritative. */ }
+  try { localStorage.setItem("screator.uiLanguage", value); } catch { /* Backend setting remains authoritative. */ }
   translateTree(document.body);
 }
 
 export function startUiLocalization() {
   try {
-    const cached = localStorage.getItem("yt2bili.uiLanguage");
+    const cached = localStorage.getItem("screator.uiLanguage");
     if (cached === "zh-CN" || cached === "zh-HK" || cached === "en") language = cached;
   } catch { /* Use the default until settings load. */ }
   document.documentElement.lang = language;

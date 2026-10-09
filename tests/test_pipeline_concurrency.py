@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from yt2bili import media, pipeline, youtube
-from yt2bili.db import Task, TaskStore
+from screator import media, pipeline, youtube
+from screator.db import Task, TaskStore
 
 
 class PipelineConcurrencyTests(unittest.TestCase):

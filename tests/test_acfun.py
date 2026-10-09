@@ -10,12 +10,12 @@ from unittest.mock import patch
 
 import test_desktop as desktop_tests
 from test_multi_account import credentials
-from yt2bili import publications
-from yt2bili.acfun import AcfunService, BusinessError, UnknownResult, VerificationRequired, WebClient, verification_page
-from yt2bili.db import TaskStore
-from yt2bili.db import Task
-from yt2bili.desktop_service import DesktopService
-from yt2bili.exceptions import Yt2BiliError
+from screator import publications
+from screator.acfun import AcfunService, BusinessError, UnknownResult, VerificationRequired, WebClient, verification_page
+from screator.db import TaskStore
+from screator.db import Task
+from screator.desktop_service import DesktopService
+from screator.exceptions import AppError
 
 
 class FakeWeb:
@@ -46,7 +46,7 @@ class FakeWeb:
         if stage == self.fail:
             if stage in ("createVideo", "createDouga"):
                 raise UnknownResult("response lost")
-            raise Yt2BiliError("upstream failure")
+            raise AppError("upstream failure")
         return {
             "getKSCloudToken": {"result": 0, "taskId": 123, "token": "video-secret", "uploadConfig": {"partSize": 5}},
             "fragment": {"result": 1}, "complete": {"result": 1},
@@ -91,7 +91,7 @@ class AcfunTests(unittest.TestCase):
                 if "/qr/scanResult" in url: return {"result": 0, "qrLoginSignature": "next"}
                 if "/qr/acceptResult" in url: return {"result": 0}
                 if "/personalInfo" in url:
-                    if not self.warmed: raise Yt2BiliError("会话尚未生效")
+                    if not self.warmed: raise AppError("会话尚未生效")
                     return {"result": 0, "info": {"userId": 12345, "name": "AcFun 测试"}}
                 raise AssertionError(url)
             def cookies(self): return [{"name": "auth_key", "value": "secret", "domain": ".acfun.cn", "path": "/"}]
@@ -152,7 +152,7 @@ class AcfunTests(unittest.TestCase):
             saved = self.service.update_publication(pub["publication_id"], revision=pub["revision"],
                 title="五字短标题", description="已获授权", channel_id=0, tags=[])
             self.assertEqual(json.loads(saved["snapshot"])["title"], "五字短标题")
-            with self.assertRaisesRegex(Yt2BiliError, "请选择 AcFun 分区"):
+            with self.assertRaisesRegex(AppError, "请选择 AcFun 分区"):
                 self.service.submit(task_id, "submit-missing-channel")
 
     def test_preview_and_submit_only_once(self):
@@ -201,7 +201,7 @@ class AcfunTests(unittest.TestCase):
     def test_auto_requires_acfun_channel_before_creating_task(self):
         self.bind()
         with patch.object(self.service.acfun, "check", return_value=self.service.acfun.account()):
-            with self.assertRaisesRegex(Yt2BiliError, "AcFun 分区 ID"):
+            with self.assertRaisesRegex(AppError, "AcFun 分区 ID"):
                 self.service.create("https://youtu.be/abcdefghijk", str(uuid.uuid4()), self.account["account_id"], mode="auto", sync_acfun=True)
         self.assertEqual(self.service.store._conn.execute("SELECT count(*) FROM tasks").fetchone()[0], 0)
 
@@ -210,7 +210,7 @@ class AcfunTests(unittest.TestCase):
         self.service.config.values["acfun_channel_id"] = 1
         fake = FakeWeb()
         with patch.object(self.service.acfun, "check", return_value=self.service.acfun.account()), patch.object(self.service.acfun, "_client", return_value=fake):
-            with self.assertRaisesRegex(Yt2BiliError, "不是可投稿的视频子分区"):
+            with self.assertRaisesRegex(AppError, "不是可投稿的视频子分区"):
                 self.service.create("https://youtu.be/abcdefghijk", str(uuid.uuid4()), self.account["account_id"], mode="auto", sync_acfun=True)
         self.assertEqual(fake.calls, ["getAllChannels"])
         self.assertEqual(self.service.store._conn.execute("SELECT count(*) FROM tasks").fetchone()[0], 0)
@@ -226,7 +226,7 @@ class AcfunTests(unittest.TestCase):
             snapshot = json.loads(pub["snapshot"])
             snapshot["channel_id"] = 1
             publications.change(self.service.store, pub["publication_id"], snapshot=json.dumps(snapshot))
-            with self.assertRaisesRegex(Yt2BiliError, "不是可投稿的视频子分区"):
+            with self.assertRaisesRegex(AppError, "不是可投稿的视频子分区"):
                 self.service.submit(task_id, "invalid-channel")
         self.assertNotIn("getKSCloudToken", fake.calls)
 
@@ -264,10 +264,10 @@ class AcfunTests(unittest.TestCase):
             self.assertNotIn("private-challenge", str(list(self.service.store._conn.execute("SELECT error FROM acfun_attempts"))))
             challenge = self.service.acfun.verification(pub["publication_id"])
             self.assertIn("/iframe/index.html?", challenge["url"])
-            with self.assertRaises(Yt2BiliError):
+            with self.assertRaises(AppError):
                 self.service.complete_acfun_verification(pub["publication_id"], "wrong", "captcha", "proof")
             self.service.complete_acfun_verification(pub["publication_id"], challenge["challenge_id"], "captcha", "private-proof")
-            with self.assertRaises(Yt2BiliError):
+            with self.assertRaises(AppError):
                 self.service.complete_acfun_verification(pub["publication_id"], challenge["challenge_id"], "captcha", "private-proof")
             self.assertEqual(fake.calls.count("createDouga"), 1)  # Completion alone never publishes.
             self.service.submit(task_id, "challenge-confirm")
@@ -310,7 +310,7 @@ class AcfunTests(unittest.TestCase):
             self.service.submit(task_id, "stale-challenge")
             self.wait_idle()
         entry = self.service.acfun._verifications[pub["publication_id"]]
-        with patch("yt2bili.acfun.time.time", return_value=entry["expires_at"] + 1):
+        with patch("screator.acfun.time.time", return_value=entry["expires_at"] + 1):
             self.assertEqual(self.service.acfun.verification(pub["publication_id"])["reason"], "expired")
         self.service.acfun._verifications[pub["publication_id"]] = entry
         with self.service.store.transaction() as db:
@@ -375,7 +375,7 @@ class AcfunTests(unittest.TestCase):
             pub = self.ready(task_id)
             self.service.submit(task_id, "unknown-challenge")
             self.wait_idle()
-            with self.assertRaises(Yt2BiliError):
+            with self.assertRaises(AppError):
                 self.service.refresh_acfun_verification(pub["publication_id"], "refresh-unknown")
         self.assertEqual(fake.calls.count("createDouga"), 1)
 
@@ -433,14 +433,14 @@ class AcfunTests(unittest.TestCase):
         self.assertIn("两平台共用的新简介", acfun["description"])
 
     def test_retranslation_clears_generated_acfun_copy_but_keeps_manual_title(self):
-        from yt2bili.translation.types import TranslationError
+        from screator.translation.types import TranslationError
         self.bind()
         with self.mocks(), patch.object(self.service.acfun, "check", return_value=self.service.acfun.account()):
             generated_id = self.create()
             manual_id = self.create("lmnopqrstuv")
             self.wait_idle()
         self.ready(manual_id)
-        with patch("yt2bili.translation.tasks.translate_group", side_effect=TranslationError("FAIL", "模拟翻译失败")):
+        with patch("screator.translation.tasks.translate_group", side_effect=TranslationError("FAIL", "模拟翻译失败")):
             self.service.retranslate(generated_id, "retranslate-acfun-generated")
             self.service.retranslate(manual_id, "retranslate-acfun-manual")
             self.wait_idle()
@@ -493,7 +493,7 @@ class AcfunTests(unittest.TestCase):
         self.assertEqual(pub["status"], "submission_unknown")
         self.assertEqual(pub["retain_assets"], 1)
         self.assertEqual(fake.calls.count("createDouga"), 1)
-        with self.assertRaises(Yt2BiliError): self.service.retry_publication(pub["publication_id"], "retry-unknown")
+        with self.assertRaises(AppError): self.service.retry_publication(pub["publication_id"], "retry-unknown")
         self.service.resolve_publication(pub["publication_id"], not_submitted=True)
         self.assertTrue(self.service.retry_publication(pub["publication_id"], "retry-after-check")["ready"])
 
@@ -503,12 +503,12 @@ class AcfunTests(unittest.TestCase):
             self.create()
             other = self.service.accounts.bind(credentials(456), verify=False)
             # A second Bilibili account is distinct but the AcFun target is not.
-            with self.assertRaises(Yt2BiliError):
+            with self.assertRaises(AppError):
                 self.service.create("https://youtu.be/abcdefghijk", str(uuid.uuid4()), other["account_id"], sync_acfun=True)
 
     def test_reject_html_and_unapproved_cookie_domain(self):
         self.assertEqual(WebClient([{"name": "secret", "value": "x", "domain": ".evil.com"}]).cookies(), [])
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             WebClient().request("GET", "https://evil.example/test")
         class Response:
             status = 200
@@ -520,7 +520,7 @@ class AcfunTests(unittest.TestCase):
         with patch.object(client.opener, "open", return_value=Response(b"<html>login</html>")):
             with self.assertRaises(UnknownResult): client.request("POST", "https://member.acfun.cn/video/api/createDouga", {})
         with patch.object(client.opener, "open", return_value=Response(b'{"result":10}')):
-            with self.assertRaisesRegex(Yt2BiliError, "createDouga 业务响应失败（代码 10）"):
+            with self.assertRaisesRegex(AppError, "createDouga 业务响应失败（代码 10）"):
                 client.request("POST", "https://member.acfun.cn/video/api/createDouga", {})
 
     def test_web_contract_parses_channel_arrays_and_nested_rejections(self):

@@ -1,4 +1,4 @@
-# Screator 本地大模型优先翻译 PRD
+# screator 本地大模型优先翻译 PRD
 
 版本：v1.0 评审稿
 
@@ -35,7 +35,7 @@
 
 ## 2. 当前产品与代码现状
 
-- `yt2bili/translate.py::translate_title_and_desc` 直接创建 DeepL 客户端，检查额度并翻译标题、简介；缺少密钥会失败。源语言元数据为中文时直接跳过翻译。
+- `screator/translate.py::translate_title_and_desc` 直接创建 DeepL 客户端，检查额度并翻译标题、简介；缺少密钥会失败。源语言元数据为中文时直接跳过翻译。
 - 简介原文先取前 `max(desc_body_limit * 2, 400)` 个字符，再调用 DeepL；现有能力不是完整长简介翻译。
 - `pipeline.py` 在校验后的素材准备阶段调用翻译，并通过全局 `_translate_lock` 串行执行。下载和校验队列可继续运行。
 - 标题通过 `clamp_title` 收敛到默认 80 字；`build_description` 将翻译正文和原标题、原作者、原链接组合到默认 2000 字内。

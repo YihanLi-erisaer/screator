@@ -15,11 +15,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 import test_desktop as desktop_tests
-from yt2bili import events, youtube, bili_upload, publications, pipeline, media
-from yt2bili.db import Task, TaskStore
-from yt2bili.desktop_service import DesktopService
-from yt2bili.desktop_worker import Protocol, WorkerRPC
-from yt2bili.scheduler import Scheduler
+from screator import events, youtube, bili_upload, publications, pipeline, media
+from screator.db import Task, TaskStore
+from screator.desktop_service import DesktopService
+from screator.desktop_worker import Protocol, WorkerRPC
+from screator.scheduler import Scheduler
 
 
 def request(identity, method):
@@ -158,7 +158,7 @@ class RPCTests(unittest.TestCase):
     def test_real_worker_finalization_ack_and_exit(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as folder:
-            process = subprocess.Popen([sys.executable, "-u", "-m", "yt2bili.desktop_worker",
+            process = subprocess.Popen([sys.executable, "-u", "-m", "screator.desktop_worker",
                                         "--data-dir", folder, "--resources", str(root)],
                                        cwd=root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, text=True, encoding="utf-8")

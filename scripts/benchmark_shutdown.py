@@ -14,13 +14,13 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
-from yt2bili import events
-from yt2bili.db import Task, TaskStore
+from screator import events
+from screator.db import Task, TaskStore
 
 
 def worker_exit():
-    with tempfile.TemporaryDirectory(prefix="yt2bili-close-") as folder:
-        process = subprocess.Popen([sys.executable, "-u", "-m", "yt2bili.desktop_worker",
+    with tempfile.TemporaryDirectory(prefix="screator-close-") as folder:
+        process = subprocess.Popen([sys.executable, "-u", "-m", "screator.desktop_worker",
                                     "--data-dir", folder, "--resources", str(root)],
                                    cwd=root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, text=True, encoding="utf-8")

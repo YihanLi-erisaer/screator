@@ -13,15 +13,15 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from yt2bili import events, media, pipeline, publications, youtube, bili_upload, desktop_auth
-from yt2bili.db import Task, TaskStore
-from yt2bili.desktop_auth import LoginSession, validate_login
-from yt2bili.desktop_service import DesktopService, parse_urls
-from yt2bili.desktop_settings import DesktopSettings
-from yt2bili.desktop_worker import DesktopLogHandler, Protocol, redact
-from yt2bili.exceptions import InvalidMediaError, Yt2BiliError
-from yt2bili.locking import FileLock, work_lock
-from yt2bili.paths import AppPaths
+from screator import events, media, pipeline, publications, youtube, bili_upload, desktop_auth
+from screator.db import Task, TaskStore
+from screator.desktop_auth import LoginSession, validate_login
+from screator.desktop_service import DesktopService, parse_urls
+from screator.desktop_settings import DesktopSettings
+from screator.desktop_worker import DesktopLogHandler, Protocol, redact
+from screator.exceptions import InvalidMediaError, AppError
+from screator.locking import FileLock, work_lock
+from screator.paths import AppPaths
 
 
 # Windows CI flushes many small SQLite transactions more slowly than a local SSD.
@@ -45,7 +45,7 @@ class DesktopTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.environment = patch.dict(os.environ, {"YT2BILI_COORDINATION_DIR": str(Path(self.tmp.name) / "coordination")})
+        self.environment = patch.dict(os.environ, {"SCREATOR_COORDINATION_DIR": str(Path(self.tmp.name) / "coordination")})
         self.environment.start()
         self.addCleanup(self.environment.stop)
         self.paths = AppPaths.default(self.tmp.name, self.tmp.name)
@@ -168,15 +168,15 @@ class DesktopTests(unittest.TestCase):
             task = self.service.task("abcdefghijk")
             self.assertEqual(task.status, "submission_unknown")
             self.assertTrue(Path(task.video_path).exists())
-            with self.assertRaises(Yt2BiliError): self.service.retry(task.video_id, "retry-unknown")
-            with self.assertRaises(Yt2BiliError): self.service.submit(task.video_id, "submit-again")
+            with self.assertRaises(AppError): self.service.retry(task.video_id, "retry-unknown")
+            with self.assertRaises(AppError): self.service.submit(task.video_id, "submit-again")
             self.service.resolve(task.video_id, bv_id="BV1234567890")
             self.assertTrue(Path(task.video_path).exists())
 
     def test_upload_error_becomes_unknown_not_automatic_retry(self):
         def fail_upload(*args, **kwargs):
             kwargs["on_started"](99999999)
-            raise Yt2BiliError("connection lost")
+            raise AppError("connection lost")
         with self.mocks():
             self.create()
             self.wait_idle()
@@ -252,8 +252,8 @@ class DesktopTests(unittest.TestCase):
         self.assertNotIn("test-key", json.dumps(result))
         self.service.update_settings({"theme": "dark"})
         self.assertNotIn("test-key", (self.paths.root / "settings.json").read_text(encoding="utf-8"))
-        with self.assertRaises(Yt2BiliError): self.service.update_settings({"upload_gap_seconds": -1})
-        with self.assertRaises(Yt2BiliError): self.service.update_settings({"deepl_auth_key": "bad"})
+        with self.assertRaises(AppError): self.service.update_settings({"upload_gap_seconds": -1})
+        with self.assertRaises(AppError): self.service.update_settings({"deepl_auth_key": "bad"})
 
     def test_youtube_resolution_setting_persists_and_old_snapshots_use_best(self):
         self.assertEqual(self.service.config.build().youtube_max_height, 0)
@@ -268,7 +268,7 @@ class DesktopTests(unittest.TestCase):
         reloaded = DesktopSettings(self.paths, MemoryVault())
         self.assertEqual(reloaded.build().youtube_max_height, 720)
         for invalid in (True, 999, "720"):
-            with self.subTest(invalid=invalid), self.assertRaises(Yt2BiliError):
+            with self.subTest(invalid=invalid), self.assertRaises(AppError):
                 self.service.update_settings({"youtube_max_height": invalid})
 
     def test_ui_language_persists_and_rejects_invalid_values(self):
@@ -277,7 +277,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(DesktopSettings(self.paths, MemoryVault()).values["ui_language"], "en")
         self.assertEqual(self.service.update_settings({"ui_language": "zh-HK"})["ui_language"], "zh-HK")
         for invalid in (None, True, "fr", ["en"]):
-            with self.subTest(invalid=invalid), self.assertRaises(Yt2BiliError):
+            with self.subTest(invalid=invalid), self.assertRaises(AppError):
                 self.service.update_settings({"ui_language": invalid})
 
     def test_youtube_audio_language_persists_and_old_snapshots_use_auto(self):
@@ -291,7 +291,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(saved["youtube_audio_language"], "zh")
         self.assertEqual(DesktopSettings(self.paths, MemoryVault()).build().youtube_audio_language, "zh")
         for invalid in (None, True, "xx", ["zh"]):
-            with self.subTest(invalid=invalid), self.assertRaises(Yt2BiliError):
+            with self.subTest(invalid=invalid), self.assertRaises(AppError):
                 self.service.update_settings({"youtube_audio_language": invalid})
 
     def test_old_acfun_enable_setting_is_ignored_and_removed_on_next_save(self):
@@ -312,7 +312,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(reloaded.build().local_llm_backend, "vulkan")
         self.assertEqual(reloaded.build(previous).local_llm_backend, "auto")
         self.assertEqual(reloaded.values["hwaccel"], "d3d11va")
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             self.service.update_settings({"local_llm_backend": "unsupported"})
 
     def test_translation_timeouts_are_persisted_and_public(self):
@@ -328,7 +328,7 @@ class DesktopTests(unittest.TestCase):
         reloaded = DesktopSettings(self.paths, MemoryVault())
         self.assertEqual(reloaded.values["local_llm_timeout_seconds"], 240)
         self.assertEqual(reloaded.values["translation_total_timeout_seconds"], 360)
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             self.service.update_settings({
                 "local_llm_timeout_seconds": 400,
                 "translation_total_timeout_seconds": 300,
@@ -340,7 +340,7 @@ class DesktopTests(unittest.TestCase):
         (self.paths.root / "settings.json").write_text(json.dumps(saved), encoding="utf-8")
         reloaded = DesktopSettings(self.paths, MemoryVault())
         self.assertEqual(reloaded.values["local_llm_model"], "qwen3.5:4b")
-        from yt2bili.translation.config import legacy_snapshot
+        from screator.translation.config import legacy_snapshot
         self.assertEqual(legacy_snapshot(saved)["local_llm_model"], "qwen3:8b")
 
     def test_local_task_creation_does_not_require_deepl_vault(self):
@@ -351,18 +351,18 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(self.service.task("abcdefghijk").status, "ready")
 
     def test_retranslation_clears_old_text_before_queue_and_never_uploads(self):
-        from yt2bili.translation.types import TranslationResult
+        from screator.translation.types import TranslationResult
         with self.mocks():
             self.create(); self.wait_idle()
         self.service.update_metadata("abcdefghijk", "用户编辑", "用户正文")
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             self.service.retranslate("abcdefghijk", "retranslate-no-confirm")
         started, release = threading.Event(), threading.Event()
         def slow_translation(*args, **kwargs):
             started.set()
             release.wait(ASYNC_TIMEOUT)
             return TranslationResult("新翻译", "新正文", "local_llm")
-        with patch("yt2bili.translation.tasks.translate_group", side_effect=slow_translation):
+        with patch("screator.translation.tasks.translate_group", side_effect=slow_translation):
             self.service.retranslate("abcdefghijk", "retranslate-success", replace_edited=True)
             try:
                 self.assertTrue(started.wait(ASYNC_TIMEOUT))
@@ -423,11 +423,11 @@ class DesktopTests(unittest.TestCase):
         self.assertIsNotNone(self.service.store.get(task_id))
 
     def test_failed_retranslation_keeps_text_cleared_and_task_retryable(self):
-        from yt2bili.translation.types import TranslationError
+        from screator.translation.types import TranslationError
         with self.mocks():
             self.create(); self.wait_idle()
         self.service.update_metadata("abcdefghijk", "用户编辑", "用户正文")
-        with patch("yt2bili.translation.tasks.translate_group", side_effect=TranslationError("FAIL", "模拟翻译失败")):
+        with patch("screator.translation.tasks.translate_group", side_effect=TranslationError("FAIL", "模拟翻译失败")):
             self.service.retranslate("abcdefghijk", "retranslate-fail", replace_edited=True)
             self.wait_idle()
         task = self.service.get_task("abcdefghijk")
@@ -437,12 +437,12 @@ class DesktopTests(unittest.TestCase):
         self.assertFalse(self.uploads)
 
     def test_translation_job_returns_immediately_and_is_idempotent(self):
-        from yt2bili.translation.types import TranslationResult
+        from screator.translation.types import TranslationResult
         started, release=threading.Event(), threading.Event()
         def slow(*args, **kwargs):
             started.set(); release.wait(3)
             return TranslationResult("试译", "正文", "local_llm")
-        with patch("yt2bili.translation.service.translate", side_effect=slow):
+        with patch("screator.translation.service.translate", side_effect=slow):
             first=self.service.translation_test("local_llm", "same-operation")
             self.assertTrue(started.wait(1))
             second=self.service.translation_test("local_llm", "same-operation")
@@ -466,7 +466,7 @@ class DesktopTests(unittest.TestCase):
         self.assertFalse(models.exists())
         self.assertEqual(job, self.service.translation_uninstall("uninstall-model-1"))
         self.service.config.values["local_llm_mode"] = "external"
-        with self.assertRaises(Yt2BiliError):
+        with self.assertRaises(AppError):
             self.service.translation_uninstall("uninstall-model-2")
 
     def test_configuration_and_edit_are_blocked_for_active_task(self):
@@ -476,17 +476,17 @@ class DesktopTests(unittest.TestCase):
         with self.mocks(), patch.object(youtube, "download_video", side_effect=download):
             try:
                 self.create(); self.assertTrue(started.wait(2))
-                with self.assertRaises(Yt2BiliError): self.service.update_settings({"bili_tid": 12})
-                with self.assertRaises(Yt2BiliError): self.service.update_metadata("abcdefghijk", "new", "desc")
+                with self.assertRaises(AppError): self.service.update_settings({"bili_tid": 12})
+                with self.assertRaises(AppError): self.service.update_metadata("abcdefghijk", "new", "desc")
             finally:
                 release.set()
             self.wait_idle()
 
     def test_unknown_method_and_bad_parameters_fail_closed(self):
-        with self.assertRaises(Yt2BiliError): self.service.dispatch("shell.execute", {})
-        with self.assertRaises(Yt2BiliError): self.service.dispatch("tasks.list", [])
-        with self.assertRaises(Yt2BiliError): self.service.list_tasks(limit=21)
-        with self.assertRaises(Yt2BiliError): self.service.list_tasks(limit=100000)
+        with self.assertRaises(AppError): self.service.dispatch("shell.execute", {})
+        with self.assertRaises(AppError): self.service.dispatch("tasks.list", [])
+        with self.assertRaises(AppError): self.service.list_tasks(limit=21)
+        with self.assertRaises(AppError): self.service.list_tasks(limit=100000)
 
     def test_task_and_history_pages_advance_by_twenty(self):
         for index in range(45):
@@ -518,12 +518,12 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0][0], "-abcdefghij")
         for invalid in ("file:///tmp/abcdefghijk", "https://youtube.com.evil.test/watch?v=abcdefghijk", "https://youtube.com/playlist?list=123"):
-            with self.assertRaises(Yt2BiliError): parse_urls(invalid)
+            with self.assertRaises(AppError): parse_urls(invalid)
 
     def test_protocol_success_error_and_invalid_version(self):
         class Service:
             def dispatch(self, method, params):
-                if method == "fail": raise Yt2BiliError("safe message")
+                if method == "fail": raise AppError("safe message")
                 return {"ok": True}
         stream = io.StringIO()
         protocol = Protocol(stream)
@@ -552,7 +552,7 @@ class ContractTests(unittest.TestCase):
             store = TaskStore(path); store.close()
             self.assertTrue(Path(str(path) + ".pre-desktop.bak").is_file())
             with closing(sqlite3.connect(path)) as conn: conn.execute("PRAGMA user_version=99")
-            with self.assertRaises(Yt2BiliError): TaskStore(path)
+            with self.assertRaises(AppError): TaskStore(path)
 
     def test_startup_recovers_states_without_restarting_jobs(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -626,7 +626,7 @@ class ContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "task.lock"
             with FileLock(path):
-                with self.assertRaises(Yt2BiliError):
+                with self.assertRaises(AppError):
                     with FileLock(path): pass
             with FileLock(path): pass
 
@@ -667,7 +667,7 @@ class ContractTests(unittest.TestCase):
 
     def test_credentials_validation_and_log_redaction(self):
         self.assertEqual(validate_login(login_fixture())["token_info"]["mid"], 123)
-        with self.assertRaises(Yt2BiliError): validate_login({"cookie_info": {}})
+        with self.assertRaises(AppError): validate_login({"cookie_info": {}})
         self.assertNotIn("secret", redact('SESSDATA=secret'))
         self.assertNotIn("secret", redact('{"access_token":"secret"}'))
 

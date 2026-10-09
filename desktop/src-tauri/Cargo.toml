@@ -1,7 +1,7 @@
 [package]
 name = "screator-desktop"
 version = "1.0.0-alpha"
-description = "StarDazz Screator desktop"
+description = "StarDazz screator desktop"
 edition = "2021"
 
 [build-dependencies]

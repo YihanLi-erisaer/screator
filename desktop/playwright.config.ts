@@ -1,5 +1,5 @@
 import { defineConfig } from "@playwright/test";
-const testPort = process.env.YT2BILI_TEST_PORT || "1420";
+const testPort = process.env.SCREATOR_TEST_PORT || "1420";
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,

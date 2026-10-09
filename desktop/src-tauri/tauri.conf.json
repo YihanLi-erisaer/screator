@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Screator",
+  "productName": "screator",
   "version": "1.0.0-alpha",
-  "identifier": "com.stardazz.yt2bili",
+  "identifier": "com.stardazz.screator",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "node scripts/build-frontend.mjs",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Screator · StarDazz",
+        "title": "screator · StarDazz",
         "width": 1280,
         "height": 800,
         "minWidth": 1024,

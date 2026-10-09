@@ -4,15 +4,15 @@
 
 ## 安装和运行
 
-- **安装版**：运行 `Screator_1.0.0-alpha_x64-setup.exe`，按向导安装，随后从开始菜单的 StarDazz 文件夹启动。
-- **免安装版**：完整解压 `Screator_1.0.0-alpha_x64-portable.zip`，双击 `Screator/Screator.exe`。也可以直接运行构建输出 `dist/windows/Screator/Screator.exe`。必须保留相邻的 `worker` 和 `bin` 文件夹，不能只复制主 EXE。
+- **安装版**：运行 `screator_1.0.0-alpha_x64-setup.exe`，按向导安装，随后从开始菜单的 StarDazz 文件夹启动。
+- **免安装版**：完整解压 `screator_1.0.0-alpha_x64-portable.zip`，双击 `screator/screator.exe`。也可以直接运行构建输出 `dist/windows/screator/screator.exe`。必须保留相邻的 `worker` 和 `bin` 文件夹，不能只复制主 EXE。
 - 已包含 Python 后台、FFmpeg、ffprobe、biliup 和 Node.js，无需安装开发工具。界面仍需要 Microsoft WebView2 Runtime；安装版会在缺失时联网安装，免安装版需要电脑已有此运行时。
 - 本地翻译模型首次使用时在应用内安装，模型不包含在安装包里。DeepL 为可选项。抖音官方同步仍需要单独配置授权服务。
 - 本次安装包未做代码签名。
 
 ## 用户数据
 
-安装版与免安装版默认共用 `%LOCALAPPDATA%/StarDazz/yt2bili/`，其中保存设置、任务和凭据；默认素材也存放在该目录。免安装指程序无需安装，数据不会跟随应用目录移动。不要同时运行开发版和发布版处理同一份数据。
+安装版与免安装版默认共用 `%LOCALAPPDATA%/StarDazz/screator/`，其中保存设置、任务和凭据；默认素材也存放在该目录。免安装指程序无需安装，数据不会跟随应用目录移动。不要同时运行开发版和发布版处理同一份数据。
 
 可通过 Windows“已安装的应用”卸载安装版。应用程序和用户数据分开保存；卸载后如果仍需要任务记录和素材，请保留上述数据目录。没有配置自动更新，升级时先退出应用，再运行新的安装包。
 
@@ -23,7 +23,7 @@
 在仓库根目录：
 
 ```powershell
-$env:YT2BILI_BUILD_PYTHON = 'C:\path\to\python.exe'
+$env:SCREATOR_BUILD_PYTHON = 'C:\path\to\python.exe'
 node desktop/scripts/package-windows.mjs
 ```
 

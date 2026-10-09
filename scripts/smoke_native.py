@@ -13,17 +13,17 @@ parser.add_argument("--shutdown", choices=("graceful", "forced"), help="Exercise
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 executable = args.release.resolve() if args.release else root / "desktop/src-tauri/target/debug" / ("screator-desktop.exe" if os.name == "nt" else "screator-desktop")
-with tempfile.TemporaryDirectory(prefix="yt2bili-native-") as folder:
+with tempfile.TemporaryDirectory(prefix="screator-native-") as folder:
     report = Path(folder) / "native.json"
-    environment = {**os.environ, "YT2BILI_NATIVE_SMOKE_REPORT": str(report),
-                   "YT2BILI_DESKTOP_DATA": folder, "YT2BILI_PROJECT_ROOT": str(root),
-                   "YT2BILI_PYTHON": os.environ.get("YT2BILI_PYTHON", str(root / (".desktop-venv/Scripts/python.exe" if os.name == "nt" else ".desktop-venv/bin/python")))}
+    environment = {**os.environ, "SCREATOR_NATIVE_SMOKE_REPORT": str(report),
+                   "SCREATOR_DESKTOP_DATA": folder, "SCREATOR_PROJECT_ROOT": str(root),
+                   "SCREATOR_PYTHON": os.environ.get("SCREATOR_PYTHON", str(root / (".desktop-venv/Scripts/python.exe" if os.name == "nt" else ".desktop-venv/bin/python")))}
     if args.shutdown:
-        environment["YT2BILI_NATIVE_SMOKE_SHUTDOWN"] = args.shutdown
+        environment["SCREATOR_NATIVE_SMOKE_SHUTDOWN"] = args.shutdown
     else:
-        environment.pop("YT2BILI_NATIVE_SMOKE_SHUTDOWN", None)
+        environment.pop("SCREATOR_NATIVE_SMOKE_SHUTDOWN", None)
     if args.release:
-        for key in ("YT2BILI_PROJECT_ROOT", "YT2BILI_PYTHON", "YT2BILI_WORKER", "YT2BILI_RESOURCES", "PYTHONPATH"):
+        for key in ("SCREATOR_PROJECT_ROOT", "SCREATOR_PYTHON", "SCREATOR_WORKER", "SCREATOR_RESOURCES", "PYTHONPATH"):
             environment.pop(key, None)
         environment["PATH"] = (str(Path(os.environ["SystemRoot"]) / "System32") if os.name == "nt"
                                else "/usr/bin:/bin:/usr/sbin:/sbin")
