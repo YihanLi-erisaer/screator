@@ -567,5 +567,10 @@
   "还没有稿件数据": "No video data yet",
   "完成投稿后，这里会按需读取已记录稿件的数据。": "After submission, data for recorded videos appears here on demand.",
   "数据每五分钟更新一次；AcFun 和抖音审核与互动数据暂不可读取，以 -- 显示。": "Data refreshes every five minutes. AcFun and Douyin review and engagement data is unavailable and appears as --.",
-  "条稿件": "videos"
+  "条稿件": "videos",
+  "自动尝试 Intel / AMD / NVIDIA 硬件解码，不可用时回退 CPU。": "Automatically try Intel / AMD / NVIDIA hardware decoding, with CPU fallback.",
+  "本地推理设备": "Local inference device",
+  "自动选择 GPU / CPU": "Automatically select GPU / CPU",
+  "首次下载约 3.6～4.9 GB；安装时需预留约 6～10 GB 空间。Windows 自动启用 Vulkan 和核显检测，支持兼容的 Intel / AMD GPU；Apple Silicon 使用 Metal。试译后显示实际 GPU / CPU 分配。安装后可断网翻译。": "The first download is about 3.6–4.9 GB; allow about 6–10 GB for installation. Windows enables Vulkan and integrated GPU discovery for compatible Intel / AMD GPUs; Apple Silicon uses Metal. A test translation shows actual GPU / CPU allocation. Translation works offline after installation.",
+  "外部 Ollama 请在服务进程中设置 OLLAMA_VULKAN=1 和 OLLAMA_IGPU_ENABLE=1，并安装兼容驱动。应用中的自动模式沿用外部服务的设备配置。": "For external Ollama, set OLLAMA_VULKAN=1 and OLLAMA_IGPU_ENABLE=1 on the server process and install compatible drivers. Automatic mode uses the external server’s device configuration."
 }

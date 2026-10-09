@@ -20,7 +20,8 @@ from yt2bili.tools import find_tool
 
 logger = logging.getLogger(__name__)
 _validated: dict[tuple, dict] = {}
-_VALIDATION_VERSION = 2
+_VALIDATION_VERSION = 3
+VALIDATION_HWACCELS = ("auto", "cpu", "cuda", "d3d11va", "vaapi", "videotoolbox")
 
 
 def ffmpeg_tool(name: str) -> str:
@@ -123,17 +124,53 @@ def _cuda_decode_args(info: dict) -> list[str]:
     return ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-c:v", decoder] if decoder else []
 
 
-def _validation_decode_args(info: dict) -> list[str]:
+def _validation_decode_candidates(info: dict) -> list[list[str]]:
     choice = os.getenv("YT2BILI_HWACCEL", "auto").strip().lower()
     if choice == "cpu":
         return []
-    if (platform.system() == "Darwin" and platform.machine().lower() == "arm64"
-            and choice in {"", "auto", "videotoolbox"}
-            and info.get("vcodec") in {"h264", "hevc", "av1"}):
-        # VideoToolbox support varies by M-series generation and codec profile.
-        # A failed hardware decode is always retried from the start on CPU.
-        return ["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"]
-    return _cuda_decode_args(info)
+    if choice not in VALIDATION_HWACCELS and choice != "":
+        raise Yt2BiliError("YT2BILI_HWACCEL 必须为 " + " / ".join(VALIDATION_HWACCELS))
+    system = platform.system()
+    automatic = choice in {"", "auto"}
+    if system == "Darwin":
+        if (choice in {"", "auto", "videotoolbox"}
+                and info.get("vcodec") in {"h264", "hevc", "av1"}):
+            return [["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"]]
+        return []
+    # Keep HDR and unusual chroma profiles on the established CPU path.
+    if (info.get("pix_fmt") not in {"yuv420p", "yuv420p10le", "nv12", "p010le"}
+            or info.get("color_transfer") in {"smpte2084", "arib-std-b67"}
+            or info.get("vcodec") not in {"h264", "hevc", "av1", "vp9"}):
+        return []
+    candidates = []
+    device = os.getenv("YT2BILI_HWACCEL_DEVICE", "").strip()
+    if system == "Windows" and (automatic or choice == "d3d11va"):
+        args = ["-hwaccel", "d3d11va", "-hwaccel_output_format", "d3d11", "-c:v", info["vcodec"]]
+        if device:
+            args += ["-hwaccel_device", device]
+        candidates.append(args)
+    cuda = _cuda_decode_args(info)
+    if cuda and system in {"Windows", "Linux"}:
+        if device and choice == "cuda":
+            cuda += ["-hwaccel_device", device]
+        candidates.append(cuda)
+    if system == "Linux" and (automatic or choice == "vaapi"):
+        # Try every render node on multi-GPU systems, including headless hosts.
+        devices = [device] if device else [str(node) for node in sorted(Path("/dev/dri").glob("renderD*"))]
+        for node in devices or ["/dev/dri/renderD128"]:
+            # Use native decoders: software defaults such as libdav1d cannot
+            # provide the hardware frames required by this validation attempt.
+            candidates.append(["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi", "-c:v", info["vcodec"],
+                               "-hwaccel_device", node])
+    return candidates
+
+
+def _decode_backend(acceleration: list[str]) -> str:
+    if not acceleration:
+        return "CPU"
+    method = acceleration[acceleration.index("-hwaccel") + 1]
+    return {"cuda": "NVIDIA GPU (CUDA)", "d3d11va": "GPU (D3D11VA)",
+            "vaapi": "GPU (VAAPI)", "videotoolbox": "VideoToolbox"}.get(method, "GPU")
 
 
 def _file_state(path: Path) -> tuple:
@@ -176,6 +213,7 @@ def _validation_fingerprint(path: Path, expected_duration) -> dict:
         "expected_duration": expected_duration,
         "tools": tool_states,
         "hwaccel": os.getenv("YT2BILI_HWACCEL", "auto").strip().lower(),
+        "hwaccel_device": os.getenv("YT2BILI_HWACCEL_DEVICE", "").strip(),
     }
 
 
@@ -212,7 +250,7 @@ def _write_validation_cache(path: Path, fingerprint: dict) -> None:
 
 
 def _decode_track(path: Path, stream: str, expected, acceleration: list[str]) -> float:
-    backend = "VideoToolbox" if "videotoolbox" in acceleration else "GPU" if acceleration else "CPU"
+    backend = _decode_backend(acceleration)
 
     def report(actual: float, speed_ratio: float | None) -> None:
         events.progress("validating", percent=min(100, actual / expected * 100) if expected else None,
@@ -226,10 +264,13 @@ def _decode_track(path: Path, stream: str, expected, acceleration: list[str]) ->
     # Keep their timestamps and input time base so the null muxer does not round
     # distinct frames to the same DTS and report a false decode failure.
     video_timing = ["-fps_mode", "passthrough", "-enc_time_base", "demux"] if stream == "v:0" else []
-    # FFmpeg can silently decode on the CPU when VideoToolbox is unavailable.
+    # FFmpeg can silently decode on the CPU when a hwaccel is unavailable.
     # Requiring hardware frames makes that attempt fail, so validate_media can
     # restart a full CPU decode instead of reporting a false hardware success.
-    hardware_frames = ["-vf", "format=videotoolbox_vld"] if stream == "v:0" and "videotoolbox" in acceleration else []
+    hardware_frames = []
+    if stream == "v:0" and "-hwaccel_output_format" in acceleration:
+        pixel_format = acceleration[acceleration.index("-hwaccel_output_format") + 1]
+        hardware_frames = ["-vf", f"format={pixel_format}"]
     cmd = [
         ffmpeg_tool("ffmpeg"), "-nostdin", "-hide_banner", "-v", "error", "-xerror",
         "-err_detect", "explode", *acceleration, "-i", str(path), "-map", f"0:{stream}",
@@ -310,16 +351,17 @@ def validate_media(
     logger.info("正在完整解码校验（不会写出转码文件）：%s", path)
     ends = []
     for stream in (["v:0", "a:0"] if info["has_audio"] else ["v:0"]):
-        acceleration = _validation_decode_args(info) if stream == "v:0" else []
-        backend = "Apple VideoToolbox" if "videotoolbox" in acceleration else "NVIDIA GPU" if acceleration else "CPU"
-        logger.info("校验 %s %s：%s", path.name, stream, backend)
-        try:
-            actual = _decode_track(path, stream, expected, acceleration)
-        except InvalidMediaError as exc:
-            if not acceleration:
-                raise
-            logger.warning("硬件解码校验不可用或失败，自动从头使用 CPU 复核：%s", exc)
-            actual = _decode_track(path, stream, expected, [])
+        candidates = _validation_decode_candidates(info) if stream == "v:0" else []
+        for acceleration in [*candidates, []]:
+            logger.info("校验 %s %s：%s", path.name, stream, _decode_backend(acceleration))
+            try:
+                actual = _decode_track(path, stream, expected, acceleration)
+                break
+            except InvalidMediaError as exc:
+                if not acceleration:
+                    raise
+                logger.warning("%s 硬件解码校验不可用或失败，将从头尝试下一解码方式（最终使用 CPU 复核）：%s",
+                               _decode_backend(acceleration), exc)
         ends.append(actual)
     if len(ends) == 2 and not duration_looks_complete(ends[0], ends[1]):
         raise InvalidMediaError(f"{path.name} 音视频长度不一致：{ends}，需要重新下载。")

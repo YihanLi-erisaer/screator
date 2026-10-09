@@ -20,6 +20,8 @@ const config = {
   local_llm_mode: "managed",
   local_llm_base_url: "http://127.0.0.1:11435",
   local_llm_model: "qwen3.5:4b",
+  local_llm_backend: "auto",
+  local_llm_backends: ["auto", "vulkan", "cpu"],
   local_llm_timeout_seconds: 300,
   translation_total_timeout_seconds: 420,
   data_dir: "本地应用数据目录",

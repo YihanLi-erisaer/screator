@@ -72,6 +72,7 @@ export default function TranslationPanel({
   }, [
     config.local_llm_mode,
     config.local_llm_base_url,
+    config.local_llm_backend,
     config.translation_primary,
     config.translation_fallback_enabled,
     config.local_llm_timeout_seconds,
@@ -235,6 +236,8 @@ export default function TranslationPanel({
             onChange={(value) =>
               void save({
                 local_llm_mode: value,
+                local_llm_backend: value === "external" && config.local_llm_backend === "vulkan"
+                  ? "auto" : config.local_llm_backend,
                 local_llm_base_url:
                   value === "managed"
                     ? "http://127.0.0.1:11435"
@@ -242,6 +245,22 @@ export default function TranslationPanel({
               })
             }
             options={[{ value: "managed", label: "应用管理（Windows x64 / Apple Silicon）" }, { value: "external", label: "连接已有本机 Ollama" }]}
+          />
+        </div>
+        <div className="field">
+          本地推理设备
+          <StyledSelect
+            label="本地推理设备"
+            value={config.local_llm_backend}
+            disabled={blocked}
+            onChange={(value) => void save({ local_llm_backend: value })}
+            options={[
+              { value: "auto", label: "自动选择 GPU / CPU" },
+              ...(config.local_llm_mode === "managed" && (config.local_llm_backends || []).includes("vulkan")
+                ? [{ value: "vulkan", label: "Vulkan（Intel / AMD / NVIDIA）" }]
+                : []),
+              { value: "cpu", label: "仅 CPU" },
+            ]}
           />
         </div>
         {config.local_llm_mode === "external" && (
@@ -263,8 +282,13 @@ export default function TranslationPanel({
         )}
         <p role="status">{local?.message || "正在检测组件…"}</p>
         <p className="help">
-          首次下载约 3.6～4.9 GB；安装时需预留约 6～10 GB 空间。Apple Silicon 使用 Ollama Metal 推理；试译后会显示实际设备。安装后可断网翻译。
+          首次下载约 3.6～4.9 GB；安装时需预留约 6～10 GB 空间。Windows 自动启用 Vulkan 和核显检测，支持兼容的 Intel / AMD GPU；Apple Silicon 使用 Metal。试译后显示实际 GPU / CPU 分配。安装后可断网翻译。
         </p>
+        {config.local_llm_mode === "external" && (
+          <p className="help">
+            外部 Ollama 请在服务进程中设置 OLLAMA_VULKAN=1 和 OLLAMA_IGPU_ENABLE=1，并安装兼容驱动。应用中的自动模式沿用外部服务的设备配置。
+          </p>
+        )}
         <h3>翻译超时</h3>
         <div className="form-grid">
           <label className="field">

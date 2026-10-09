@@ -43,6 +43,10 @@ copy .env.example .env
 
 默认本地优先，执行 `python -m yt2bili translation setup` 安装固定版本的 Ollama 和 Qwen3.5 4B，再用 `python -m yt2bili translation test` 试译。首次下载约 4.9 GB；安装会检查空间。
 
+本地推理支持兼容的 Intel 和 AMD GPU。Windows 应用管理模式默认启用 Ollama Vulkan 和核显检测，同时保留 NVIDIA CUDA / AMD ROCm 自动选择；Apple Silicon 继续使用 Metal。桌面“本地推理设备”或 `.env` 中的 `LOCAL_LLM_BACKEND=auto|vulkan|cpu` 可选择自动、Vulkan 或仅 CPU。Vulkan 选项用于 Windows 托管运行时；macOS 请选择自动或 CPU。没有可用 GPU 时，Ollama 可使用 CPU；试译结果根据 `/api/ps` 的显存分配显示 GPU、CPU 或 GPU + CPU，不根据配置猜测显卡厂商。
+
+Linux 和其他使用外部 Ollama 的环境，在 **Ollama 服务进程** 中设置 `OLLAMA_VULKAN=1`、`OLLAMA_IGPU_ENABLE=1` 后重启服务，在本项目中选外部模式及 `LOCAL_LLM_BACKEND=auto`。需安装包含 Vulkan 后端的 Ollama 和兼容显卡驱动；AMD ROCm 支持范围、Linux Vulkan 驱动与设备权限见 [Ollama 硬件文档](https://docs.ollama.com/gpu)。多卡可用 `GGML_VK_VISIBLE_DEVICES` 选择 Vulkan 设备，`OLLAMA_IGPU_ENABLE=0` 禁用核显；自动模式保留这些显式环境设置。外部服务的环境由用户管理，应用不会修改或重启它。仅 CPU 选项通过请求的 `num_gpu=0` 生效。
+
 如需 DeepL，在 `.env` 填入可选的 `DEEPL_AUTH_KEY`，设置 `TRANSLATION_PRIMARY=deepl` 可优先使用它。`TRANSLATION_FALLBACK_ENABLED=false` 关闭自动切换。密钥不要提交到 Git。详细部署、离线导入与验收边界见[本地翻译实现说明](docs/本地翻译实现与验证.md)。
 
 下载投稿工具并检查 FFmpeg：
@@ -130,7 +134,9 @@ python -m yt2bili repair TASK_ID
 
 修复会先尝试复用本任务完整素材，缺失或损坏时重新准备。成功后使用日志显示的路径在创作中心替换原稿件视频；不上传、不修改 BV、不触发成功清理。
 
-完整校验在 Windows 上默认优先尝试 NVIDIA GPU 解码（普通 8-bit 4:2:0 的 AV1/H.264/VP9）；在 Apple Silicon 上对 H.264/HEVC/AV1 优先尝试 VideoToolbox 硬件解码。没有可用设备、解码器不支持或硬件校验出错时，自动从头用 CPU 复核。其它格式和音频使用 CPU。可设置 `YT2BILI_HWACCEL=cpu` 强制 CPU，或设为 `auto` 恢复自动选择。CPU 处理 AV1 时建议使用包含 `libdav1d` 的 FFmpeg full 构建。
+完整校验在 Windows 上默认先尝试 D3D11VA（Intel / AMD / NVIDIA），失败后尝试适用的 CUDA 解码；Linux 先尝试适用的 CUDA，再尝试各 DRM render 节点的 VAAPI（Intel / AMD）；macOS 对 H.264/HEVC/AV1 尝试 VideoToolbox。D3D11VA/VAAPI 支持普通 8/10-bit 4:2:0 的 H.264/HEVC/AV1/VP9，实际能力取决于显卡、驱动和 FFmpeg 构建。每次硬件尝试必须输出硬件帧；失败会从头尝试下一方式，最后用 CPU 复核。其它格式、HDR 和音频使用 CPU（macOS VideoToolbox 的既有 HDR 路径保留）。CPU 处理 AV1 时建议使用包含 `libdav1d` 的 FFmpeg full 构建。
+
+可在桌面设置选择校验后端，或设置 `YT2BILI_HWACCEL=auto|cpu|cuda|d3d11va|vaapi|videotoolbox`。显式选择只尝试该硬件后端，失败仍从头用 CPU 复核。多卡可设置 `YT2BILI_HWACCEL_DEVICE`：Windows 使用 D3D11 适配器索引（如 `1`），Linux VAAPI 使用 render 节点（如 `/dev/dri/renderD129`），显式 CUDA 模式使用 CUDA 设备索引。设备设置参与校验缓存指纹；修改后重新解码。后端和设备选项参考 [FFmpeg 文档](https://ffmpeg.org/ffmpeg.html#Advanced-Video-options)。
 
 完整校验成功后，会在视频旁写入 `<文件名>.validation.json` 缓存，程序重启后仍可复用。每次先检查轨道信息并计算**整文件 SHA-256**，只有内容、文件状态、预期时长、解码模式、校验规则版本及 FFmpeg/ffprobe 工具状态均匹配才跳过重复解码；仍需顺序读取整个文件，但无需再次逐帧解码。文件中间内容变化（即使大小和修改时间不变）也会使缓存失效。失败或中断的校验不写成功缓存；缓存损坏时重新校验，缓存写入失败不影响已通过的结果。上传后清理任务目录时缓存一并删除。
 

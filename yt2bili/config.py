@@ -39,6 +39,7 @@ class Settings:
     local_llm_mode: str = "managed"
     local_llm_base_url: str = "http://127.0.0.1:11435"
     local_llm_model: str = "qwen3.5:4b"
+    local_llm_backend: str = "auto"
     local_llm_num_ctx: int = 8192
     local_llm_timeout_seconds: int = 300
     translation_total_timeout_seconds: int = 420

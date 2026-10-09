@@ -32,10 +32,14 @@ def translate(payload):
             if not body:
                 raise TranslationError("INPUT_INVALID", "标题超出模型上下文预算。")
             body = body[:max(0, len(body) - max(32, len(body) // 8))].rstrip()
+        options = {"temperature": .2, "num_ctx": config["local_llm_num_ctx"], "num_predict": 3072}
+        if config.get("local_llm_backend") == "cpu":
+            # Also works with an external service and with Metal on macOS.
+            options["num_gpu"] = 0
         response = request_json(address, "/api/chat", {
             "model": config["local_llm_model"], "messages": messages(body),
             "stream": False, "think": False, "format": prompts.SCHEMA, "keep_alive": "60s",
-            "options": {"temperature": .2, "num_ctx": config["local_llm_num_ctx"], "num_predict": 3072},
+            "options": options,
         }, timeout=config["local_llm_timeout_seconds"])
         message = response.get("message", {})
         if (response.get("done") is not True or response.get("done_reason") == "length"
@@ -63,6 +67,9 @@ def translate(payload):
                            or str(item.get("digest", "")).removeprefix("sha256:") == status["digest"]), None)
             if loaded is not None and isinstance(loaded.get("size_vram"), int):
                 inference_device = ("Apple GPU (Metal)" if sys.platform == "darwin" else "GPU") if loaded["size_vram"] > 0 else "CPU"
+                if (loaded["size_vram"] > 0 and isinstance(loaded.get("size"), int)
+                        and loaded["size"] > loaded["size_vram"]):
+                    inference_device += " + CPU"
         except TranslationError:
             pass
         return {**result, "provider": "local_llm", "model_digest": status["digest"],

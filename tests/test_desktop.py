@@ -303,6 +303,18 @@ class DesktopTests(unittest.TestCase):
         reloaded.update({"theme": "dark"})
         self.assertNotIn("acfun_experimental_enabled", json.loads((self.paths.root / "settings.json").read_text(encoding="utf-8")))
 
+    def test_gpu_backend_settings_are_persisted_and_snapshotted(self):
+        previous = self.service.config.snapshot()
+        previous.pop("local_llm_backend")
+        result = self.service.update_settings({"local_llm_backend": "vulkan", "hwaccel": "d3d11va"})
+        self.assertEqual(result["local_llm_backend"], "vulkan")
+        reloaded = DesktopSettings(self.paths, MemoryVault())
+        self.assertEqual(reloaded.build().local_llm_backend, "vulkan")
+        self.assertEqual(reloaded.build(previous).local_llm_backend, "auto")
+        self.assertEqual(reloaded.values["hwaccel"], "d3d11va")
+        with self.assertRaises(Yt2BiliError):
+            self.service.update_settings({"local_llm_backend": "unsupported"})
+
     def test_translation_timeouts_are_persisted_and_public(self):
         result = self.service.update_settings({
             "local_llm_timeout_seconds": 240,

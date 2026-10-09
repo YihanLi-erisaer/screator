@@ -193,6 +193,34 @@ test("local-first translation settings and fallback can be changed", async ({
   await expect(page.getByLabel("翻译流程总超时（秒）")).toHaveValue("360");
 });
 
+test("GPU inference settings reset Vulkan when switching to an external server", async ({ page }) => {
+  await page.goto("/?preview");
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  const device = page.getByRole("combobox", { name: "本地推理设备" });
+  await device.click();
+  await page.getByRole("option", { name: "Vulkan（Intel / AMD / NVIDIA）", exact: true }).click();
+  await expect(device).toContainText("Vulkan");
+  await page.getByRole("combobox", { name: "本地运行方式" }).click();
+  await page.getByRole("option", { name: "连接已有本机 Ollama", exact: true }).click();
+  await expect(device).toContainText("自动选择 GPU / CPU");
+  await device.click();
+  await expect(page.getByRole("option", { name: /Vulkan/ })).toHaveCount(0);
+  await page.getByRole("option", { name: "仅 CPU", exact: true }).click();
+  await expect(device).toContainText("仅 CPU");
+  await expect(page.getByText(/外部 Ollama 请在服务进程中设置/)).toBeVisible();
+});
+
+test("Intel and AMD validation backend can be saved independently of inference", async ({ page }) => {
+  await page.goto("/?preview");
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  const validation = page.getByRole("combobox", { name: "完整校验" });
+  await validation.click();
+  await page.getByRole("option", { name: "D3D11VA（Windows Intel / AMD / NVIDIA）", exact: true }).click();
+  await page.getByRole("button", { name: "保存设置", exact: true }).click();
+  await expect(validation).toContainText("D3D11VA");
+  await expect(page.getByRole("combobox", { name: "本地推理设备" })).toContainText("自动选择 GPU / CPU");
+});
+
 test("DeepL key badge follows saved credential state", async ({ page }) => {
   await page.goto("/?preview");
   await page.getByRole("button", { name: "设置", exact: true }).click();

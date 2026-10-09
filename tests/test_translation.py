@@ -212,6 +212,7 @@ class LocalHttpTests(unittest.TestCase):
         self.content = json.dumps({"title": "译文", "description": "正文"})
         self.done_reason = "stop"
         self.gpu_size = None
+        self.model_size = None
         self.last_body = None
         self.model_name = manifest()["model"]["name"]
         self.model_digest = manifest()["model"]["digest"]
@@ -228,7 +229,8 @@ class LocalHttpTests(unittest.TestCase):
                     time.sleep(owner.ready_delay)
                 self.respond({"version": "test"} if self.path == "/api/version" else
                              {"models": [{"name": owner.model_name, "digest": owner.model_digest,
-                                          **({"size_vram": owner.gpu_size} if self.path == "/api/ps" and owner.gpu_size is not None else {})}]})
+                                          **({"size_vram": owner.gpu_size} if self.path == "/api/ps" and owner.gpu_size is not None else {}),
+                                          **({"size": owner.model_size} if self.path == "/api/ps" and owner.model_size is not None else {})}]})
             def do_POST(self):
                 owner.last_body=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 time.sleep(owner.delay)
@@ -259,6 +261,19 @@ class LocalHttpTests(unittest.TestCase):
         self.assertEqual(result["inference_device"], "Apple GPU (Metal)" if sys.platform == "darwin" else "GPU")
         self.gpu_size = 0
         self.assertEqual(isolated_request(self.payload, time.monotonic() + 10)["inference_device"], "CPU")
+
+    def test_cpu_backend_is_sent_to_external_service(self):
+        self.config["local_llm_backend"] = "cpu"
+        isolated_request(self.payload, time.monotonic() + 10)
+        self.assertEqual(self.last_body["options"]["num_gpu"], 0)
+
+    def test_actual_hybrid_allocation_is_reported_without_guessing_vendor(self):
+        self.gpu_size = 1024
+        self.model_size = 2048
+        result = isolated_request(self.payload, time.monotonic() + 10)
+        self.assertEqual(result["inference_device"],
+                         ("Apple GPU (Metal)" if sys.platform == "darwin" else "GPU") + " + CPU")
+        self.assertNotIn("num_gpu", self.last_body["options"])
 
     def test_local_timeout_starts_after_service_is_ready(self):
         self.ready_delay = 1.4

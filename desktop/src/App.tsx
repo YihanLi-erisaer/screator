@@ -2274,13 +2274,20 @@ function Settings({
           <div className="setting-row">
             <div>
               <strong>完整校验</strong>
-              <p>自动尝试硬件解码，不可用时回退 CPU。</p>
+              <p>自动尝试 Intel / AMD / NVIDIA 硬件解码，不可用时回退 CPU。</p>
             </div>
             <StyledSelect
               label="完整校验"
               value={form.hwaccel}
               onChange={(value) => update("hwaccel", value)}
-              options={[{ value: "auto", label: "自动选择" }, { value: "cpu", label: "仅 CPU" }]}
+              options={[
+                { value: "auto", label: "自动选择" },
+                { value: "d3d11va", label: "D3D11VA（Windows Intel / AMD / NVIDIA）" },
+                { value: "vaapi", label: "VAAPI（Linux Intel / AMD）" },
+                { value: "cuda", label: "CUDA（NVIDIA）" },
+                { value: "videotoolbox", label: "VideoToolbox（macOS）" },
+                { value: "cpu", label: "仅 CPU" },
+              ]}
             />
           </div>
           <label className="setting-row">

@@ -12,6 +12,7 @@ DEFAULTS = {
     "local_llm_mode": "managed",
     "local_llm_base_url": "http://127.0.0.1:11435",
     "local_llm_model": "qwen3.5:4b",
+    "local_llm_backend": "auto",
     "local_llm_num_ctx": 8192,
     # Preserve the existing bounded timeout until Qwen3.5 is measured locally.
     "local_llm_timeout_seconds": 300,
@@ -27,6 +28,10 @@ def validate(values):
         raise Yt2BiliError("自动切换必须是开关值。")
     if result["local_llm_mode"] not in ("managed", "external"):
         raise Yt2BiliError("本地运行模式无效。")
+    if result["local_llm_backend"] not in ("auto", "vulkan", "cpu"):
+        raise Yt2BiliError("请选择自动、Vulkan 或 CPU 推理。")
+    if result["local_llm_mode"] == "external" and result["local_llm_backend"] == "vulkan":
+        raise Yt2BiliError("外部模式请在 Ollama 服务中启用 Vulkan，应用内选择自动推理。")
     if result["local_llm_model"] not in ("qwen3.5:4b", "qwen3:8b"):
         raise Yt2BiliError("当前支持的模型为 qwen3.5:4b；历史任务可继续使用 qwen3:8b。")
     for name, low, high in (("local_llm_num_ctx", 8192, 32768),

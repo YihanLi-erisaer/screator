@@ -90,6 +90,31 @@ def status(config, root):
         return {"state": "missing", "message": "尚未安装本地翻译组件。", "code": "MODEL_MISSING"}
 
 
+def runtime_environment(config, root):
+    env = {**os.environ, "OLLAMA_HOST": "127.0.0.1:11435", "OLLAMA_MODELS": str(Path(root) / "models"),
+           "OLLAMA_NO_CLOUD": "1", "OLLAMA_NUM_PARALLEL": "1", "OLLAMA_MAX_LOADED_MODELS": "1"}
+    backend = config.get("local_llm_backend", "auto")
+    if backend == "vulkan" and sys.platform not in {"win32", "linux"}:
+        raise TranslationError("INPUT_INVALID", "Vulkan 推理支持 Windows 和 Linux；Apple Silicon 请选择自动推理。")
+    if sys.platform == "darwin":
+        # Ollama discovers its bundled Metal runner beside this binary.
+        env.pop("OLLAMA_LLM_LIBRARY", None)
+    elif backend == "cpu":
+        env.update(OLLAMA_LLM_LIBRARY="cpu", OLLAMA_VULKAN="0", OLLAMA_IGPU_ENABLE="0",
+                   CUDA_VISIBLE_DEVICES="-1", HIP_VISIBLE_DEVICES="-1", ROCR_VISIBLE_DEVICES="-1",
+                   GGML_VK_VISIBLE_DEVICES="-1")
+    elif backend == "vulkan":
+        env.update(OLLAMA_LLM_LIBRARY="vulkan", OLLAMA_VULKAN="1", OLLAMA_IGPU_ENABLE="1")
+    else:
+        # v0.34.3 filters most integrated GPUs out unless explicitly enabled.
+        # Preserve advanced device selection and explicit opt-outs from the environment.
+        env.setdefault("OLLAMA_VULKAN", "1")
+        env.setdefault("OLLAMA_IGPU_ENABLE", "1")
+    # Do not log runtime output: model runners can include prompts in debug logs.
+    env.pop("OLLAMA_DEBUG", None)
+    return env
+
+
 @contextmanager
 def local_session(config, root, *, installing=False):
     """Own only processes created here. A busy port never grants ownership."""
@@ -114,13 +139,7 @@ def local_session(config, root, *, installing=False):
         pass
     else:
         raise TranslationError("PORT_IN_USE", "11435 端口已被占用；请关闭占用服务或使用外部模式。")
-    env = {**os.environ, "OLLAMA_HOST": "127.0.0.1:11435", "OLLAMA_MODELS": str(root / "models"),
-           "OLLAMA_NO_CLOUD": "1", "OLLAMA_NUM_PARALLEL": "1", "OLLAMA_MAX_LOADED_MODELS": "1"}
-    if sys.platform == "darwin":
-        # Ollama discovers its bundled Metal runner beside this binary.
-        env.pop("OLLAMA_LLM_LIBRARY", None)
-    # Do not log runtime output: model runners can include prompts in debug logs.
-    env.pop("OLLAMA_DEBUG", None)
+    env = runtime_environment(config, root)
     process = subprocess.Popen([str(binary), "serve"], env=env, stdin=subprocess.DEVNULL,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **creation_options())
     tree = ProcessTree(process)

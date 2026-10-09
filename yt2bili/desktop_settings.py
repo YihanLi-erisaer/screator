@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 from yt2bili.config import Settings
 from yt2bili.exceptions import Yt2BiliError
 from yt2bili.translation.config import DEFAULTS, validate as validate_translation, legacy_snapshot
+from yt2bili.media import VALIDATION_HWACCELS
 
 
 def atomic_json(path: Path, value):
@@ -74,6 +76,7 @@ class DesktopSettings:
         primary_ready = local_ready if self.values["translation_primary"] == "local_llm" else has_key
         ready = primary_ready or (self.values["translation_fallback_enabled"] and (local_ready or has_key))
         return {**self.values, "has_deepl_key": has_key, "vault_error": vault_error, "translation_ready": bool(ready),
+                "local_llm_backends": ["auto", "vulkan", "cpu"] if sys.platform == "win32" else ["auto", "cpu"],
                 "translation_upgrade_notice": self.translation_upgrade_notice,
                 "data_dir": str(self.paths.root), "youtube_cookies": (self.paths.root / "secrets/youtube_cookies.txt").is_file()}
 
@@ -96,7 +99,7 @@ class DesktopSettings:
             raise Yt2BiliError("请选择支持的 YouTube 下载分辨率。")
         if merged["youtube_audio_language"] not in ("auto", "original", "zh", "en", "ja", "ko", "es", "fr", "de", "hi"):
             raise Yt2BiliError("请选择支持的 YouTube 配音语言。")
-        if merged["theme"] not in ("system", "dark", "light") or merged["hwaccel"] not in ("auto", "cpu"):
+        if merged["theme"] not in ("system", "dark", "light") or merged["hwaccel"] not in VALIDATION_HWACCELS:
             raise Yt2BiliError("主题或校验模式无效。")
         if merged["ui_language"] not in ("zh-CN", "zh-HK", "en"):
             raise Yt2BiliError("请选择支持的界面语言。")
@@ -143,4 +146,3 @@ class DesktopSettings:
                         upload_gap_seconds=value["upload_gap_seconds"], work_dir=Path(value["work_dir"]),
                         data_dir=root / "data", bin_dir=self.paths.resources / "bin",
                         translation_root=root / "translation", **validate_translation(value))
-

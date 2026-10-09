@@ -224,12 +224,14 @@ class ValidationAccelerationCacheTests(unittest.TestCase):
 
     def test_auto_tries_gpu_then_cpu_on_failure(self):
         with patch.object(media.platform, "system", return_value="Linux"), \
-             patch.object(media, "_decode_track", side_effect=[InvalidMediaError("no device"), 3.0, 3.0]) as decode:
+             patch.object(Path, "glob", return_value=[]), \
+             patch.object(media, "_decode_track", side_effect=[InvalidMediaError("no CUDA"), InvalidMediaError("no VAAPI"), 3.0, 3.0]) as decode:
             media.validate_media(self.source, 3)
         calls = decode.call_args_list
         self.assertIn("cuda", calls[0].args[3])
-        self.assertEqual(calls[1].args[1:], ("v:0", 3, []))
-        self.assertEqual(calls[2].args[1:], ("a:0", 3, []))
+        self.assertIn("vaapi", calls[1].args[3])
+        self.assertEqual(calls[2].args[1:], ("v:0", 3, []))
+        self.assertEqual(calls[3].args[1:], ("a:0", 3, []))
         self.assertTrue(media._validation_cache_path(self.source).exists())
 
     def test_apple_silicon_tries_videotoolbox_then_cpu(self):
@@ -242,10 +244,11 @@ class ValidationAccelerationCacheTests(unittest.TestCase):
         self.assertEqual(decode.call_args_list[1].args[3], [])
 
     def test_gpu_and_cpu_failure_never_saved_as_pass(self):
+        attempts = len(media._validation_decode_candidates(media.probe_brief(self.source))) + 1
         with patch.object(media, "_decode_track", side_effect=InvalidMediaError("broken")) as decode:
             with self.assertRaises(InvalidMediaError):
                 media.validate_media(self.source, 3)
-        self.assertEqual(decode.call_count, 2)
+        self.assertEqual(decode.call_count, attempts)
         self.assertFalse(media._validation_cache_path(self.source).exists())
 
     def test_force_cpu_never_tries_cuda(self):
@@ -316,6 +319,14 @@ class ValidationAccelerationCacheTests(unittest.TestCase):
     def test_bad_json_cache_is_ignored(self):
         media._validation_cache_path(self.source).write_text("{partial")
         with patch.object(media, "_decode_track", return_value=3.0) as decode:
+            media.validate_media(self.source, 3)
+        self.assertEqual(decode.call_count, 2)
+
+    def test_changed_hardware_device_invalidates_cache(self):
+        with patch.object(media, "_decode_track", return_value=3.0):
+            media.validate_media(self.source, 3)
+        with patch.dict(os.environ, {"YT2BILI_HWACCEL_DEVICE": "1"}), \
+             patch.object(media, "_decode_track", return_value=3.0) as decode:
             media.validate_media(self.source, 3)
         self.assertEqual(decode.call_count, 2)
 
