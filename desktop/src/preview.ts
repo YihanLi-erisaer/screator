@@ -132,7 +132,26 @@ if (verificationPreview && tasks.length) {
     snapshot: JSON.stringify({ title: "验证测试", channel_id: 86, description: "共用简介", tags: ["转载"] }),
   }];
 }
+let resourceSamples = 0;
 export async function request(method: string, params: any): Promise<any> {
+  if (method === "system.resources") {
+    resourceSamples += 1;
+    const flags = new URLSearchParams(location.search);
+    if (flags.has("resourceError") && resourceSamples <= 2) throw new Error("Preview monitor unavailable");
+    const warming = flags.has("resourceWarmup") && resourceSamples <= 2;
+    const processes = [
+      { pid: 4100, parent_pid: null, name: "yt2bili.exe", cpu_percent: 0.5, memory_bytes: 64 * 1024 ** 2 },
+      { pid: 4101, parent_pid: 4100, name: "msedgewebview2.exe", cpu_percent: 2, memory_bytes: 128 * 1024 ** 2 },
+      { pid: 4102, parent_pid: 4100, name: "yt2bili-worker.exe", cpu_percent: 1, memory_bytes: 64 * 1024 ** 2 },
+      { pid: 4103, parent_pid: 4102, name: "ffmpeg.exe", cpu_percent: 40, memory_bytes: 256 * 1024 ** 2 },
+      { pid: 4104, parent_pid: 4102, name: "ollama.exe", cpu_percent: 25, memory_bytes: 512 * 1024 ** 2 },
+    ].map((process) => ({ ...process, cpu_percent: warming ? null : process.cpu_percent }));
+    return { scope: "application", root_pid: 4100, sampled_at: Date.now() / 1000,
+      interval_seconds: warming ? null : 2, logical_cpu_count: 8, system_memory_bytes: 16 * 1024 ** 3,
+      cpu_percent: warming ? null : 68.5, memory_bytes: 1024 ** 3, process_count: 5,
+      cpu_pending_processes: warming ? 5 : 0, memory_unavailable_processes: 0,
+      inaccessible_processes: 0, processes };
+  }
   if (verificationPreview && method === "acfun.verification") return verificationMissing ? {
     status: "refresh_required", reason: "missing", message: "本次验证入口未保存或来自旧版后台。",
   } : {

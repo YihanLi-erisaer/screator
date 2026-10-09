@@ -507,6 +507,8 @@ def _prepare_assets(settings, store, task, meta, work_dir: Path, video_path: Pat
                 settings.cover_width,
                 settings.cover_height,
             )
+        except events.Cancelled:
+            raise
         except Yt2BiliError as exc:
             log.warning("封面下载失败，改为从视频抽帧：%s", exc)
             frame = work_dir / "frame.jpg"

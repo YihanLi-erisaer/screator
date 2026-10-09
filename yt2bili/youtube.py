@@ -5,7 +5,6 @@ import logging
 import shutil
 import sys
 import threading
-import time
 import uuid
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass
@@ -47,8 +46,10 @@ def _download_with_slot(opts: dict, url: str) -> dict:
     # Validation, cache checks and retry backoff must remain outside it.
     with gate if gate is not None else nullcontext():
         with _download_lock if _download_lock is not None else nullcontext():
+            events.check_cancelled()
             with yt_dlp.YoutubeDL(opts) as ydl:
                 result = ydl.extract_info(url, download=True)
+            events.check_cancelled()
     logger.info("下载/合并阶段结束，已释放下载名额：%s", url)
     return result
 
@@ -163,6 +164,7 @@ def download_video(
     last_error: Exception | None = None
     max_attempts = 5
     for attempt in range(1, max_attempts + 1):
+        events.check_cancelled()
         finished = _finish_existing_source(url, work_dir, settings, expected_duration) if validate else _find_source(work_dir)
         if finished:
             return finished
@@ -191,6 +193,7 @@ def download_video(
         except Yt2BiliError:
             raise
         except Exception as exc:  # yt-dlp raises DownloadError
+            events.check_cancelled()
             last_error = exc
             logger.warning("下载失败：%s", exc)
             recovered = _finish_existing_source(
@@ -206,7 +209,7 @@ def download_video(
                         "Windows 文件被占用（常见于杀毒扫描），%s 秒后重试。",
                         wait,
                     )
-                    time.sleep(wait)
+                    events.wait(wait)
                     continue
             if _is_range_error(exc):
                 recovered = _recover_after_416(
@@ -219,20 +222,20 @@ def download_video(
                 if attempt < max_attempts:
                     opts = {**opts, "continuedl": False, "overwrites": True}
                     logger.warning("半成品无法续传（HTTP 416），将从头下载。")
-                    time.sleep(2)
+                    events.wait(2)
                     continue
             if _is_ssl_error(exc) and attempt < max_attempts:
                 wait = 10 * attempt
                 logger.warning("网络 SSL 连接中断，%s 秒后重试。", wait)
-                time.sleep(wait)
+                events.wait(wait)
                 continue
             if _is_bot_block(exc) and attempt < max_attempts:
                 wait = 15 * attempt
                 logger.warning("YouTube 机器人校验失败，%s 秒后重试。", wait)
-                time.sleep(wait)
+                events.wait(wait)
                 continue
             if attempt < max_attempts:
-                time.sleep(2 ** attempt)
+                events.wait(2 ** attempt)
     raise Yt2BiliError(_format_ytdlp_error("视频下载失败", last_error))
 
 
@@ -359,6 +362,7 @@ def _download_audio_only(url: str, work_dir: Path, settings: Settings) -> Path:
     last_error: Exception | None = None
     max_attempts = 5
     for attempt in range(1, max_attempts + 1):
+        events.check_cancelled()
         existing = _find_audio(work_dir)
         if existing:
             logger.info("已存在音轨，跳过下载：%s", existing)
@@ -374,15 +378,16 @@ def _download_audio_only(url: str, work_dir: Path, settings: Settings) -> Path:
         except Yt2BiliError:
             raise
         except Exception as exc:
+            events.check_cancelled()
             last_error = exc
             logger.warning("音轨下载失败：%s", exc)
             if _is_ssl_error(exc) and attempt < max_attempts:
                 wait = 10 * attempt
                 logger.warning("网络 SSL 连接中断，%s 秒后重试音轨下载。", wait)
-                time.sleep(wait)
+                events.wait(wait)
                 continue
             if attempt < max_attempts:
-                time.sleep(2 ** attempt)
+                events.wait(2 ** attempt)
     raise Yt2BiliError(_format_ytdlp_error("音轨下载失败", last_error))
 
 
@@ -400,15 +405,24 @@ def _find_audio(work_dir: Path) -> Path | None:
 
 
 def download_thumbnail(url: str, dest: Path) -> None:
+    events.check_cancelled()
     dest.parent.mkdir(parents=True, exist_ok=True)
     req = Request(url, headers={"User-Agent": "Mozilla/5.0 yt2bili"})
+    temporary = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.part")
     try:
-        with urlopen(req, timeout=60) as resp:
-            dest.write_bytes(resp.read())
+        with urlopen(req, timeout=5) as resp, temporary.open("wb") as output:
+            while chunk := resp.read(64 * 1024):
+                events.check_cancelled()
+                output.write(chunk)
+        events.check_cancelled()
+        if temporary.stat().st_size <= 0:
+            raise Yt2BiliError("封面文件为空。")
+        temporary.replace(dest)
     except Exception as exc:
+        events.check_cancelled()
         raise Yt2BiliError(f"封面下载失败：{exc}") from exc
-    if dest.stat().st_size <= 0:
-        raise Yt2BiliError("封面文件为空。")
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def describe_js_runtimes(settings: Settings) -> str:

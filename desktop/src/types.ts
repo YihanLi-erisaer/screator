@@ -92,6 +92,27 @@ export interface Progress {
   backend?: string;
   provider?: string;
 }
+export interface ResourceSnapshot {
+  scope: "application" | "worker";
+  root_pid: number;
+  sampled_at: number;
+  interval_seconds: number | null;
+  logical_cpu_count: number;
+  system_memory_bytes: number;
+  cpu_percent: number | null;
+  memory_bytes: number | null;
+  process_count: number;
+  cpu_pending_processes: number;
+  memory_unavailable_processes: number;
+  inaccessible_processes: number;
+  processes: {
+    pid: number;
+    parent_pid: number | null;
+    name: string;
+    cpu_percent: number | null;
+    memory_bytes: number | null;
+  }[];
+}
 export const labels: Record<string, string> = {
   partial_success: "部分已提交",
   completed_with_abandon: "已结束（部分放弃）",

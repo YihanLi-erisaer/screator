@@ -52,6 +52,17 @@ def cancellation_event():
     return context[1] if context else None
 
 
+def wait(seconds):
+    """Wait between attempts, waking immediately when the task is cancelled."""
+    check_cancelled()
+    cancel = cancellation_event()
+    if cancel is None:
+        time.sleep(seconds)
+    else:
+        cancel.wait(seconds)
+    check_cancelled()
+
+
 def progress(stage, *, force=False, **payload):
     check_cancelled()
     context = getattr(_local, "context", None)

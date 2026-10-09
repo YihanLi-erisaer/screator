@@ -9,6 +9,8 @@ export const preview =
   import.meta.env.DEV &&
   !isTauri() &&
   new URLSearchParams(location.search).has("preview");
+let shuttingDown = false;
+export function beginShutdown() { shuttingDown = true; }
 export async function setWindowTheme(theme: "system" | "dark" | "light") {
   if (isTauri())
     await getCurrentWindow().setTheme(theme === "system" ? null : theme);
@@ -42,6 +44,10 @@ export async function request<T = any>(
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<T> {
+  if (shuttingDown && !method.startsWith("system."))
+    throw new Error("应用正在退出。");
+  if (shuttingDown && !["system.prepare_shutdown", "system.shutdown_status"].includes(method))
+    throw new Error("应用正在退出。");
   if (preview) return (await import("./preview")).request(method, params) as T;
   if (!isTauri())
     throw new Error(

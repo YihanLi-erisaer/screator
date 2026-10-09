@@ -30,7 +30,7 @@ if (process.argv[2] === "dev" && !env.YT2BILI_WORKER) {
     env.YT2BILI_PYTHON || python,
     [
       "-c",
-      "import sqlite3, yt_dlp, deepl, keyring, qrcode; from PIL import _imaging",
+      "import sqlite3, yt_dlp, deepl, keyring, qrcode, psutil; from PIL import _imaging",
     ],
     {
       cwd: root,

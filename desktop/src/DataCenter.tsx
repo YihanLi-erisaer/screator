@@ -17,7 +17,7 @@ const PAGE_SIZE = 20;
 const format = (value: number | null | undefined) => value == null ? "--" : value.toLocaleString();
 const platformName: Record<Platform, string> = { bilibili: "Bilibili", acfun: "AcFun", douyin: "抖音" };
 
-export function DataCenter({ accounts, onOpenTask }: { accounts: BiliAccount[]; onOpenTask: (taskId: string) => void }) {
+export function DataCenter({ accounts, onOpenTask, paused = false }: { accounts: BiliAccount[]; onOpenTask: (taskId: string) => void; paused?: boolean }) {
   const [platform, setPlatform] = useState("");
   const [accountId, setAccountId] = useState("");
   const [offset, setOffset] = useState(0);
@@ -27,6 +27,7 @@ export function DataCenter({ accounts, onOpenTask }: { accounts: BiliAccount[]; 
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (paused) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const schedule = () => { timer = setTimeout(() => setRevision((value) => value + 1), 300_000); };
@@ -36,7 +37,7 @@ export function DataCenter({ accounts, onOpenTask }: { accounts: BiliAccount[]; 
       .then((value) => { if (alive) { setResult(value); setLoading(false); schedule(); } })
       .catch(() => { if (alive) { setError("数据暂时无法获取，请稍后重试。"); setLoading(false); schedule(); } });
     return () => { alive = false; if (timer) clearTimeout(timer); };
-  }, [platform, accountId, offset, revision]);
+  }, [platform, accountId, offset, revision, paused]);
 
   const summary = result?.accounts ?? [];
   const rows = result?.items ?? [];

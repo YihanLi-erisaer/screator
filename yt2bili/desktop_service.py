@@ -42,8 +42,11 @@ def parse_urls(text):
 class DesktopService:
     def __init__(self, paths, emit, vault=None, config=None):
         self.paths, self.output = paths, emit
+        self._closed = False
         self.logs = deque(maxlen=1500)
         self.logs_lock = threading.Lock()
+        from yt2bili.resource_monitor import ResourceMonitor
+        self.resource_monitor = ResourceMonitor()
         self.mutation = threading.RLock()
         self.login = None
         self.auth_state = {"status": "idle"}
@@ -109,6 +112,9 @@ class DesktopService:
                     if item.wait_reason == "rate_limited": item.wait_reason, item.deadline = "", None
                 lane.condition.notify_all()
         self.output(event, payload)
+        if (event in ("queue.changed", "translation.job.finished")
+                and hasattr(self, "translation_jobs") and self.scheduler.closing and not self._closed):
+            self.output("system.shutdown_status", self.shutdown_status())
 
     def add_log(self, entry):
         with self.logs_lock:
@@ -133,8 +139,11 @@ class DesktopService:
     def dispatch(self, method, params):
         if not isinstance(params, dict):
             raise Yt2BiliError("请求参数必须为对象。")
+        if self.scheduler.closing and method not in ("system.prepare_shutdown", "system.shutdown_status"):
+            raise Yt2BiliError("应用正在退出。")
         handlers = {
             "system.health": self.health, "system.diagnostics": self.diagnostics,
+            "system.resources": self.resource_monitor.snapshot,
             "settings.get": lambda: self.config.public(), "settings.update": self.update_settings,
             "translation.status": self.translation_status, "translation.test": self.translation_test,
             "translation.install": self.translation_install, "translation.uninstall": self.translation_uninstall,
@@ -918,11 +927,17 @@ class DesktopService:
             for cancel, _ in self.translation_jobs.running.values():
                 cancel.set()
         self.scheduler.prepare_shutdown()
-        return self.shutdown_status()
+        result = self.shutdown_status()
+        self.output("system.shutdown_status", result)
+        return result
 
     def shutdown_status(self):
+        if self._closed:
+            return {"closing": True, "ready": True, "pending_task_ids": [], "inflight_task_ids": [],
+                    "stages": [], "translation_active": False}
         result = self.scheduler.shutdown_status()
         result["ready"] = result["ready"] and not self.translation_jobs.active()
+        result["translation_active"] = self.translation_jobs.active()
         return result
 
     def export_youtube(self, browser="edge"):

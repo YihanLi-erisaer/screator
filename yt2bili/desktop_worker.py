@@ -85,6 +85,86 @@ class Protocol:
             self.write({"request_id": request_id, "error": {"code": type(exc).__name__, "message": redact(message)}})
 
 
+class WorkerRPC:
+    """Keep lifecycle requests independent of the bounded business executor."""
+    CONTROL = {"system.prepare_shutdown", "system.shutdown_status", "system.finish_shutdown"}
+
+    def __init__(self, protocol, service):
+        self.protocol, self.service = protocol, service
+        self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="desktop-rpc")
+        self.control = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desktop-control")
+        self.slots = threading.BoundedSemaphore(16)
+        self.control_slots = threading.BoundedSemaphore(8)
+        self.lock = threading.RLock()
+        self.futures = set()
+        self.cancel = threading.Event()
+
+    def error(self, request, message):
+        self.protocol.write({"request_id": request.get("request_id") if isinstance(request, dict) else None,
+                             "error": {"code": "Unavailable", "message": message}})
+
+    def begin_shutdown(self):
+        with self.lock:
+            self.cancel.set()
+            for future in list(self.futures):
+                future.cancel()
+
+    def handle(self, request):
+        try:
+            with events.task_context(None, self.cancel, self.service.emit):
+                self.protocol.handle(self.service, request)
+        except events.Cancelled:
+            self.error(request, "应用正在退出。")
+
+    def handle_control(self, request):
+        if request.get("params", {}) != {}:
+            return self.error(request, "无效退出请求。")
+        method = request.get("method")
+        if method == "system.prepare_shutdown":
+            self.begin_shutdown()
+        if method != "system.finish_shutdown":
+            return self.protocol.handle(self.service, request)
+        # Finalize only after task receipts have been persisted. Drain mutations
+        # before closing SQLite; the native owner bounds this phase to 3 seconds.
+        if not self.service.shutdown_status()["ready"]:
+            return self.error(request, "后台仍在收尾，请等待上传完成。")
+        self.begin_shutdown()
+        self.pool.shutdown(wait=True, cancel_futures=True)
+        self.service.close()
+        self.protocol.write({"request_id": request.get("request_id"), "result": {"ready": True}})
+
+    def submit(self, request):
+        is_control = (isinstance(request, dict) and request.get("protocol_version") == 2
+                      and isinstance(request.get("request_id"), str) and len(request["request_id"]) <= 100
+                      and isinstance(request.get("params", {}), dict)
+                      and isinstance(request.get("method"), str) and request["method"] in self.CONTROL)
+        slots = self.control_slots if is_control else self.slots
+        with self.lock:
+            if not is_control and self.cancel.is_set():
+                return self.error(request, "应用正在退出。")
+            # Never block stdin intake: close/status must remain readable even
+            # when all ordinary slots are occupied.
+            if not slots.acquire(blocking=False):
+                return self.error(request, "后台请求过多，请稍后重试。")
+            executor = self.control if is_control else self.pool
+            future = executor.submit(self.handle_control if is_control else self.handle, request)
+            if not is_control:
+                self.futures.add(future)
+            def done(completed):
+                with self.lock:
+                    self.futures.discard(completed)
+                if completed.cancelled():
+                    self.error(request, "应用正在退出。")
+                elif completed.exception() is not None:
+                    self.error(request, "后台操作未完成，请检查日志。")
+                slots.release()
+            future.add_done_callback(done)
+
+    def close(self):
+        self.control.shutdown(wait=True)
+        self.pool.shutdown(wait=True)
+
+
 def main():
     if "--translation-request" in sys.argv:
         from yt2bili.translation.worker import main as translate_request
@@ -112,8 +192,8 @@ def main():
         handler = DesktopLogHandler(service, file_handler)
         logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
         protocol.emit("worker.ready", service.health())
-        pending = threading.BoundedSemaphore(16)
-        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="desktop-rpc") as pool:
+        rpc = WorkerRPC(protocol, service)
+        try:
             while True:
                 line = sys.stdin.readline(MAX_MESSAGE + 1)
                 if not line:
@@ -126,9 +206,9 @@ def main():
                 except ValueError:
                     protocol.write({"request_id": None, "error": {"code": "InvalidJSON", "message": "消息不是有效 JSON。"}})
                     continue
-                pending.acquire()
-                future = pool.submit(protocol.handle, service, request)
-                future.add_done_callback(lambda _: pending.release())
+                rpc.submit(request)
+        finally:
+            rpc.close()
         service.close()
         logging.getLogger().removeHandler(handler)
         file_handler.close()

@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import {
   request,
+  beginShutdown,
   subscribe,
   preview,
   chooseFile,
@@ -79,14 +80,18 @@ import { StatusBadge } from "./StatusBadge";
 import { SubmissionTrend, type SubmissionTrendData } from "./SubmissionTrend";
 import { ToastViewport, ReportError, useToast } from "./Toast";
 import { DataCenter } from "./DataCenter";
+import { ResourceMonitor } from "./ResourceMonitor";
 import { setUiLanguage, uiText } from "./i18n";
 
 type Page = "tasks" | "history" | "data" | "account" | "settings";
 const PAGE_SIZE = 20;
 type ShutdownStatus = {
+  closing?: boolean;
   ready: boolean;
   pending_task_ids: string[];
   inflight_task_ids: string[];
+  stages?: string[];
+  translation_active?: boolean;
 };
 const titles = {
   tasks: "任务中心",
@@ -221,6 +226,9 @@ export default function App() {
   const [accountOptions, setAccountOptions] = useState<BiliAccount[]>([]);
   const [shutdownStarted, setShutdownStarted] = useState(false);
   const [shutdownStatus, setShutdownStatus] = useState<ShutdownStatus | null>(null);
+  const shutdownRef = useRef(false);
+  const finishingClose = useRef(false);
+  const [forceClosing, setForceClosing] = useState(false);
   const taskRequest = useRef(0);
   const listKey = JSON.stringify([page, accountFilter, query, filter, offset]);
   const taskRowsByKey = useRef(new Map<string, number>());
@@ -323,6 +331,11 @@ export default function App() {
     let stopClose = () => {};
     subscribe((event) => {
       if (!alive) return;
+      if (event.event === "system.shutdown_status") {
+        if (shutdownRef.current) setShutdownStatus(event.payload);
+        return;
+      }
+      if (shutdownRef.current) return;
       if (event.event === "accounts.changed") void refreshAccount();
       if (event.event === "queue.changed") {
         setQueue((old: any) =>
@@ -416,7 +429,7 @@ export default function App() {
   }, [loadConfig, refreshAccount, showSuccess]);
 
   useEffect(() => {
-    if (!connected || page === "data") return;
+    if (!connected || page === "data" || shutdownStarted) return;
     let disposed = false;
     let loading = false;
     const update = async () => {
@@ -436,7 +449,7 @@ export default function App() {
       disposed = true;
       clearInterval(interval);
     };
-  }, [connected, loadTasks, page]);
+  }, [connected, loadTasks, page, shutdownStarted]);
 
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
@@ -479,16 +492,14 @@ export default function App() {
     let stop = false;
     const tick = async () => {
       try {
-        const state = (await request("system.shutdown_status")) as ShutdownStatus;
-        if (!stop) setShutdownStatus(state);
-        if (state.ready && !stop) {
-          await closeApp();
-          return;
+        if (!finishingClose.current) {
+          const state = (await request("system.shutdown_status")) as ShutdownStatus;
+          if (!stop) setShutdownStatus(state);
         }
       } catch (e) {
         showError(String(e));
       }
-      if (!stop) timer = setTimeout(tick, 500);
+      if (!stop) timer = setTimeout(tick, 2000);
     };
     let timer = setTimeout(tick, 0);
     return () => {
@@ -496,6 +507,14 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [shutdownStarted, showError]);
+  useEffect(() => {
+    if (!shutdownStarted || !shutdownStatus?.ready || finishingClose.current) return;
+    finishingClose.current = true;
+    void closeApp().catch((error) => {
+      finishingClose.current = false;
+      showError(String(error));
+    });
+  }, [shutdownStarted, shutdownStatus, showError]);
   useEffect(() => {
     if (connectionError) showError(`未连接到后台：${connectionError}`, {
       label: "重新连接",
@@ -698,7 +717,7 @@ export default function App() {
                 </div>
               )}
             </div>
-            {page === "data" && <DataCenter accounts={accountOptions} onOpenTask={(taskId) => {
+            {page === "data" && <DataCenter paused={shutdownStarted} accounts={accountOptions} onOpenTask={(taskId) => {
               void action(async () => setSelected(await request("tasks.get", { task_id: taskId })));
             }} />}
             {(page === "tasks" || page === "history") && (
@@ -1047,6 +1066,7 @@ export default function App() {
             )}
             {page === "settings" && config && (
               <Settings
+                paused={shutdownStarted}
                 config={config}
                 busy={busy}
                 action={action}
@@ -1157,9 +1177,24 @@ export default function App() {
           >
             <p className="modal-copy">
               {shutdownStarted
-                ? `已停止未投稿任务并保留素材。仍有 ${shutdownStatus?.inflight_task_ids.length ?? 0} 个在途投稿、${shutdownStatus?.pending_task_ids.length ?? 0} 个任务待收尾；投稿结束后自动退出。`
+                ? !shutdownStatus?.closing
+                  ? "正在通知后台停止任务并保存状态…"
+                  : shutdownStatus.ready
+                    ? "正在释放后台资源并退出…"
+                    : `已停止未投稿任务并保留素材。仍有 ${shutdownStatus.inflight_task_ids.length} 个在途投稿、${shutdownStatus.pending_task_ids.length} 个任务待收尾；投稿结束后自动退出。`
                 : "退出会取消未投稿任务，并等待正在投稿的账号完成。"}
             </p>
+            {shutdownStarted && shutdownStatus && !shutdownStatus.ready && (
+              <p className="help">
+                {shutdownStatus.inflight_task_ids.length > 0
+                  ? "正在等待平台返回投稿结果。"
+                  : shutdownStatus.translation_active
+                    ? "正在停止翻译组件操作。"
+                    : shutdownStatus.stages?.length
+                      ? "正在停止下载、校验或素材准备。"
+                      : "正在保存任务状态。"}
+              </p>
+            )}
             {shutdownStarted && (
               <p className="help">
                 如需立即退出，可停止在途投稿。素材会保留；投稿请求可能已到达平台，重启后请核对结果，再决定是否重试。
@@ -1174,8 +1209,14 @@ export default function App() {
               {shutdownStarted && (
                 <button
                   className="secondary"
-                  disabled={busy}
-                  onClick={() => action(async () => { await forceCloseApp(); })}
+                  disabled={forceClosing}
+                  onClick={() => {
+                    setForceClosing(true);
+                    void forceCloseApp().catch((error) => {
+                      setForceClosing(false);
+                      showError(String(error));
+                    });
+                  }}
                 >
                   停止投稿并退出
                 </button>
@@ -1185,9 +1226,11 @@ export default function App() {
                 className="primary"
                 onClick={() =>
                   action(async () => {
+                    shutdownRef.current = true;
+                    beginShutdown();
+                    setShutdownStarted(true);
                     const state = (await request("system.prepare_shutdown")) as ShutdownStatus;
                     setShutdownStatus(state);
-                    setShutdownStarted(true);
                   })
                 }
               >
@@ -2041,6 +2084,7 @@ function Account({
 }
 
 function Settings({
+  paused,
   config,
   busy,
   action,
@@ -2049,6 +2093,7 @@ function Settings({
   setDiagnostics,
   exportLogs,
 }: {
+  paused: boolean;
   config: Config;
   busy: boolean;
   action: Action;
@@ -2069,6 +2114,7 @@ function Settings({
     diagnostics.tools.some((tool: any) => ["deno", "node"].includes(tool.name) && tool.available);
   return (
     <div className="settings-stack">
+      <ResourceMonitor paused={paused} />
       <TranslationPanel
         config={config}
         busy={busy}

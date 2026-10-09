@@ -150,7 +150,7 @@ class PipelineConcurrencyTests(unittest.TestCase):
             with patch.object(youtube, "_base_opts", return_value={}), \
                  patch.object(youtube, "_download_with_slot", side_effect=transfer), \
                  patch.object(youtube, "_log_selected_format"), \
-                 patch.object(youtube.time, "sleep"), \
+                 patch.object(youtube.events, "wait"), \
                  patch.object(media, "validate_media") as validate:
                 result = youtube.download_video("url", root, None, 10, validate=False)
             self.assertEqual(result, root / "source.mp4")

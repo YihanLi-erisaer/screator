@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory(prefix="yt2bili-smoke-") as folder:
     command = [str(Path(args.frozen).resolve())] if args.frozen else [sys.executable, "-u", "-m", "yt2bili.desktop_worker"]
     command += ["--data-dir", folder, "--resources", str(args.resources.resolve() if args.resources else root)]
     environment = {**os.environ, "PYTHONPATH": str(root) + os.pathsep + os.environ.get("PYTHONPATH", ""), "PYTHONIOENCODING": "utf-8"}
-    methods = ["system.health", "settings.get", "tasks.list", "system.diagnostics"]
+    methods = ["system.health", "settings.get", "tasks.list", "system.diagnostics", "system.resources"]
     requests = "".join(json.dumps({"protocol_version": 2, "request_id": str(i), "method": name, "params": {}}) + "\n"
                        for i, name in enumerate(methods))
     result = subprocess.run(command, cwd=folder, env=environment, input=requests, text=True,
@@ -29,6 +29,9 @@ with tempfile.TemporaryDirectory(prefix="yt2bili-smoke-") as folder:
     assert all("error" not in item for item in responses.values()), responses
     assert responses["0"]["result"]["protocol_version"] == 2
     assert not responses["2"]["result"]["items"]
+    resources = responses["4"]["result"]
+    assert resources["process_count"] >= 1 and resources["memory_bytes"] > 0, resources
+    assert resources["root_pid"] in [process["pid"] for process in resources["processes"]], resources
     if args.resources:
         bundled = {item["name"]: item for item in responses["3"]["result"]["tools"]}
         for name in ("ffmpeg", "ffprobe", "biliup", "node"):

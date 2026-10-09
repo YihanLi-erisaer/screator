@@ -313,6 +313,25 @@ class TaskStore:
             row = self._conn.execute("SELECT payload FROM desktop_jobs WHERE task_id=?", (task.task_id,)).fetchone()
             return json.loads(row[0]) if row else None
 
+    def session_jobs(self, session_id, states=("queued", "running", "waiting")):
+        """Read current execution records together, without per-task lookups."""
+        placeholders = ",".join("?" for _ in states)
+        with self._lock:
+            rows = self._conn.execute(f"""SELECT t.*, j.payload AS job_payload,
+                EXISTS(SELECT 1 FROM task_publications p WHERE p.task_id=t.task_id
+                       AND p.status IN ('uploading_media','creating')) AS inflight
+                FROM desktop_jobs j JOIN tasks t ON t.task_id=j.task_id
+                WHERE json_extract(j.payload, '$.owner_session_id')=?
+                  AND json_extract(j.payload, '$.execution_state') IN ({placeholders})""",
+                (session_id, *states)).fetchall()
+        result = []
+        for row in rows:
+            values = dict(row)
+            payload = json.loads(values.pop("job_payload"))
+            inflight = bool(values.pop("inflight")) or values["status"] == "uploading"
+            result.append((Task(**values), payload, inflight))
+        return result
+
     def operation(self, operation_id, method, result=None, request_hash=None):
         with self.transaction() as conn:
             if conn.execute("SELECT 1 FROM legacy_operations WHERE id=?", (operation_id,)).fetchone():

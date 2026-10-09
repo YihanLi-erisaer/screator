@@ -69,7 +69,9 @@ def safe_extract_tar(archive, destination, *, limit=12 * 1024**3):
             if source is None:
                 raise TranslationError("INVALID_ARCHIVE", "组件压缩包包含无法读取的文件。")
             with source, open(target, "wb") as out:
-                shutil.copyfileobj(source, out, 1024 * 1024)
+                while chunk := source.read(1024 * 1024):
+                    events.check_cancelled()
+                    out.write(chunk)
             target.chmod(item.mode & 0o777)
 
 

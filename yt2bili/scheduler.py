@@ -223,6 +223,8 @@ class Scheduler:
         needs_bili = targets is None or any(p["platform"] == "bilibili" and p["publication_id"] in targets for p in publications.items(self.store, task.task_id))
         self.store.account(task.account_id, active=not repair and needs_bili)
         with self.store.transaction():
+            if self.closing:
+                raise Yt2BiliError("应用正在退出，不能添加任务。")
             saved = self.store.get_job(task.task_id) or {}
             if saved.get("owner_session_id") == self.session_id and saved.get("execution_state") in ("queued", "running", "waiting"):
                 raise Yt2BiliError("此任务已在队列中。")
@@ -244,11 +246,22 @@ class Scheduler:
         self.signal.set()
 
     def _dispatch(self):
+        # Successful uploads may have deferred deletion during a prior shutdown.
+        with self.store._lock:
+            cleanup = [r[0] for r in self.store._conn.execute(
+                "SELECT task_id FROM tasks WHERE cleanup_state='pending' AND work_dir!=''")]
+        for task_id in cleanup:
+            if self.closing: break
+            task = self.store.require(task_id)
+            try:
+                with work_lock(Path(task.work_dir)):
+                    self.uploader.cleanup(task_id)
+            except (OSError, Yt2BiliError):
+                pass  # Keep the marker; never delete another owner's material.
         while not self.closed.is_set():
             self.signal.wait(.25)
             self.signal.clear()
-            pending = [(task, self.store.get_job(task.task_id) or {}) for task in self.store.list_all()]
-            pending = [(task, saved) for task, saved in pending if saved.get("owner_session_id") == self.session_id and saved.get("execution_state") == "queued"]
+            pending = [(task, saved) for task, saved, _ in self.store.session_jobs(self.session_id, ("queued",))]
             for task, saved in sorted(pending, key=lambda pair: pair[1]["sequence"]):
                 with self.guard:
                     if task.task_id in self.active:
@@ -478,6 +491,7 @@ class Scheduler:
             logging.getLogger(__name__).warning("[%s] %s", item.task_id, exc)
 
     def finish(self, item):
+        cleanup = False
         if item.platform:
             with self.guard:
                 parent = self.active[item.task_id]
@@ -485,10 +499,15 @@ class Scheduler:
                 publications.project(self.store, item.task_id)
                 if parent.children: return
                 item = parent
-                try:
-                    if publications.can_cleanup(self.store, item.task_id): self.uploader.cleanup(item.task_id)
-                except OSError:
-                    self.store.update(item.task_id, cleanup_state="failed")
+                cleanup = publications.can_cleanup(self.store, item.task_id)
+            if cleanup:
+                # Save success first. Closing can leave deletion for next launch.
+                self.store.update(item.task_id, cleanup_state="pending")
+                if not self.closing:
+                    try:
+                        self.uploader.cleanup(item.task_id)
+                    except OSError:
+                        self.store.update(item.task_id, cleanup_state="failed")
         self.persist(item, finished=True)
         with self.guard:
             current = self.store.require(item.task_id)
@@ -547,16 +566,18 @@ class Scheduler:
                     "acfun": {"running_task_id": next((i.task_id for i in ac if i.running), None), "queued_count": sum(not i.running for i in ac), "wait_reason": next((i.wait_reason for i in ac if i.wait_reason), "")}}
 
     def prepare_shutdown(self):
-        self.closing = True
         with self.guard:
+            self.closing = True
             for root in self.active.values():
                 for child in root.children.values():
                     p = publications.for_platform(self.store, child.task_id, child.platform)
                     if p["status"] not in publications.INFLIGHT: child.cancel.set()
             for lane in [*self.upload_lanes.values(), self.douyin_lane, self.acfun_lane]: lane.wake()
-        for task in self.store.list_all():
-            saved = self.store.get_job(task.task_id) or {}
-            if saved.get("owner_session_id") == self.session_id and saved.get("execution_state") in ("running", "queued", "waiting") and task.status != "uploading":
+        for task, _, inflight in self.store.session_jobs(self.session_id):
+            with self.guard:
+                root = self.active.get(task.task_id)
+                cancellable = not inflight or bool(root and root.children)
+            if cancellable:
                 try:
                     self.cancel(task.task_id)
                 except Yt2BiliError:
@@ -565,14 +586,14 @@ class Scheduler:
         return self.shutdown_status()
 
     def shutdown_status(self):
-        pending = [t.task_id for t in self.store.list_all()
-                   if (self.store.get_job(t.task_id) or {}).get("owner_session_id") == self.session_id
-                   and (self.store.get_job(t.task_id) or {}).get("execution_state") in ("queued", "running", "waiting")]
-        inflight = [task_id for task_id in pending
-                    if self.store.require(task_id).status == "uploading"
-                    or any(p["status"] in publications.INFLIGHT for p in publications.items(self.store, task_id))]
-        return {"closing": self.closing, "ready": self.closing and not pending and not self.active,
-                "pending_task_ids": pending, "inflight_task_ids": inflight}
+        with self.guard:
+            jobs = self.store.session_jobs(self.session_id)
+            pending = [task.task_id for task, _, _ in jobs]
+            inflight = [task.task_id for task, _, uploading in jobs if uploading]
+            stages = sorted({item.running_action or item.stage for item in self.active.values()
+                             if item.task_id not in inflight})
+            return {"closing": self.closing, "ready": self.closing and not pending and not self.active,
+                    "pending_task_ids": pending, "inflight_task_ids": inflight, "stages": stages}
 
     def close(self):
         self.prepare_shutdown()

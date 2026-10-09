@@ -7,6 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
+from yt2bili import events
 
 from yt2bili import history_transfer
 from yt2bili.exceptions import Yt2BiliError
@@ -22,9 +23,11 @@ def _number(value):
 
 
 def _get(url, *, cookies=None, params=None):
+    events.check_cancelled()
     response = requests.get(url, cookies=cookies, params=params, timeout=8,
                             headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.bilibili.com/"})
     response.raise_for_status()
+    events.check_cancelled()
     body = response.json()
     if not isinstance(body, dict) or body.get("code") != 0 or not isinstance(body.get("data"), dict):
         return None
@@ -46,6 +49,8 @@ class DataCenter:
                 return entry[1]
         try:
             value = fetch()
+        except events.Cancelled:
+            raise
         except (requests.RequestException, ValueError, KeyError, TypeError, Yt2BiliError):
             value = None
         with self._lock:
@@ -161,12 +166,19 @@ class DataCenter:
         rows = [row for row in self._rows() if (not platform or row["platform"] == platform)
                 and (not account_id or row["account_id"] == account_id)]
         page = rows[offset:offset + limit]
+        cancel = events.cancellation_event()
+        def cancellable(action, value):
+            with events.task_context(None, cancel, lambda *_: None):
+                result = action(value)
+                events.check_cancelled()
+                return result
         def enrich(row):
             reader = self._metric_readers.get(row["platform"])
             metrics = reader(row, account_by_id) if reader else EMPTY_METRICS
             return {**row, **metrics}
         with ThreadPoolExecutor(max_workers=4) as pool:
-            items = list(pool.map(enrich, page))
-            summaries = list(pool.map(self._bili_account, accounts))
+            items = list(pool.map(lambda row: cancellable(enrich, row), page))
+            events.check_cancelled()
+            summaries = list(pool.map(lambda account: cancellable(self._bili_account, account), accounts))
         return {"items": items, "total": len(rows), "accounts": summaries,
                 "updated_at": time.time(), "refresh_seconds": TTL_SECONDS}

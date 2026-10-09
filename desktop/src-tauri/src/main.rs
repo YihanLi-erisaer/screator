@@ -2,7 +2,7 @@
 
 use serde_json::{json, Value};
 use std::{collections::HashMap, fs::OpenOptions, io::{BufRead, BufReader, Write}, path::PathBuf,
-    process::{Child, ChildStdin, Command, Stdio}, sync::{Arc, Mutex, OnceLock, atomic::{AtomicBool, AtomicU64, Ordering}}, time::{Duration, SystemTime, UNIX_EPOCH}};
+    process::{Child, ChildStdin, Command, Stdio}, sync::{Arc, Mutex, OnceLock, atomic::{AtomicBool, AtomicU64, Ordering}}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::oneshot;
 
@@ -37,6 +37,11 @@ async fn request_worker(worker: &Worker, method: String, params: Value) -> Resul
     let id = worker.next.fetch_add(1, Ordering::Relaxed).to_string();
     let (tx, rx) = oneshot::channel();
     worker.pending.lock().unwrap().insert(id.clone(), tx);
+    let timeout = match method.as_str() {
+        "system.finish_shutdown" => Duration::from_secs(3),
+        "system.prepare_shutdown" | "system.shutdown_status" => Duration::from_secs(5),
+        _ => Duration::from_secs(90),
+    };
     let message = json!({"protocol_version":2,"request_id":id,"method":method,"params":params}).to_string();
     if message.len() > 1_000_000 {
         worker.pending.lock().unwrap().remove(&id);
@@ -50,7 +55,7 @@ async fn request_worker(worker: &Worker, method: String, params: Value) -> Resul
         }
     };
     if let Err(error) = result { worker.pending.lock().unwrap().remove(&id); return Err(error); }
-    match tokio::time::timeout(Duration::from_secs(90), rx).await {
+    match tokio::time::timeout(timeout, rx).await {
         Ok(Ok(value)) => value,
         _ => { worker.pending.lock().unwrap().remove(&id); Err("后台响应超时；请刷新状态后再操作，勿重复投稿。".into()) }
     }
@@ -70,14 +75,16 @@ fn take_worker_process(worker: &Worker) -> WorkerProcess {
     }
 }
 
-fn reap_worker(mut process: WorkerProcess) {
+fn reap_worker(mut process: WorkerProcess, deadline: Instant) {
     if let Some(mut child) = process.child.take() {
-        for _ in 0..30 {
+        loop {
             if child.try_wait().ok().flatten().is_some() {
                 kill_worker_group(&child);
                 return close_worker_job(process);
             }
-            std::thread::sleep(Duration::from_millis(100));
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() { break; }
+            std::thread::sleep(remaining.min(Duration::from_millis(20)));
         }
         kill_worker_group(&child);
         let _ = child.kill();
@@ -123,21 +130,31 @@ async fn finish_close(app: tauri::AppHandle, worker: State<'_, Worker>) -> Resul
     let status = request_worker(&worker, "system.shutdown_status".into(), json!({})).await?;
     if status["ready"] != true { return Err("后台仍在收尾，请等待上传完成。".into()); }
     log_shell("confirmed shutdown: worker is ready");
-    let process = take_worker_process(&worker);
-    tauri::async_runtime::spawn_blocking(move || reap_worker(process)).await
-        .map_err(|_| "后台退出任务未完成，请重试。".to_string())?;
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(3);
+    match request_worker(&worker, "system.finish_shutdown".into(), json!({})).await {
+        Ok(_) => log_shell("shutdown resources finalized"),
+        Err(error) => log_shell(&format!("shutdown finalization fallback: {error}")),
+    }
     EXPECTED_EXIT.store(true, Ordering::Release);
+    let process = take_worker_process(&worker);
+    tauri::async_runtime::spawn_blocking(move || reap_worker(process, deadline)).await
+        .map_err(|_| "后台退出任务未完成，请重试。".to_string())?;
+    log_shell(&format!("shutdown reap elapsed_ms={}", started.elapsed().as_millis()));
+    record_shutdown_smoke("graceful", started.elapsed());
     app.exit(0);
     Ok(())
 }
 
 #[tauri::command]
 async fn force_close(app: tauri::AppHandle, worker: State<'_, Worker>) -> Result<(), String> {
+    let started = Instant::now();
     log_shell("forced shutdown: stopping worker process tree; in-flight submissions need review");
     let process = take_worker_process(&worker);
     tauri::async_runtime::spawn_blocking(move || force_stop_worker(process)).await
         .map_err(|_| "无法停止后台进程，请重试。".to_string())?;
     EXPECTED_EXIT.store(true, Ordering::Release);
+    record_shutdown_smoke("forced", started.elapsed());
     app.exit(0);
     Ok(())
 }
@@ -149,8 +166,40 @@ fn frontend_ready(app: tauri::AppHandle, health: Value) {
             let value = json!({"ok":health["protocol_version"] == 2,"webview_loaded":true,
                 "frontend_ipc":true,"protocol_version":health["protocol_version"]});
             let _ = std::fs::write(report, value.to_string());
+            if let Ok(mode) = std::env::var("YT2BILI_NATIVE_SMOKE_SHUTDOWN") {
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let worker = handle.state::<Worker>();
+                    let result = if mode == "graceful" {
+                        match request_worker(&worker, "system.prepare_shutdown".into(), json!({})).await {
+                            Ok(_) => finish_close(handle.clone(), worker).await,
+                            Err(error) => Err(error),
+                        }
+                    } else if mode == "forced" {
+                        force_close(handle.clone(), worker).await
+                    } else { Err("无效退出测试模式".into()) };
+                    if let Err(error) = result {
+                        log_shell(&format!("shutdown smoke failed: {error}"));
+                        handle.exit(1);
+                    }
+                });
+                return;
+            }
             EXPECTED_EXIT.store(true, Ordering::Release);
             app.exit(0);
+        }
+    }
+}
+
+fn record_shutdown_smoke(mode: &str, elapsed: Duration) {
+    if !smoke_enabled() { return; }
+    if std::env::var("YT2BILI_NATIVE_SMOKE_SHUTDOWN").ok().as_deref() != Some(mode) { return; }
+    if let Some(report) = std::env::var_os("YT2BILI_NATIVE_SMOKE_REPORT") {
+        if let Ok(data) = std::fs::read_to_string(&report) {
+            if let Ok(mut value) = serde_json::from_str::<Value>(&data) {
+                value["shutdown"] = json!({"mode":mode,"completed":true,"elapsed_ms":elapsed.as_millis()});
+                let _ = std::fs::write(report, value.to_string());
+            }
         }
     }
 }
@@ -208,6 +257,7 @@ fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Er
     };
     command.arg("--data-dir").arg(data).arg("--resources").arg(&resources)
         .current_dir(if cfg!(debug_assertions) { &project } else { &resources }).env("PYTHONIOENCODING", "utf-8")
+        .env("YT2BILI_APP_PID", std::process::id().to_string())
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)] {
         use std::os::windows::process::CommandExt;
