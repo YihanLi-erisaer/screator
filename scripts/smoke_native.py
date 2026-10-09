@@ -1,5 +1,6 @@
 """Native WebView -> Rust -> Python check; --release tests a packaged app offline."""
 from pathlib import Path
+from contextlib import contextmanager
 import argparse
 import json
 import os
@@ -7,6 +8,25 @@ import sys
 import subprocess
 import tempfile
 import time
+
+
+@contextmanager
+def isolated_data_dir():
+    directory = tempfile.TemporaryDirectory(prefix="screator-native-")
+    try:
+        yield directory.name
+    finally:
+        # WebView2 can still finish writing its profile just after its
+        # processes exit. Retry only transient Windows directory errors.
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                directory.cleanup()
+                break
+            except OSError as exc:
+                if os.name != "nt" or getattr(exc, "winerror", None) not in (32, 145) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.2)
 
 
 def inspect_process_tree(command, environment, folder, seconds, release):
@@ -81,7 +101,7 @@ if args.inspect_seconds and args.shutdown:
     parser.error("--inspect-seconds cannot be combined with --shutdown")
 root = Path(__file__).resolve().parent.parent
 executable = args.release.resolve() if args.release else root / "desktop/src-tauri/target/debug" / ("screator.exe" if os.name == "nt" else "screator")
-with tempfile.TemporaryDirectory(prefix="screator-native-") as folder:
+with isolated_data_dir() as folder:
     report = Path(folder) / "native.json"
     environment = {**os.environ, "SCREATOR_NATIVE_SMOKE_REPORT": str(report),
                    "SCREATOR_DESKTOP_DATA": folder, "SCREATOR_PROJECT_ROOT": str(root),
@@ -102,7 +122,7 @@ with tempfile.TemporaryDirectory(prefix="screator-native-") as folder:
                                else "/usr/bin:/bin:/usr/sbin:/sbin")
     command = [str(executable), "--smoke-test"]
     process_tree = None
-    if args.inspect_seconds:
+    if args.inspect_seconds or os.name == "nt":
         result, process_tree = inspect_process_tree(command, environment, folder, args.inspect_seconds, bool(args.release))
     else:
         result = subprocess.run(command, env=environment, cwd=folder, timeout=60, capture_output=True,
