@@ -1,4 +1,4 @@
-# yt2bili 桌面端 · 第一期
+# Screator 桌面端 · 第一期
 
 版本：`v1.0.0alpha`。提供 React + Tauri 原生桌面应用，连接现有 Python 视频业务。Windows 安装包和免安装应用的使用及构建见 [Windows 安装与打包](../docs/Windows安装与打包.md)；Apple Silicon 原生运行与 DMG 构建见 [macOS 安装与打包](../docs/macOS安装与打包.md)。
 
@@ -85,7 +85,7 @@ DeepL 密钥保存到系统凭据存储，不写入普通设置或任务快照�
 
 ### 应用资源监控
 
-“设置”页顶部显示 yt2bili 的总 CPU、总驻留内存、当前监控进程数量，以及可展开的 PID / 进程名称 / CPU / 内存明细。页面可见时每两秒采样，可暂停和恢复；离开设置页、隐藏应用页面或开始退出后停止刷新。
+“设置”页顶部显示 Screator 的总 CPU、总驻留内存、当前监控进程数量，以及可展开的 PID / 进程名称 / CPU / 内存明细。页面可见时每两秒采样，可暂停和恢复；离开设置页、隐藏应用页面或开始退出后停止刷新。
 
 原生主程序通过 `YT2BILI_APP_PID` 告知后台进程所有者，后台验证其为自己的祖先进程后追踪整个应用进程树，因此包含主程序、WebView2、Python 后台、FFmpeg / ffprobe、上传工具以及应用启动的翻译服务。外部已有的 Ollama 服务及远程翻译服务不计入。独立启动后台时仅显示后台进程树，界面会说明范围；更新开发版后需重启主程序以启用完整范围。
 
@@ -121,7 +121,7 @@ $env:YT2BILI_BIN_DIR = Join-Path (Get-Location) 'bin'
 .desktop-venv/Scripts/python.exe -m unittest discover -s tests -v
 .desktop-venv/Scripts/python.exe scripts/smoke_worker.py
 .desktop-venv/Scripts/python.exe scripts/build_worker.py
-.desktop-venv/Scripts/python.exe scripts/smoke_worker.py --frozen packaging/staging/yt2bili-worker/yt2bili-worker.exe
+.desktop-venv/Scripts/python.exe scripts/smoke_worker.py --frozen packaging/staging/screator-worker/screator-worker.exe
 ```
 
 前端构建、交互测试：
@@ -135,7 +135,7 @@ npm run test:launcher
 
 测试默认使用本机 Microsoft Edge。`npm run test:e2e` 会自动启动前端开发服务（或复用已有服务）。开发预览 `/?preview&populated` 明确标记示例数据，不调用外部账号，生产构建不会包含预览模块。
 
-原生通信检查：先启动 `npm run dev`，用已安装的 Rust 工具链运行 `cargo build --manifest-path desktop/src-tauri/Cargo.toml`，然后在仓库根目录运行 `scripts/smoke_native.py`。脚本使用独立临时数据目录，在隐藏窗口验证 React → Tauri → Python → React 后自动退出。发布版检查使用 `scripts/smoke_native.py --release dist/windows/yt2bili/yt2bili.exe`，不需要 Vite；仅在显式传入 `--smoke-test` 且指定独立数据和报告环境变量时启用测试钩子。
+原生通信检查：先启动 `npm run dev`，用已安装的 Rust 工具链运行 `cargo build --manifest-path desktop/src-tauri/Cargo.toml`，然后在仓库根目录运行 `scripts/smoke_native.py`。脚本使用独立临时数据目录，在隐藏窗口验证 React → Tauri → Python → React 后自动退出。发布版检查使用 `scripts/smoke_native.py --release dist/windows/Screator/Screator.exe`，不需要 Vite；仅在显式传入 `--smoke-test` 且指定独立数据和报告环境变量时启用测试钩子。
 
 退出验证：`python scripts/smoke_native.py --shutdown graceful` 和 `--shutdown forced` 分别走真实正常退出、强制退出命令。`python scripts/benchmark_shutdown.py` 使用独立临时数据测量空闲后台退出、长重试等待的取消响应，以及一万条历史记录下新旧关闭状态查询的耗时和查询次数；不包含窗口关闭交互、在途上传或真实网络等待。
 

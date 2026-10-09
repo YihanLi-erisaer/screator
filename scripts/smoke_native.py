@@ -12,7 +12,7 @@ parser.add_argument("--release", type=Path)
 parser.add_argument("--shutdown", choices=("graceful", "forced"), help="Exercise the real native close command after frontend startup")
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
-executable = args.release.resolve() if args.release else root / "desktop/src-tauri/target/debug" / ("yt2bili-desktop.exe" if os.name == "nt" else "yt2bili-desktop")
+executable = args.release.resolve() if args.release else root / "desktop/src-tauri/target/debug" / ("screator-desktop.exe" if os.name == "nt" else "screator-desktop")
 with tempfile.TemporaryDirectory(prefix="yt2bili-native-") as folder:
     report = Path(folder) / "native.json"
     environment = {**os.environ, "YT2BILI_NATIVE_SMOKE_REPORT": str(report),

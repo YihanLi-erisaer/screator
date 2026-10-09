@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "yt2bili"
+name = "Screator"
 version = "1.0.0alpha"
 description = "Download a YouTube video you are allowed to reprint, translate with DeepL, and submit to Bilibili."
 readme = "README.md"
@@ -16,6 +16,8 @@ dependencies = [
 ]
 
 [project.scripts]
+screator = "yt2bili.cli:main"
+screator-worker = "yt2bili.desktop_worker:main"
 yt2bili = "yt2bili.cli:main"
 yt2bili-worker = "yt2bili.desktop_worker:main"
 
@@ -24,7 +26,7 @@ desktop = ["keyring>=25,<26", "qrcode[pil]>=8,<9", "psutil==7.2.2"]
 douyin-broker = ["cryptography>=43.0.0"]
 
 [tool.setuptools.packages.find]
-include = ["yt2bili*"]
+include = ["screator*", "yt2bili*"]
 
 [tool.setuptools.package-data]
 "yt2bili.translation" = ["manifest.json"]

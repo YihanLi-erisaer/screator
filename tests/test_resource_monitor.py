@@ -23,7 +23,7 @@ class Process:
     def create_time(self): return self.created
     def is_running(self): return self.running
     def status(self): return psutil.STATUS_RUNNING
-    def name(self): return "ffmpeg.exe" if self.pid != 1 else "yt2bili.exe"
+    def name(self): return "ffmpeg.exe" if self.pid != 1 else "Screator.exe"
     def ppid(self): return 1
     def children(self, recursive=False):
         assert recursive

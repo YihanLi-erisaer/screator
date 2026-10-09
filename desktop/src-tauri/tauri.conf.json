@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "yt2bili",
+  "productName": "Screator",
   "version": "1.0.0-alpha",
   "identifier": "com.stardazz.yt2bili",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "yt2bili · StarDazz",
+        "title": "Screator · StarDazz",
         "width": 1280,
         "height": 800,
         "minWidth": 1024,

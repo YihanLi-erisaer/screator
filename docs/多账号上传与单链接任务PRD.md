@@ -1,4 +1,4 @@
-# yt2bili 多账号上传与单链接任务 PRD（最多 5 个账号）
+# Screator 多账号上传与单链接任务 PRD（最多 5 个账号）
 
 版本：v1.1 草案
 
@@ -342,14 +342,14 @@ CLI 与桌面目前使用不同默认配置/数据目录，该事实保持显式
 建议命令契约（目标接口，当前尚未实现）：
 
 ```text
-python -m yt2bili run "https://www.youtube.com/watch?v=abcdefghijk" --account <account_id>
-python -m yt2bili run "https://www.youtube.com/watch?v=abcdefghijk" --account <account_id> --dry-run
-python -m yt2bili login --account <account_id>
-python -m yt2bili renew --account <account_id>
-python -m yt2bili list --account <account_id>
-python -m yt2bili retry <task_id>
-python -m yt2bili submit <task_id>
-python -m yt2bili repair <task_id>
+python -m screator run "https://www.youtube.com/watch?v=abcdefghijk" --account <account_id>
+python -m screator run "https://www.youtube.com/watch?v=abcdefghijk" --account <account_id> --dry-run
+python -m screator login --account <account_id>
+python -m screator renew --account <account_id>
+python -m screator list --account <account_id>
+python -m screator retry <task_id>
+python -m screator submit <task_id>
+python -m screator repair <task_id>
 ```
 
 - CLI 新建只接受一个 URL；多个 URL、`--file`、缺失账号直接报错，不创建任务。

@@ -1,4 +1,4 @@
-# yt2bili AcFun 同步投稿技术实现方案
+# Screator AcFun 同步投稿技术实现方案
 
 版本：v1.4 安全验证与素材复用实现记录
 

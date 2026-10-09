@@ -56,7 +56,7 @@ export function ResourceMonitor({ paused = false }: { paused?: boolean }) {
         <div className="service-icon"><Activity size={23} /></div>
         <div>
           <h2>应用资源监控</h2>
-          <p>汇总 yt2bili 主程序、界面、后台和工具进程的资源占用。</p>
+          <p>汇总 Screator 主程序、界面、后台和工具进程的资源占用。</p>
         </div>
         <div className="section-actions">
           <StatusBadge tone={error ? "error" : "neutral"}>

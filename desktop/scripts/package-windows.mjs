@@ -24,16 +24,16 @@ for (const name of ["ffmpeg.exe", "ffprobe.exe", "biliup.exe"]) {
 }
 copyFileSync(process.execPath, path.join(tools, "node.exe"));
 run(python, ["scripts/build_worker.py"]);
-run(python, ["scripts/smoke_worker.py", "--frozen", "packaging/staging/yt2bili-worker/yt2bili-worker.exe"]);
+run(python, ["scripts/smoke_worker.py", "--frozen", "packaging/staging/screator-worker/screator-worker.exe"]);
 run(process.execPath, ["desktop/scripts/tauri.mjs", "build", "--no-bundle", "--config", "src-tauri/tauri.windows-release.conf.json", "--", "--locked"]);
 const release = path.join(root, "desktop/src-tauri/target/release");
-const portable = path.join(root, "dist/windows/yt2bili");
+const portable = path.join(root, "dist/windows/Screator");
 mkdirSync(portable, { recursive: true });
-copyFileSync(path.join(release, "yt2bili-desktop.exe"), path.join(portable, "yt2bili.exe"));
-cpSync(path.join(root, "packaging/staging/yt2bili-worker"), path.join(portable, "worker"), { recursive: true });
+copyFileSync(path.join(release, "screator-desktop.exe"), path.join(portable, "Screator.exe"));
+cpSync(path.join(root, "packaging/staging/screator-worker"), path.join(portable, "worker"), { recursive: true });
 cpSync(tools, path.join(portable, "bin"), { recursive: true });
-run(python, ["scripts/smoke_worker.py", "--frozen", path.join(portable, "worker/yt2bili-worker.exe"), "--resources", portable]);
-run(python, ["scripts/smoke_native.py", "--release", path.join(portable, "yt2bili.exe")]);
+run(python, ["scripts/smoke_worker.py", "--frozen", path.join(portable, "worker/screator-worker.exe"), "--resources", portable]);
+run(python, ["scripts/smoke_native.py", "--release", path.join(portable, "Screator.exe")]);
 run(process.execPath, ["desktop/scripts/tauri.mjs", "bundle", "--config", "src-tauri/tauri.windows-release.conf.json"]);
 cpSync(path.join(release, "bundle/nsis"), path.join(root, "dist/windows"), { recursive: true });
 run(python, ["scripts/archive_windows.py"]);

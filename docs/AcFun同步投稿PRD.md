@@ -1,4 +1,4 @@
-# yt2bili AcFun 同步投稿 PRD
+# Screator AcFun 同步投稿 PRD
 
 版本：v1.4 安全验证与失败重试更新
 

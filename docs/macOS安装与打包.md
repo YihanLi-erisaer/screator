@@ -4,7 +4,7 @@
 
 ## 开发运行
 
-安装原生 arm64 Python 3.11+、Node.js 22+、Rust stable、FFmpeg（含 `ffprobe`）、biliupR。检查 `python3`、`node`、`cargo`、`ffmpeg`、`ffprobe` 和 `biliup` 可从终端执行。biliupR 的 Apple Silicon 包名包含 `aarch64-macos.tar.xz`；也可运行 `python -m yt2bili setup` 下载到项目 `bin/`。
+安装原生 arm64 Python 3.11+、Node.js 22+、Rust stable、FFmpeg（含 `ffprobe`）、biliupR。检查 `python3`、`node`、`cargo`、`ffmpeg`、`ffprobe` 和 `biliup` 可从终端执行。biliupR 的 Apple Silicon 包名包含 `aarch64-macos.tar.xz`；也可运行 `python -m screator setup` 下载到项目 `bin/`。
 
 ```sh
 python3 -m venv .desktop-venv
@@ -27,7 +27,7 @@ cd desktop
 npm run desktop:package:mac
 ```
 
-脚本依次冻结 arm64 Python 后台、运行离线后台测试、构建 Tauri 原生应用、做本机临时签名并验证原生窗口启动，最后用 macOS 的 `hdiutil` 生成和校验 DMG。`dist/macos/` 只保留 DMG；构建结束会清理 Tauri 的 `.app` 和旧的临时 `rw.*.dmg`，也不会复制应用到 `/Applications`。打开 DMG 后手动将 `yt2bili.app` 拖入 `Applications` 才会安装。也可设置 `YT2BILI_BUILD_PYTHON` 指向另一套已装依赖的 arm64 Python 环境。
+脚本依次冻结 arm64 Python 后台、运行离线后台测试、构建 Tauri 原生应用、做本机临时签名并验证原生窗口启动，最后用 macOS 的 `hdiutil` 生成和校验 DMG。`dist/macos/` 只保留 DMG；构建结束会清理 Tauri 的 `.app` 和旧的临时 `rw.*.dmg`，也不会复制应用到 `/Applications`。打开 DMG 后手动将 `Screator.app` 拖入 `Applications` 才会安装。也可设置 `YT2BILI_BUILD_PYTHON` 指向另一套已装依赖的 arm64 Python 环境。
 
 仓库打包时使用临时签名，未做 Apple Developer ID 签名和公证；首次打开时 macOS 可能要求在“隐私与安全性”中明确允许。若要向其他用户公开分发且正常通过 Gatekeeper，需用自己的 Apple Developer ID 重新签名并公证。发布前还须核对随包 FFmpeg 和其它二进制的许可证。此仓库没有附带或自动下载这些发布用二进制。
 

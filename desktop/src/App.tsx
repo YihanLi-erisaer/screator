@@ -579,7 +579,7 @@ export default function App() {
             <img className="brand-icon-light" src="/brand.png" alt="" />
             <img className="brand-icon-dark" src="/brand-dark.png" alt="" />
             <span>
-              yt2bili<small>by StarDazz</small>
+              Screator<small>by StarDazz</small>
             </span>
           </a>
           <div className="nav-label">工作空间</div>
@@ -1089,7 +1089,7 @@ export default function App() {
         </div>
         {setup && config && (
           <Modal
-            title="欢迎使用 yt2bili"
+            title="欢迎使用 Screator"
             close={() => {
               if (!busy)
                 action(async () => {
@@ -1170,7 +1170,7 @@ export default function App() {
         ))}
         {closing && (
           <Modal
-            title="退出 yt2bili"
+            title="退出 Screator"
             close={() => {
               if (!shutdownStarted) setClosing(false);
             }}

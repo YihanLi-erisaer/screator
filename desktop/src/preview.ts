@@ -1,7 +1,7 @@
 // Explicit development-only preview. Never used by the native desktop transport.
 import type { Task } from "./types";
 const config = {
-  work_dir: "D:\\yt2bili-work",
+  work_dir: "D:\\Screator-work",
   bili_tid: 171,
   bili_tags: "转载",
   acfun_channel_id: 90,
@@ -140,9 +140,9 @@ export async function request(method: string, params: any): Promise<any> {
     if (flags.has("resourceError") && resourceSamples <= 2) throw new Error("Preview monitor unavailable");
     const warming = flags.has("resourceWarmup") && resourceSamples <= 2;
     const processes = [
-      { pid: 4100, parent_pid: null, name: "yt2bili.exe", cpu_percent: 0.5, memory_bytes: 64 * 1024 ** 2 },
+      { pid: 4100, parent_pid: null, name: "Screator.exe", cpu_percent: 0.5, memory_bytes: 64 * 1024 ** 2 },
       { pid: 4101, parent_pid: 4100, name: "msedgewebview2.exe", cpu_percent: 2, memory_bytes: 128 * 1024 ** 2 },
-      { pid: 4102, parent_pid: 4100, name: "yt2bili-worker.exe", cpu_percent: 1, memory_bytes: 64 * 1024 ** 2 },
+      { pid: 4102, parent_pid: 4100, name: "screator-worker.exe", cpu_percent: 1, memory_bytes: 64 * 1024 ** 2 },
       { pid: 4103, parent_pid: 4102, name: "ffmpeg.exe", cpu_percent: 40, memory_bytes: 256 * 1024 ** 2 },
       { pid: 4104, parent_pid: 4102, name: "ollama.exe", cpu_percent: 25, memory_bytes: 512 * 1024 ** 2 },
     ].map((process) => ({ ...process, cpu_percent: warming ? null : process.cpu_percent }));

@@ -244,7 +244,7 @@ fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Er
     let _ = SHELL_LOG.set(log_dir.join("desktop-shell.log"));
     log_shell("desktop starting");
     let mut command = if !cfg!(debug_assertions) {
-        Command::new(resources.join("worker").join(if cfg!(windows) { "yt2bili-worker.exe" } else { "yt2bili-worker" }))
+        Command::new(resources.join("worker").join(if cfg!(windows) { "screator-worker.exe" } else { "screator-worker" }))
     } else if let Some(frozen) = std::env::var_os("YT2BILI_WORKER") {
         Command::new(frozen)
     } else {

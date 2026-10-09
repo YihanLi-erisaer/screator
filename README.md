@@ -1,4 +1,8 @@
-# yt2bili
+# Screator
+
+项目已由 yt2bili 更名为 Screator。GitHub 仓库当前为 [YihanLi-erisaer/yt2bili](https://github.com/YihanLi-erisaer/yt2bili)，计划同步更名为 `Screator`。
+
+为兼容已有安装，内部 Python 包 `yt2bili`、`YT2BILI_*` 环境变量、应用标识和用户数据目录继续沿用；已有任务、设置和系统凭据无需迁移。CLI 支持 `python -m screator`，安装项目后也可使用 `screator` 命令，旧命令仍然可用。
 
 把**你有权转载**的 YouTube 视频下载下来，默认用本地开源大模型把标题和简介译成中文（也可优先使用 DeepL），再投稿到 B 站。
 
@@ -41,7 +45,7 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-默认本地优先，执行 `python -m yt2bili translation setup` 安装固定版本的 Ollama 和 Qwen3.5 4B，再用 `python -m yt2bili translation test` 试译。首次下载约 4.9 GB；安装会检查空间。
+默认本地优先，执行 `python -m screator translation setup` 安装固定版本的 Ollama 和 Qwen3.5 4B，再用 `python -m screator translation test` 试译。首次下载约 4.9 GB；安装会检查空间。
 
 本地推理支持兼容的 Intel 和 AMD GPU。Windows 应用管理模式默认启用 Ollama Vulkan 和核显检测，同时保留 NVIDIA CUDA / AMD ROCm 自动选择；Apple Silicon 继续使用 Metal。桌面“本地推理设备”或 `.env` 中的 `LOCAL_LLM_BACKEND=auto|vulkan|cpu` 可选择自动、Vulkan 或仅 CPU。Vulkan 选项用于 Windows 托管运行时；macOS 请选择自动或 CPU。没有可用 GPU 时，Ollama 可使用 CPU；试译结果根据 `/api/ps` 的显存分配显示 GPU、CPU 或 GPU + CPU，不根据配置猜测显卡厂商。
 
@@ -52,7 +56,7 @@ Linux 和其他使用外部 Ollama 的环境，在 **Ollama 服务进程** 中�
 下载投稿工具并检查 FFmpeg：
 
 ```powershell
-python -m yt2bili setup
+python -m screator setup
 ```
 
 这会把官方 [biliupR](https://github.com/biliup/biliup/releases/latest)（原 biliup-rs）放到 `bin\biliup.exe`。也可以自己下载 `biliupR-*-x86_64-windows.zip`，把 `biliup.exe` 放进 `bin\`。
@@ -60,8 +64,8 @@ python -m yt2bili setup
 添加 Bilibili 账号（最多 5 个不同 UID，凭据保存在忽略提交的 secrets 目录）：
 
 ```powershell
-python -m yt2bili accounts add
-python -m yt2bili accounts list
+python -m screator accounts add
+python -m screator accounts list
 ```
 
 ## 使用
@@ -69,20 +73,20 @@ python -m yt2bili accounts list
 每次只输入一个 YouTube 视频链接，必须用 `--account` 选择账号。默认只准备素材，完成后在桌面预览编辑并确认投稿；也可用 CLI 确认：
 
 ```powershell
-python -m yt2bili run "https://www.youtube.com/watch?v=xxxxxxxxxxx" --account ACCOUNT_ID
-python -m yt2bili submit TASK_ID
+python -m screator run "https://www.youtube.com/watch?v=xxxxxxxxxxx" --account ACCOUNT_ID
+python -m screator submit TASK_ID
 ```
 
 明确需要自动投稿时增加 `--auto`。不再支持多 URL、TXT 列表、`--file` 或 `--force`。同视频同账号返回原任务，同视频可分别创建到不同账号。
 
 ```powershell
-python -m yt2bili run "https://youtu.be/xxxxxxxxxxx" --account ACCOUNT_ID --auto
-python -m yt2bili retry TASK_ID
-python -m yt2bili repair TASK_ID
-python -m yt2bili login --account ACCOUNT_ID
-python -m yt2bili renew --account ACCOUNT_ID
-python -m yt2bili accounts archive --account ACCOUNT_ID
-python -m yt2bili list
+python -m screator run "https://youtu.be/xxxxxxxxxxx" --account ACCOUNT_ID --auto
+python -m screator retry TASK_ID
+python -m screator repair TASK_ID
+python -m screator login --account ACCOUNT_ID
+python -m screator renew --account ACCOUNT_ID
+python -m screator accounts archive --account ACCOUNT_ID
+python -m screator list
 ```
 
 重试始终回到预览，目标账号不能改变。归档只允许该账号全部任务已提交；清除登录凭据仍占账号名额。重新添加已归档的 UID 会恢复原账号身份。
@@ -90,7 +94,7 @@ python -m yt2bili list
 新素材目录为 `work/<task_id>/`，历史视频 ID 有且仅有一个匹配时才允许作为 CLI 参数。GUI 与 CLI 不能同时执行同一个数据目录；指定同一份库时先退出桌面：
 
 ```powershell
-python -m yt2bili --data-dir "C:\\path\\to\\profile" list
+python -m screator --data-dir "C:\\path\\to\\profile" list
 ```
 
 启动会备份旧数据库并升级到 schema v3（兼容旧单账号库及两种 v2 多账号/翻译库）。旧任务不会自动判断历史投稿账号，需在桌面详情中一次性绑定。旧 Cookie 能确定本地 UID 时仅导入为待验证账号，原文件保留。新旧版本不支持混跑；回滚需先另存升级后的数据库，再恢复升级前备份及对应旧版本，不能直接降低 schema 版本号。备份后新增任务不在旧库中，素材目录应保留。
@@ -111,7 +115,7 @@ python -m yt2bili --data-dir "C:\\path\\to\\profile" list
 YouTube 现在要求 JS 运行时才能完整解析。本机有 Node.js 或 Deno 即可（`setup` 会检测）。若出现「Sign in to confirm you’re not a bot」，先完全退出 Edge/Chrome，再导出 cookies：
 
 ```powershell
-python -m yt2bili youtube-cookies
+python -m screator youtube-cookies
 ```
 
 之后会自动使用 `secrets\youtube_cookies.txt`。也可以在 `.env` 里写 `YOUTUBE_COOKIES_FROM_BROWSER=edge`（每次下载前都要退出浏览器）。
@@ -129,7 +133,7 @@ python -m yt2bili youtube-cookies
 平台转码失败时，可生成完整、兼容的替换文件，命令不会重复投稿或修改原 BV 号：
 
 ```powershell
-python -m yt2bili repair TASK_ID
+python -m screator repair TASK_ID
 ```
 
 修复会先尝试复用本任务完整素材，缺失或损坏时重新准备。成功后使用日志显示的路径在创作中心替换原稿件视频；不上传、不修改 BV、不触发成功清理。

@@ -10,6 +10,7 @@ import threading
 import time
 import unittest
 import uuid
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -181,9 +182,9 @@ class RPCTests(unittest.TestCase):
 
 class SessionQueryTests(unittest.TestCase):
     def test_status_uses_one_query_with_large_history_and_platform_inflight(self):
-        with tempfile.TemporaryDirectory() as folder:
-            store = TaskStore(Path(folder) / "tasks.sqlite")
-            self.addCleanup(store.close)
+        # Windows requires the database to close before its directory is removed.
+        with tempfile.TemporaryDirectory() as folder, \
+             closing(TaskStore(Path(folder) / "tasks.sqlite")) as store:
             with store.transaction():
                 for i in range(1000):
                     task = Task("abcdefghijk", "url", "submitted", task_id=str(uuid.uuid4()), bv_id="BV1234567890")

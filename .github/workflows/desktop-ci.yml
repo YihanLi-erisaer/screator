@@ -70,4 +70,4 @@ jobs:
         run: |
           python scripts/smoke_worker.py
           python scripts/build_worker.py
-          python scripts/smoke_worker.py --frozen packaging/staging/yt2bili-worker/yt2bili-worker.exe
+          python scripts/smoke_worker.py --frozen packaging/staging/screator-worker/screator-worker.exe

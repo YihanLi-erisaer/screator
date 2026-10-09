@@ -147,7 +147,7 @@ def _login(service, account_id):
 
 
 def _build_parser():
-    parser = argparse.ArgumentParser(prog="yt2bili", description="单链接、显式账号的本地投稿工具。")
+    parser = argparse.ArgumentParser(prog="screator", description="单链接、显式账号的本地投稿工具。")
     parser.add_argument("--data-dir", help="账号与任务数据目录；默认项目目录")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("setup")

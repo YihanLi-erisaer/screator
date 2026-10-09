@@ -1,4 +1,4 @@
-# yt2bili 本地大模型优先翻译 PRD
+# Screator 本地大模型优先翻译 PRD
 
 版本：v1.0 评审稿
 

@@ -4,7 +4,7 @@
     "targets": ["nsis"],
     "publisher": "StarDazz",
     "resources": {
-      "../../packaging/staging/yt2bili-worker/": "worker/",
+      "../../packaging/staging/screator-worker/": "worker/",
       "../../packaging/staging/windows-bin/": "bin/"
     },
     "windows": {

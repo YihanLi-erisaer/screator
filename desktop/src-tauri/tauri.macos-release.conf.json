@@ -4,7 +4,7 @@
     "targets": ["dmg"],
     "icon": ["icons/icon.icns", "icons/icon.png"],
     "resources": {
-      "../../packaging/staging/yt2bili-worker/": "worker/",
+      "../../packaging/staging/screator-worker/": "worker/",
       "../../packaging/staging/macos-bin/": "bin/"
     },
     "macOS": {
