@@ -66,7 +66,7 @@ class DesktopSettings:
         except Exception as exc:
             raise Yt2BiliError("系统凭据保存失败，未将密钥写入普通设置文件。") from exc
 
-    def public(self):
+    def service_status(self):
         try:
             has_key, vault_error = bool(self.key()), ""
         except Yt2BiliError as exc:
@@ -75,7 +75,15 @@ class DesktopSettings:
         local_ready = status(self.values, self.paths.root / "translation")["state"] == "ready"
         primary_ready = local_ready if self.values["translation_primary"] == "local_llm" else has_key
         ready = primary_ready or (self.values["translation_fallback_enabled"] and (local_ready or has_key))
-        return {**self.values, "has_deepl_key": has_key, "vault_error": vault_error, "translation_ready": bool(ready),
+        return {"has_deepl_key": has_key, "vault_error": vault_error,
+                "translation_ready": bool(ready), "readiness_pending": False}
+
+    def public(self, check_services=True):
+        if type(check_services) is not bool:
+            raise Yt2BiliError("服务检测参数无效。")
+        services = self.service_status() if check_services else {
+            "has_deepl_key": False, "vault_error": "", "translation_ready": False, "readiness_pending": True}
+        return {**self.values, **services,
                 "local_llm_backends": ["auto", "vulkan", "cpu"] if sys.platform == "win32" else ["auto", "cpu"],
                 "translation_upgrade_notice": self.translation_upgrade_notice,
                 "data_dir": str(self.paths.root), "youtube_cookies": (self.paths.root / "secrets/youtube_cookies.txt").is_file()}

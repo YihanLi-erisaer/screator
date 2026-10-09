@@ -16,7 +16,6 @@ import uuid
 from urllib.parse import urlencode
 
 import requests
-import qrcode
 
 from yt2bili.desktop_settings import atomic_json
 from yt2bili.identity import normalize_uid
@@ -81,6 +80,7 @@ class LoginSession:
 
     def _run(self):
         try:
+            import qrcode
             self.send("loading")
             response = self.call("auth_code", {})
             if response.get("code") != 0:

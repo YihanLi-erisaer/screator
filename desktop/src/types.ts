@@ -68,6 +68,7 @@ export interface Config {
   translation_primary: "local_llm" | "deepl";
   translation_fallback_enabled: boolean;
   translation_ready: boolean;
+  readiness_pending?: boolean;
   translation_upgrade_notice?: boolean;
   local_llm_mode: "managed" | "external";
   local_llm_base_url: string;

@@ -56,6 +56,9 @@ class TaskStore:
         self._depth, self._events = 0, []
         self._conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None, timeout=15)
         self._conn.row_factory = sqlite3.Row
+        # SQLite's built-in lower() only handles ASCII. Keep the desktop search
+        # semantics for Unicode titles while filtering rows before pagination.
+        self._conn.create_function("unicode_lower", 1, lambda value: (value or "").lower(), deterministic=True)
         self._conn.execute("PRAGMA foreign_keys=ON")
         version = self._conn.execute("PRAGMA user_version").fetchone()[0]
         if version > SCHEMA_VERSION:
@@ -83,6 +86,12 @@ class TaskStore:
             except BaseException:
                 self._conn.close()
                 raise
+        # Additive indexes are safe for existing schema-v5 profiles too.
+        with self.transaction() as conn:
+            conn.execute("CREATE INDEX IF NOT EXISTS ix_task_updated ON tasks(updated_at DESC,task_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS ix_task_status_updated ON tasks(status,updated_at DESC,task_id)")
+            conn.execute("""CREATE INDEX IF NOT EXISTS ix_job_session_state ON desktop_jobs(
+                json_extract(payload,'$.owner_session_id'),json_extract(payload,'$.execution_state'))""")
 
     def _migrate(self):
         with self.transaction():
@@ -267,6 +276,71 @@ class TaskStore:
     def list_all(self):
         with self._lock:
             return [Task(**dict(r)) for r in self._conn.execute("SELECT * FROM tasks ORDER BY updated_at DESC,task_id")]
+
+    def recovery_tasks(self):
+        """Skip settled successful history; uncertain submissions still recover."""
+        with self._lock:
+            rows = self._conn.execute("""SELECT t.* FROM tasks t
+                WHERE t.status != 'submitted' OR t.bv_id = '' OR t.error != ''
+                  OR t.cancel_requested != 0
+                  OR EXISTS (SELECT 1 FROM task_publications p WHERE p.task_id=t.task_id
+                             AND (p.status != 'submitted' OR p.error != ''))
+                  OR EXISTS (SELECT 1 FROM desktop_jobs j WHERE j.task_id=t.task_id
+                             AND json_extract(j.payload, '$.execution_state') IN ('queued','running','waiting'))
+                ORDER BY t.updated_at DESC,t.task_id""").fetchall()
+            return [Task(**dict(row)) for row in rows]
+
+    def desktop_page(self, *, offset, limit, search, status, account_id, history_statuses=()):
+        """Filter/count in SQLite; decode only the requested page, including imports."""
+        with self._lock:
+            where, params = [], []
+            if search:
+                where.append("instr(unicode_lower(t.title_zh || t.title_orig || t.video_id), ?) > 0")
+                params.append(search.lower())
+            if account_id:
+                where.append("t.account_id=?")
+                params.append(account_id)
+            if status:
+                where.append("t.status=?")
+                params.append(status)
+            if history_statuses:
+                where.append("t.status IN (" + ",".join("?" for _ in history_statuses) + ")")
+                params.extend(history_statuses)
+            matched = "SELECT t.task_id,t.updated_at,'local' AS source FROM tasks t"
+            if where:
+                matched += " WHERE " + " AND ".join(where)
+            if history_statuses:
+                imported_where = []
+                if search:
+                    imported_where.append("instr(unicode_lower(json_extract(payload,'$.title_zh') || json_extract(payload,'$.title_orig') || json_extract(payload,'$.video_id')), ?) > 0")
+                    params.append(search.lower())
+                if account_id:
+                    account = self._conn.execute("SELECT uid FROM bilibili_accounts WHERE account_id=?", (account_id,)).fetchone()
+                    imported_where.append("json_extract(payload,'$.account_uid_snapshot')=?")
+                    params.append(account[0] if account else "")
+                if status:
+                    imported_where.append("json_extract(payload,'$.status')=?")
+                    params.append(status)
+                matched += " UNION ALL SELECT task_id,json_extract(payload,'$.updated_at'),'imported' FROM imported_publishing_history"
+                if imported_where:
+                    matched += " WHERE " + " AND ".join(imported_where)
+            total = self._conn.execute("SELECT COUNT(*) FROM (" + matched + ")", params).fetchone()[0]
+            direction = "DESC" if history_statuses else "ASC"
+            page = self._conn.execute(f"SELECT * FROM ({matched}) ORDER BY updated_at DESC,task_id {direction} LIMIT ? OFFSET ?",
+                                      (*params, limit, offset)).fetchall()
+            items = []
+            for row in page:
+                if row["source"] == "imported":
+                    payload = self._conn.execute("SELECT payload FROM imported_publishing_history WHERE task_id=?", (row["task_id"],)).fetchone()[0]
+                    items.append(json.loads(payload))
+                else:
+                    items.append(self.require(row["task_id"]))
+            counts = {row[0]: row[1] for row in self._conn.execute("SELECT status,COUNT(*) FROM tasks GROUP BY status")}
+            all_total = sum(counts.values())
+            if history_statuses:
+                all_total = sum(counts.get(name, 0) for name in history_statuses)
+                all_total += self._conn.execute("SELECT COUNT(*) FROM imported_publishing_history").fetchone()[0]
+            return items, total, counts, all_total
 
     def upsert(self, task):
         with self.transaction() as conn:

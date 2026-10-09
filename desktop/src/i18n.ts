@@ -1,22 +1,14 @@
-import { Converter } from "opencc-js";
 import source from "./ui-source.json";
 import english from "./messagesEn.json";
+import traditional from "./messagesHk.json";
 import type { Config } from "./types";
 
 type Language = Config["ui_language"];
 type AttributeName = "aria-label" | "placeholder" | "title";
 const sourcePhrases = new Set<string>(source);
 const en = english as Record<string, string>;
-const traditional = Converter({ from: "cn", to: "hk" });
-const hk: Record<string, string> = {
-  "设置": "設定", "通用设置": "通用設定", "界面语言": "介面語言",
-  "简体中文": "简体中文", "繁體中文": "繁體中文",
-  "保存后切换应用的显示语言。": "儲存後切換應用程式的顯示語言。",
-  "保存设置": "儲存設定", "设置已保存。": "設定已儲存。",
-  "任务中心": "任務中心", "投稿记录": "投稿紀錄", "数据中心": "數據中心",
-  "账号与连接": "帳號與連線", "工作目录": "工作目錄",
-};
-const toTraditional = (text: string) => hk[text] ?? traditional(text);
+const hk = traditional as Record<string, string>;
+const toTraditional = (text: string) => hk[text] ?? text;
 const dynamicFragments = [
   "的创作中心，并确认没有遗留上传进程。恢复该账号上传队列？",
   "已停止未投稿任务并保留素材。仍有",

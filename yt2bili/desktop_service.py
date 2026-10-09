@@ -18,8 +18,6 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from PIL import Image
-
 from yt2bili import __version__, bili_upload, youtube, translate, publications, history_transfer
 from yt2bili.db import Task, TaskStore
 from yt2bili.desktop_auth import LoginSession, account_status, validate_login
@@ -144,7 +142,8 @@ class DesktopService:
         handlers = {
             "system.health": self.health, "system.diagnostics": self.diagnostics,
             "system.resources": self.resource_monitor.snapshot,
-            "settings.get": lambda: self.config.public(), "settings.update": self.update_settings,
+            "settings.get": self.config.public, "settings.status": self.config.service_status,
+            "settings.update": self.update_settings,
             "translation.status": self.translation_status, "translation.test": self.translation_test,
             "translation.install": self.translation_install, "translation.uninstall": self.translation_uninstall,
             "translation.jobs.get": self.translation_jobs.get,
@@ -197,7 +196,7 @@ class DesktopService:
         capabilities = ["single_url", "account_lanes", "graceful_shutdown", "local_translation_v1", "douyin_sync_v1", "acfun_sync_v1"]
         return {"protocol_version": 2, "schema_version": 5, "account_limit": 5,
                 "capabilities": capabilities,
-                "migration_notes": self.migration_notes, "version": __version__, "queue": self.scheduler.snapshot(),
+                "migration_notes": self.migration_notes, "version": __version__,
                 "data_dir": str(self.paths.root)}
 
     def translation_status(self):
@@ -450,23 +449,10 @@ class DesktopService:
     def list_tasks(self, offset=0, limit=20, search="", status="", history=False, account_id=""):
         if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 20:
             raise Yt2BiliError("分页参数无效。")
-        all_tasks = self.store.list_all()
-        tasks = [item for item in all_tasks if (not search or search.lower() in (item.title_zh + item.title_orig + item.video_id).lower())
-                 and (not account_id or item.account_id == account_id) and (not status or item.status == status)
-                 and (not history or item.status in history_transfer.HISTORY_STATUSES)]
-        history_total = 0
-        if history:
-            imported = history_transfer.list_imported(self.store)
-            account_uid = next((a["uid"] for a in self.store.accounts(True) if a["account_id"] == account_id), "") if account_id else ""
-            tasks.extend(item for item in imported
-                         if (not search or search.lower() in (item["title_zh"] + item["title_orig"] + item["video_id"]).lower())
-                         and (not account_id or item["account_uid_snapshot"] == account_uid)
-                         and (not status or item["status"] == status))
-            tasks.sort(key=lambda item: (item["updated_at"], item["task_id"]) if isinstance(item, dict)
-                       else (item.updated_at, item.task_id), reverse=True)
-            history_total = sum(t.status in history_transfer.HISTORY_STATUSES for t in all_tasks) + len(imported)
-        page = tasks[offset:offset + limit]
-        items = [item if isinstance(item, dict) else
+        page, total, counts, all_total = self.store.desktop_page(
+            offset=offset, limit=limit, search=search, status=status, account_id=account_id,
+            history_statuses=tuple(sorted(history_transfer.HISTORY_STATUSES)) if history else ())
+        items = [history_transfer.view(item) if isinstance(item, dict) else
                  {**{key: value for key, value in asdict(item).items() if key not in ("desc_orig", "desc_zh")},
                   "publications": publications.items(self.store, item.task_id),
                   "run_id": (self.store.get_job(item.task_id) or {}).get("run_id")} for item in page]
@@ -520,11 +506,11 @@ class DesktopService:
                         GROUP BY p.account_id
                     """, (start, end))
                 }
-        return {"items": items, "total": len(tasks),
-                "counts": {name: sum(t.status == name for t in all_tasks) for name in ("downloading", "validating", "uploading", "ready", "submitted", "failed")},
+        return {"items": items, "total": total,
+                "counts": {name: counts.get(name, 0) for name in ("downloading", "validating", "uploading", "ready", "submitted", "failed")},
                 "today_submitted_by_account": today_submitted,
                 "submission_trend": submission_trend,
-                "queue": self.scheduler.snapshot(), "all_total": history_total if history else len(all_tasks)}
+                "queue": self.scheduler.snapshot(), "all_total": all_total}
 
     def get_task(self, task_id):
         imported = history_transfer.get_imported(self.store, task_id)
@@ -808,6 +794,7 @@ class DesktopService:
             return asdict(task)
 
     def cover(self, task_id):
+        from PIL import Image
         task = self.task(task_id)
         if not task.cover_path or not task.work_dir:
             return {"image": None}

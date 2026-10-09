@@ -12,8 +12,6 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request, urlopen
 
-import yt_dlp
-
 from yt2bili import media
 from yt2bili import events
 from yt2bili.config import Settings
@@ -28,6 +26,16 @@ _download_lock = threading.Lock() if sys.platform == "win32" else None
 _download_context = threading.local()
 
 
+def __getattr__(name):
+    # Preserve the module attribute for integrations and downloader test doubles.
+    if name == "yt_dlp":
+        import importlib
+        module = importlib.import_module("yt_dlp")
+        globals()[name] = module
+        return module
+    raise AttributeError(name)
+
+
 @contextmanager
 def download_slots(gate):
     """Share a batch's download budget without holding it during validation."""
@@ -40,6 +48,7 @@ def download_slots(gate):
 
 
 def _download_with_slot(opts: dict, url: str) -> dict:
+    yt_dlp = __getattr__("yt_dlp")
     gate = getattr(_download_context, "gate", None)
     logger.info("等待下载名额：%s", url)
     # Include yt-dlp merging, renaming and cookie writes in the critical section.
@@ -437,6 +446,7 @@ def describe_js_runtimes(settings: Settings) -> str:
 
 
 def export_browser_cookies(settings: Settings, browser: str | None = None) -> Path:
+    yt_dlp = __getattr__("yt_dlp")
     dest = settings.youtube_cookies or (settings.root / "secrets" / "youtube_cookies.txt")
     dest.parent.mkdir(parents=True, exist_ok=True)
     browsers = [browser] if browser else ["edge", "chrome", "firefox"]
@@ -488,6 +498,7 @@ def export_browser_cookies(settings: Settings, browser: str | None = None) -> Pa
 
 
 def _extract(url: str, settings: Settings, download: bool) -> dict[str, Any]:
+    yt_dlp = __getattr__("yt_dlp")
     opts = _base_opts(settings)
     opts["skip_download"] = not download
     try:

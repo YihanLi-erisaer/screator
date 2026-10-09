@@ -1737,7 +1737,8 @@ pre {
 .queue-overview { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin:16px 0; }
 .queue-card { border:1px solid var(--border); border-radius:10px; padding:12px; min-width:0; }
 .queue-card strong,.queue-card small { display:block; overflow-wrap:anywhere; }
-.queue-card small { margin-top:6px; opacity:.7; }
+.queue-card strong { line-height:19px; }
+.queue-card small { margin-top:6px; opacity:.7; line-height:15px; }
 .stat-skeleton > div { flex: 1; }
 .skeleton-stat-label { width: min(105px, 80%); height: 14px; }
 .skeleton-stat-value { width: 32px; height: 28px; }

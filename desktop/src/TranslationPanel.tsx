@@ -181,8 +181,8 @@ export default function TranslationPanel({
           <h2>翻译服务</h2>
           <p>默认本地推理，也可优先使用 DeepL。</p>
         </div>
-        <StatusBadge tone={config.translation_ready ? "success" : "error"}>
-          {config.translation_ready ? "已就绪" : "未就绪"}
+        <StatusBadge tone={config.readiness_pending ? "neutral" : config.translation_ready ? "success" : "error"}>
+          {config.readiness_pending ? "待检测" : config.translation_ready ? "已就绪" : "未就绪"}
         </StatusBadge>
       </div>
       <div className="section-body">

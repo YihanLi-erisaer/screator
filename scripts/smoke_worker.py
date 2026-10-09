@@ -10,6 +10,7 @@ import tempfile
 parser = argparse.ArgumentParser()
 parser.add_argument("--frozen")
 parser.add_argument("--resources", type=Path)
+parser.add_argument("--protocol-only", action="store_true", help="Skip the FFmpeg media self-test")
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 with tempfile.TemporaryDirectory(prefix="yt2bili-smoke-") as folder:
@@ -38,6 +39,8 @@ with tempfile.TemporaryDirectory(prefix="yt2bili-smoke-") as folder:
             assert bundled[name]["available"], bundled[name]
             assert Path(bundled[name]["path"]).resolve().is_relative_to(args.resources.resolve()), bundled[name]
     print(json.dumps({"worker": "frozen" if args.frozen else "source", "protocol": "passed", "responses": len(responses)}))
+    if args.protocol_only:
+        raise SystemExit(0)
     result = subprocess.run(command + ["--self-test"], cwd=folder, env=environment, text=True,
                             encoding="utf-8", capture_output=True, timeout=60)
     if result.returncode:

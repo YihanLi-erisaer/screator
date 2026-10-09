@@ -11,8 +11,10 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from PIL import Image
+if TYPE_CHECKING:
+    from PIL import Image
 
 from yt2bili.exceptions import InvalidMediaError, Yt2BiliError
 from yt2bili import events, process_manager
@@ -497,6 +499,7 @@ def _upload_compatible(info: dict) -> bool:
 
 
 def process_cover(src: Path, dest: Path, width: int, height: int) -> Path:
+    from PIL import Image
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.is_file() and dest.stat().st_size > 0:
         logger.info("已存在封面，跳过处理：%s", dest)

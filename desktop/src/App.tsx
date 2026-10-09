@@ -5,6 +5,8 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  lazy,
+  Suspense,
   type ReactNode,
 } from "react";
 import {
@@ -69,19 +71,20 @@ import {
   type Progress,
   type Task,
 } from "./types";
-import SetupWizard from "./SetupWizard";
 import { AccountsPanel, AccountSelector, QueueOverview } from "./Accounts";
 import { DouyinAccountPanel, PublicationDetails } from "./Douyin";
 import { AcfunAccountPanel, AcfunChannelSelect } from "./Acfun";
 import { accountLabel, type BiliAccount } from "./types";
-import TranslationPanel from "./TranslationPanel";
 import { StyledSelect } from "./StyledSelect";
 import { StatusBadge } from "./StatusBadge";
 import { SubmissionTrend, type SubmissionTrendData } from "./SubmissionTrend";
 import { ToastViewport, ReportError, useToast } from "./Toast";
-import { DataCenter } from "./DataCenter";
-import { ResourceMonitor } from "./ResourceMonitor";
 import { setUiLanguage, uiText } from "./i18n";
+
+const SetupWizard = lazy(() => import("./SetupWizard"));
+const TranslationPanel = lazy(() => import("./TranslationPanel"));
+const DataCenter = lazy(() => import("./DataCenter").then((module) => ({ default: module.DataCenter })));
+const ResourceMonitor = lazy(() => import("./ResourceMonitor").then((module) => ({ default: module.ResourceMonitor })));
 
 type Page = "tasks" | "history" | "data" | "account" | "settings";
 const PAGE_SIZE = 20;
@@ -195,6 +198,7 @@ export default function App() {
   const { showError, showSuccess } = useToast();
   const [page, setPage] = useState<Page>("tasks");
   const [config, setConfig] = useState<Config | null>(null);
+  const configRequest = useRef(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loadedListKey, setLoadedListKey] = useState("");
   const [total, setTotal] = useState(0);
@@ -255,10 +259,19 @@ export default function App() {
     [showError, showSuccess],
   );
   const loadConfig = useCallback(
-    async () => {
-      const value: Config = await request("settings.get");
+    async (checkServices = true) => {
+      const generation = ++configRequest.current;
+      const value: Config = await request("settings.get", { check_services: checkServices });
+      if (generation !== configRequest.current) return;
       setUiLanguage(value.ui_language ?? "zh-CN");
       setConfig(value);
+      if (!checkServices) {
+        void request<Partial<Config>>("settings.status").then((status) => {
+          if (generation === configRequest.current) setConfig((current) => current && { ...current, ...status });
+        }).catch(() => {
+          // Leave readiness pending; opening settings can explicitly retry.
+        });
+      }
     },
     [],
   );
@@ -303,8 +316,9 @@ export default function App() {
     );
   }, [query, filter, offset, page, accountFilter, listKey]);
   const refreshAccount = useCallback(async () => {
-    setAuth(await request("auth.status"));
-    setAccountOptions((await request("accounts.list")).items);
+    const [auth, accounts] = await Promise.all([request("auth.status"), request("accounts.list")]);
+    setAuth(auth);
+    setAccountOptions(accounts.items);
   }, []);
 
   useEffect(() => {
@@ -313,11 +327,12 @@ export default function App() {
       .then(async (result) => {
         if (result.protocol_version !== 2)
           throw new Error("桌面与后台协议版本不匹配。");
-        await Promise.all([loadConfig(), refreshAccount()]);
+        if (!alive) return;
         if (alive) {
           setConnected(true);
           setConnectionError("");
         }
+        await Promise.all([loadConfig(false), refreshAccount()]);
         request("system.diagnostics")
           .then((value) => {
             if (alive) setDiagnostics(value);
@@ -423,6 +438,7 @@ export default function App() {
     });
     return () => {
       alive = false;
+      configRequest.current += 1;
       stop();
       stopClose();
     };
@@ -717,6 +733,7 @@ export default function App() {
                 </div>
               )}
             </div>
+            <Suspense fallback={<div className="help" role="status">{uiText("加载中…")}</div>}>
             {page === "data" && <DataCenter paused={shutdownStarted} accounts={accountOptions} onOpenTask={(taskId) => {
               void action(async () => setSelected(await request("tasks.get", { task_id: taskId })));
             }} />}
@@ -766,7 +783,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {config && !config.translation_ready && page === "tasks" && (
+                {config && !config.readiness_pending && !config.translation_ready && page === "tasks" && (
                   <div className="setup-banner">
                     <div className="setup-icon">
                       <Zap size={20} />
@@ -1076,6 +1093,7 @@ export default function App() {
                 exportLogs={exportLogs}
               />
             )}
+            </Suspense>
           </main>
           <footer className="bottom-bar">
             <span>
@@ -1098,6 +1116,7 @@ export default function App() {
                 });
             }}
           >
+            <Suspense fallback={<div className="help" role="status">{uiText("加载中…")}</div>}>
             <SetupWizard
               config={config}
               auth={auth}
@@ -1111,6 +1130,7 @@ export default function App() {
               setDiagnostics={setDiagnostics}
               done={() => setSetup(false)}
             />
+            </Suspense>
           </Modal>
         )}
         {confirmDeleteAllHistory && (

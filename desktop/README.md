@@ -135,6 +135,10 @@ npm run test:launcher
 
 测试默认使用本机 Microsoft Edge。`npm run test:e2e` 会自动启动前端开发服务（或复用已有服务）。开发预览 `/?preview&populated` 明确标记示例数据，不调用外部账号，生产构建不会包含预览模块。
 
+界面繁体文案由构建脚本预先生成，运行时不加载 OpenCC 词库。修改界面文案后，在 `desktop/` 运行 `node scripts/extract-ui-source.mjs`，补齐 `src/messagesEn.json`，再运行 `node scripts/build-ui-locales.mjs` 更新 `src/messagesHk.json`；两种生产构建入口都会检查语言资源是否同步。
+
+启动测量：在仓库根目录运行 `python scripts/benchmark_startup.py`，或用 `--samples 5 --tasks 0 1000 10000` 指定样本数和历史数量。脚本使用临时数据及空凭据存储，测量源码 worker 就绪、已完成历史任务下的后台初始化、健康查询、列表查询和队列快照；不操作真实账号，不包含原生窗口绘制、系统冷启动或真实服务检测。`scripts/smoke_worker.py --protocol-only` 可在未安装 FFmpeg 时单独检查源码或冻结后台通信。
+
 原生通信检查：先启动 `npm run dev`，用已安装的 Rust 工具链运行 `cargo build --manifest-path desktop/src-tauri/Cargo.toml`，然后在仓库根目录运行 `scripts/smoke_native.py`。脚本使用独立临时数据目录，在隐藏窗口验证 React → Tauri → Python → React 后自动退出。发布版检查使用 `scripts/smoke_native.py --release dist/windows/Screator/Screator.exe`，不需要 Vite；仅在显式传入 `--smoke-test` 且指定独立数据和报告环境变量时启用测试钩子。
 
 退出验证：`python scripts/smoke_native.py --shutdown graceful` 和 `--shutdown forced` 分别走真实正常退出、强制退出命令。`python scripts/benchmark_shutdown.py` 使用独立临时数据测量空闲后台退出、长重试等待的取消响应，以及一万条历史记录下新旧关闭状态查询的耗时和查询次数；不包含窗口关闭交互、在途上传或真实网络等待。

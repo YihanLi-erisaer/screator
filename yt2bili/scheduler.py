@@ -163,7 +163,7 @@ class Scheduler:
         self.dispatcher.start()
 
     def _recover(self):
-        for task in self.store.list_all():
+        for task in self.store.recovery_tasks():
             if publications.multi_target(self.store, task.task_id):
                 for p in publications.items(self.store, task.task_id):
                     acfun_uncertain = p["platform"] == "acfun" and p["status"] == "uploading_media" and bool(
@@ -541,9 +541,8 @@ class Scheduler:
             items = list(self.active.values())
             active = [{"task_id": i.task_id, "video_id": i.video_id, "account_id": i.job.task.account_id,
                        "stage": i.stage, "mode": i.mode, "run_id": i.run_id} for i in items]
-            for task in self.store.list_all():
-                saved = self.store.get_job(task.task_id) or {}
-                if task.task_id not in self.active and saved.get("owner_session_id") == self.session_id and saved.get("execution_state") == "queued":
+            for task, saved, _ in self.store.session_jobs(self.session_id, ("queued",)):
+                if task.task_id not in self.active:
                     active.append({"task_id": task.task_id, "video_id": task.video_id, "account_id": task.account_id,
                                    "stage": saved["stage"], "mode": saved["mode"], "run_id": saved["run_id"]})
             def shared(stage):

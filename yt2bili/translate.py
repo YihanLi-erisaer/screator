@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 import re
 import time
+from typing import TYPE_CHECKING
 
-import deepl
+if TYPE_CHECKING:
+    import deepl
 
 from yt2bili.exceptions import Yt2BiliError
 
@@ -29,6 +31,7 @@ def translate_title_and_desc(
             "未配置 DEEPL_AUTH_KEY。请复制 .env.example 为 .env 并填入 DeepL Free 密钥。"
         )
 
+    import deepl
     translator = deepl.Translator(auth_key)
     _assert_quota(translator)
 
@@ -96,6 +99,7 @@ def _translate(
     source_lang: str | None,
     split_sentences: str,
 ) -> str:
+    import deepl
     if not text.strip():
         return ""
     lang = _deepl_source(source_lang)
@@ -134,6 +138,7 @@ def _translate(
 
 
 def _assert_quota(translator: deepl.Translator) -> None:
+    import deepl
     try:
         usage = translator.get_usage()
     except deepl.DeepLException as exc:

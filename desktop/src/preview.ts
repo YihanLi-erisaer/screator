@@ -219,8 +219,15 @@ export async function request(method: string, params: any): Promise<any> {
   }
 
   if (method === "settings.get") {
-    const result: Record<string, unknown> = { ...config };
+    const result: Record<string, unknown> = { ...config, readiness_pending: params.check_services === false };
     if (new URLSearchParams(location.search).has("legacyAudioSettings")) delete result.youtube_audio_language;
+    return result;
+  }
+  if (method === "settings.status") {
+    const result = { has_deepl_key: config.has_deepl_key, vault_error: config.vault_error,
+      translation_ready: config.translation_ready, readiness_pending: false };
+    const delay = Number(new URLSearchParams(location.search).get("slowSettingsStatus") || 0);
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
     return result;
   }
   if (method === "settings.update") {
