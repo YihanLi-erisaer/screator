@@ -32,3 +32,11 @@ node desktop/scripts/package-windows.mjs
 发布配置：`desktop/src-tauri/tauri.windows-release.conf.json`。安装包使用当前用户安装模式，支持简体中文、繁体中文、英文。构建首次运行可能需要联网获取 NSIS 等组件。Tauri 安装器说明：https://v2.tauri.app/distribute/windows-installer/
 
 自动化检查覆盖本机启动与通信，不代表干净 Windows 虚拟机兼容性验证，也不代表真实账号上传或真实模型质量验收。
+
+## 任务管理器中的名称和进程
+
+主程序文件、窗口标题与产品名为 `screator`。自有后台文件保留 `screator-worker.exe`，其 Windows 文件描述和图标使用 `screator`。根目录 `启动桌面版.cmd` 直接启动打包版；开发服务单独通过 `启动开发版.cmd` 启动。
+
+主程序启动 WebView2 和后台，后台再启动 FFmpeg、上传和应用管理的翻译工具。父子归属用于生命周期管理和应用内资源统计，并不能强制 Windows 任务管理器将所有不同的可执行文件合并成一个条目。外部独立启动的 Ollama 也不属于该应用进程树。
+
+任务管理器的“进程”页可先按“名称”排序检查；其他列排序可能影响 WebView2 的父级分组。新版 Windows 11 仍会显示 WebView2 的子进程角色，且存在 Tauri/WebView2 被单独列组的上游问题。“详细信息”页会保留 `msedgewebview2.exe`、`ffmpeg.exe` 等真实文件名。参见 [微软说明](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/end-user-faq) 与 [WebView2 分组问题](https://github.com/MicrosoftEdge/WebView2Feedback/issues/5628)。

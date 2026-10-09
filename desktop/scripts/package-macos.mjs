@@ -69,7 +69,7 @@ try {
   cpSync(app, packagedApp, { recursive: true, force: true });
   run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", packagedApp]);
   run("/usr/bin/codesign", ["--verify", "--deep", "--strict", packagedApp]);
-  run(python, ["scripts/smoke_native.py", "--release", path.join(packagedApp, "Contents/MacOS/screator-desktop")]);
+  run(python, ["scripts/smoke_native.py", "--release", path.join(packagedApp, "Contents/MacOS/screator")]);
   symlinkSync("/Applications", path.join(dmgStage, "Applications"));
   run("/usr/bin/hdiutil", ["create", "-ov", "-format", "UDZO", "-volname", "screator", "-srcfolder", dmgStage, dmg]);
   run("/usr/bin/hdiutil", ["verify", dmg]);

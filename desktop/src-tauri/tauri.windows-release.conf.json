@@ -14,7 +14,8 @@
         "compression": "zlib",
         "languages": ["SimpChinese", "TradChinese", "English"],
         "displayLanguageSelector": true,
-        "startMenuFolder": "StarDazz"
+        "startMenuFolder": "StarDazz",
+        "installerHooks": "../../packaging/windows-installer-hooks.nsh"
       }
     }
   }

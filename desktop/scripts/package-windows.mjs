@@ -29,7 +29,7 @@ run(process.execPath, ["desktop/scripts/tauri.mjs", "build", "--no-bundle", "--c
 const release = path.join(root, "desktop/src-tauri/target/release");
 const portable = path.join(root, "dist/windows/screator");
 mkdirSync(portable, { recursive: true });
-copyFileSync(path.join(release, "screator-desktop.exe"), path.join(portable, "screator.exe"));
+copyFileSync(path.join(release, "screator.exe"), path.join(portable, "screator.exe"));
 cpSync(path.join(root, "packaging/staging/screator-worker"), path.join(portable, "worker"), { recursive: true });
 cpSync(tools, path.join(portable, "bin"), { recursive: true });
 run(python, ["scripts/smoke_worker.py", "--frozen", path.join(portable, "worker/screator-worker.exe"), "--resources", portable]);

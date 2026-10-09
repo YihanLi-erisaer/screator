@@ -4,6 +4,10 @@ version = "1.0.0-alpha"
 description = "StarDazz screator desktop"
 edition = "2021"
 
+[[bin]]
+name = "screator"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

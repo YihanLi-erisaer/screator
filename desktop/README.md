@@ -4,7 +4,9 @@
 
 ## 在当前电脑启动
 
-双击项目根目录的 **`启动桌面版.cmd`**，或者在项目根目录运行：
+双击项目根目录的 **`启动桌面版.cmd`** 直接运行已打包的 `dist/windows/screator/screator.exe`，不会启动 Node、Cargo 或 Vite 开发服务。若未构建，请先运行 `打包Windows.cmd`。
+
+需要开发与热更新时使用 **`启动开发版.cmd`**，或者在项目根目录运行：
 
 ```powershell
 cd desktop

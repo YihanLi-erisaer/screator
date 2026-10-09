@@ -185,6 +185,15 @@ fn frontend_ready(app: tauri::AppHandle, health: Value) {
                 });
                 return;
             }
+            if let Some(seconds) = smoke_inspect_seconds() {
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(seconds)).await;
+                    EXPECTED_EXIT.store(true, Ordering::Release);
+                    handle.exit(0);
+                });
+                return;
+            }
             EXPECTED_EXIT.store(true, Ordering::Release);
             app.exit(0);
         }
@@ -208,6 +217,15 @@ fn smoke_enabled() -> bool {
     std::env::var_os("SCREATOR_NATIVE_SMOKE_REPORT").is_some()
         && std::env::var_os("SCREATOR_DESKTOP_DATA").is_some()
         && (cfg!(debug_assertions) || std::env::args().any(|arg| arg == "--smoke-test"))
+}
+
+fn smoke_inspect_seconds() -> Option<u64> {
+    if !smoke_enabled() || std::env::var_os("SCREATOR_NATIVE_SMOKE_SHUTDOWN").is_some() {
+        return None;
+    }
+    std::env::var("SCREATOR_NATIVE_SMOKE_INSPECT_SECONDS").ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| (1..=120).contains(seconds))
 }
 
 #[cfg(windows)]
@@ -322,7 +340,10 @@ fn main() {
         .setup(|app| {
             app.manage(start_worker(app.handle())?);
             if smoke_enabled() {
-                if let Some(window) = app.get_webview_window("main") { let _ = window.hide(); }
+                if let Some(window) = app.get_webview_window("main") {
+                    if smoke_inspect_seconds().is_some() { let _ = window.show(); }
+                    else { let _ = window.hide(); }
+                }
             }
             Ok(())
         })

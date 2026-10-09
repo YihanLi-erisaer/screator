@@ -12,7 +12,7 @@ Python 包和命令均为 `screator`；桌面应用、安装包和配置项也�
 
 现已提供与 StarDazz 官网风格一致的桌面应用，支持任务管理、素材预览与编辑、扫码登录、设置、日志和投稿操作。Windows 安装包和免安装版输出在 `dist/windows/`，使用与构建步骤见 [Windows 安装与打包](docs/Windows安装与打包.md)。
 
-当前电脑可双击根目录 `启动桌面版.cmd`，或执行 `cd desktop` 后运行 `npm run desktop`。首次使用请从任务中心的“开始配置”进入。
+双击根目录 `启动桌面版.cmd` 运行 `dist/windows/screator/screator.exe`；首次运行前请先用 `打包Windows.cmd` 构建。需要热更新开发时使用 `启动开发版.cmd`，或执行 `cd desktop` 后运行 `npm run desktop`。首次使用请从任务中心的“开始配置”进入。
 
 macOS Apple Silicon 可按 [macOS 安装与打包](docs/macOS安装与打包.md) 在 M 系列设备上原生运行和构建 DMG。开发环境与使用方法见 [桌面版说明](desktop/README.md)，实现与测试记录见 [第一期开发与验收记录](第一期开发与验收记录.md)。以下仍是原有 CLI 用法。
 
