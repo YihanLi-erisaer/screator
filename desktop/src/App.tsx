@@ -1763,7 +1763,7 @@ function TaskDetail({
             />
           </label>
           <p className="help">
-            简介中的原标题、作者与来源链接会保留。获得 BV
+            简介中会保留原作者。获得 BV
             号后，任务素材将自动清理。
           </p>
           {editable(task) && (

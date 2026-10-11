@@ -122,9 +122,21 @@ class DesktopTests(unittest.TestCase):
             self.wait_idle()
             self.assertEqual(len(self.uploads), 1)
             self.assertEqual(self.uploads[0][1], "编辑后的标题")
-            self.assertIn("原链接：", self.uploads[0][2])
+            self.assertIn("原作者：", self.uploads[0][2])
+            self.assertNotIn("原标题：", self.uploads[0][2])
+            self.assertNotIn("原链接：", self.uploads[0][2])
             self.assertEqual(self.service.task(task.video_id).status, "submitted")
             self.assertFalse(Path(task.work_dir).exists())
+
+    def test_edit_replaces_existing_attribution_footer(self):
+        with self.mocks():
+            self.create()
+            self.wait_idle()
+            legacy = "正文\n\n————————\n原标题：Original title\n原作者：author\n原链接：https://youtu.be/abcdefghijk"
+            result = self.service.update_metadata("abcdefghijk", "编辑后的标题", legacy)
+            self.assertEqual(result["desc_zh"], "正文\n\n————————\n原作者：author")
+            updated = self.service.update_metadata("abcdefghijk", "编辑后的标题", result["desc_zh"])
+            self.assertEqual(updated["desc_zh"], result["desc_zh"])
 
     def test_duplicate_operation_and_url_only_enqueues_once(self):
         with self.mocks():

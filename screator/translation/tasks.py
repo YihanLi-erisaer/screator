@@ -31,7 +31,7 @@ def prepare(settings, store, task, meta, folder, *, force=False):
         record["config_snapshot"] = config
         store.save_translation(task, record)
     description_limit = min(settings.desc_limit, 1000) if has_acfun else settings.desc_limit
-    reserve = 80 + len(meta.title) + len(meta.uploader) + len(meta.webpage_url)
+    reserve = 32 + len(meta.uploader)
     try:
         result = translate_group(settings, meta.title, meta.description, meta.language,
                                  settings.title_limit, max(200, description_limit-reserve), config=config)
@@ -51,7 +51,7 @@ def prepare(settings, store, task, meta, folder, *, force=False):
         new_record["acfun_title_attempts"] = acfun_result.attempts
     title_before, desc_before = task.title_zh, task.desc_zh
     task.title_zh = result.title
-    task.desc_zh = translate.build_description(result.description, meta.title, meta.uploader, meta.webpage_url, description_limit)
+    task.desc_zh = translate.build_description(result.description, meta.uploader, description_limit)
     try:
         store.save_translation(task, new_record)
     except Exception:

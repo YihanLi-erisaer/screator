@@ -73,16 +73,11 @@ def clamp_title(title: str, limit: int) -> str:
 
 def build_description(
     body: str,
-    orig_title: str,
     uploader: str,
-    source_url: str,
     limit: int,
 ) -> str:
-    orig_title = orig_title.replace("\n", " ").strip()
     uploader = uploader.replace("\n", " ").strip()
-    footer = (
-        f"\n\n————————\n原标题：{orig_title}\n原作者：{uploader}\n原链接：{source_url}"
-    )
+    footer = f"\n\n————————\n原作者：{uploader}"
     if len(footer) >= limit:
         return footer[-limit:]
     budget = limit - len(footer)

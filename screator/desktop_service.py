@@ -759,8 +759,8 @@ class DesktopService:
                 raise AppError(f"简介不能超过 {desc_limit} 字。")
             task.metadata_revision += 1
             task.title_zh = title.strip().replace("\n", " ")
-            body = description.split("\n\n————————\n原标题：")[0]
-            task.desc_zh = translate.build_description(body, task.title_orig, task.uploader, task.url, desc_limit)
+            body = re.split(r"\n\n————————\n(?:原标题|原作者)：", description, maxsplit=1)[0]
+            task.desc_zh = translate.build_description(body, task.uploader, desc_limit)
             record = self.store.translation(task_id) or {}
             record.update(state="edited", user_edited=True, description=body)
             self.store.save_translation(task, record)

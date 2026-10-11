@@ -45,7 +45,9 @@ class StorageTests(unittest.TestCase):
         with patch.object(tasks,'translate_group',return_value=TranslationResult('新标题','新正文','local_llm',model_digest='digest')):
             tasks.prepare(self.settings,self.store,self.task,self.meta,self.root,force=True)
         self.assertEqual(self.store.require(self.task.video_id).title_zh,'新标题')
-        self.assertEqual(self.task.desc_zh.count('原标题：'),1)
+        self.assertEqual(self.task.desc_zh.count('原作者：'),1)
+        self.assertNotIn('原标题：', self.task.desc_zh)
+        self.assertNotIn('原链接：', self.task.desc_zh)
         record=self.store.translation(self.task.video_id)
         self.assertEqual(record['config_snapshot']['model_digest'],'digest')
         self.assertEqual(record['state'],'complete')

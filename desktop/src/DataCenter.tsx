@@ -12,8 +12,9 @@ type Submission = {
   review_status?: string | null; views?: number | null; likes?: number | null;
   comments?: number | null; favorites?: number | null;
 };
-type Result = { items: Submission[]; total: number; accounts: Summary[]; updated_at: number };
+type Result = { items: Submission[]; total: number; accounts: Summary[]; updated_at: number; refresh_seconds?: number };
 const PAGE_SIZE = 20;
+const REFRESH_MS = 300_000;
 const format = (value: number | null | undefined) => value == null ? "--" : value.toLocaleString();
 const platformName: Record<Platform, string> = { bilibili: "Bilibili", acfun: "AcFun", douyin: "抖音" };
 
@@ -30,11 +31,13 @@ export function DataCenter({ accounts, onOpenTask, paused = false }: { accounts:
     if (paused) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const schedule = () => { timer = setTimeout(() => setRevision((value) => value + 1), 300_000); };
+    const schedule = (seconds = REFRESH_MS / 1000) => {
+      timer = setTimeout(() => setRevision((value) => value + 1), seconds * 1000);
+    };
     setLoading(true);
     setError("");
     request<Result>("data_center.list", { offset, limit: PAGE_SIZE, platform, account_id: accountId })
-      .then((value) => { if (alive) { setResult(value); setLoading(false); schedule(); } })
+      .then((value) => { if (alive) { setResult(value); setLoading(false); schedule(value.refresh_seconds); } })
       .catch(() => { if (alive) { setError("数据暂时无法获取，请稍后重试。"); setLoading(false); schedule(); } });
     return () => { alive = false; if (timer) clearTimeout(timer); };
   }, [platform, accountId, offset, revision, paused]);
@@ -89,7 +92,7 @@ export function DataCenter({ accounts, onOpenTask, paused = false }: { accounts:
             <span>{row.review_status || "--"}</span><span>{format(row.views)}</span><span>{format(row.likes)}</span>
             <span>{format(row.comments)}</span><span>{format(row.favorites)}</span>
           </button>)}</div> : <div className="empty-state"><h2>还没有稿件数据</h2><p>完成投稿后，这里会按需读取已记录稿件的数据。</p></div>}
-      <div className="panel-footer"><span>数据每五分钟更新一次；AcFun 和抖音审核与互动数据暂不可读取，以 -- 显示。</span>
+      <div className="panel-footer"><span>账号概览及稿件数据每五分钟更新一次；AcFun 和抖音审核与互动数据暂不可读取，以 -- 显示。</span>
         <div><span>{loading ? "…" : `${total} 条稿件`}</span>
           <button className="icon-button" aria-label="上一页" disabled={loading || offset === 0} onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}><ChevronLeft size={15} /></button>
           <button className="icon-button" aria-label="下一页" disabled={loading || offset + PAGE_SIZE >= total} onClick={() => setOffset((value) => value + PAGE_SIZE)}><ChevronRight size={15} /></button>

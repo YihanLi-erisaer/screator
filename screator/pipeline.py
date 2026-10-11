@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 NOTICE = (
     "本工具只应用于你拥有版权、已获授权，或源平台明确允许转载的视频。"
-    "稿件创作声明为「内容无需标注」，简介会保留原标题、原作者和原链接。"
+    "稿件创作声明为「内容无需标注」，简介会保留原作者。"
 )
 
 _translate_lock = threading.Lock()
