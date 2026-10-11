@@ -166,7 +166,7 @@ class Broker:
         if data.get("client_key") != self.key or data.get("open_id") != token["open_id"]: raise Rejected("目标抖音身份不一致。")
         if data.get("auto") and not self.auto: raise Rejected("未启用官方批准的自动发布场景。")
         if not isinstance(data.get("text"), str) or not 1 <= len(data["text"].strip()) <= 1000: raise Rejected("文案须为 1～1000 字。")
-        if not re.fullmatch(r"[\w-]{11}", data.get("source_video_id", ""), flags=re.ASCII): raise Rejected("源视频 ID 无效。")
+        if not re.fullmatch(r"(?:[\w-]{11}|local-[0-9a-f]{32})", data.get("source_video_id", ""), flags=re.ASCII): raise Rejected("源视频 ID 无效。")
         payload = json.dumps(data, sort_keys=True, ensure_ascii=False)
         digest = hashlib.sha256(payload.encode()).hexdigest()
         existing = self.db.execute("SELECT * FROM publications WHERE id=?", (identity,)).fetchone()

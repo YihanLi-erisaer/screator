@@ -133,7 +133,19 @@ if (verificationPreview && tasks.length) {
   }];
 }
 let resourceSamples = 0;
+const materialLibraries = [{ id: "sample-library", name: "示例素材库" }];
+const materialFiles = [
+  { name: "示例视频.mp4", kind: "video", size: 2048000, modified: 1791691200 },
+  { name: "参考图片.png", kind: "image", size: 102400, modified: 1791691100 },
+  { name: "背景音乐.mp3", kind: "audio", size: 524288, modified: 1791691000 },
+];
 export async function request(method: string, params: any): Promise<any> {
+  if (method === "materials.libraries") return { items: [...materialLibraries], root: "示例素材目录" };
+  if (method === "materials.create_library") { const result = { id: crypto.randomUUID(), name: params.name }; materialLibraries.push(result); return result; }
+  if (method === "materials.list") return { items: params.library_id === "sample-library" ? [...materialFiles] : [], path: "示例素材目录" };
+  if (method === "materials.rename") { const file = materialFiles.find(f => f.name === params.name); if (file) file.name = params.new_name; return { renamed: true }; }
+  if (method === "materials.delete") { const index = materialFiles.findIndex(f => f.name === params.name); if (index >= 0 && params.confirmed) materialFiles.splice(index, 1); return { deleted: true }; }
+
   if (method === "system.resources") {
     resourceSamples += 1;
     const flags = new URLSearchParams(location.search);

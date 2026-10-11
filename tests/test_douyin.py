@@ -279,6 +279,12 @@ class BrokerTests(unittest.TestCase):
         self.assertNotIn("secret-access", self.broker.value("token"))
         self.assertEqual(self.broker.token()["open_id"], "o")
 
+    def test_local_source_identity_is_accepted_and_remains_idempotent(self):
+        self.payload["source_video_id"] = "local-" + uuid.uuid4().hex
+        self.registered()
+        self.assertEqual(self.broker.submit(self.identity), self.broker.submit(self.identity))
+        self.assertEqual(self.calls.count("/api/douyin/v1/video/create_video/"), 1)
+
     def test_receipt_idempotency_and_unique_source(self):
         self.registered()
         self.assertEqual(self.broker.submit(self.identity), self.broker.submit(self.identity))

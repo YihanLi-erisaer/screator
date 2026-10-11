@@ -16,7 +16,7 @@ from screator.task_paths import validate_task_paths
 FORMAT = "screator-publishing-history"
 VERSION = 1
 HISTORY_STATUSES = {"submitted", "submission_unknown", "partial_success", "completed_with_abandon"}
-DELETEABLE_STATUSES = HISTORY_STATUSES | {"ready", "failed", "cancelled", "interrupted"}
+DELETEABLE_STATUSES = HISTORY_STATUSES | {"ready", "failed", "cancelled", "interrupted", "downloaded"}
 PLATFORMS = {"bilibili", "douyin", "acfun"}
 MAX_BYTES = 100 * 1024 * 1024
 MAX_RECORDS = 100_000
@@ -261,7 +261,7 @@ def delete_record(store, task_id, expected_revision):
         unsubmitted = not task.bv_id and task.status not in {"submitted", "partial_success", "submission_unknown"} and all(
             row["status"] not in {"submitted", "submission_unknown"} and not row["remote_id"] for row in receipts)
         asset_dir = None
-        if unsubmitted and task.work_dir:
+        if unsubmitted and task.work_dir and task.source_kind == "youtube":
             asset_dir = validate_task_paths(task)
             resolved = asset_dir.resolve()
             for other in store.list_all():

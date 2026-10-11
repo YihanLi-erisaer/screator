@@ -164,6 +164,12 @@ class Scheduler:
 
     def _recover(self):
         for task in self.store.recovery_tasks():
+            if task.status == "downloaded":
+                saved = self.store.get_job(task.task_id)
+                if saved:
+                    saved["execution_state"] = "finished"
+                    self.store.save_job(task.task_id, saved)
+                continue
             if publications.multi_target(self.store, task.task_id):
                 for p in publications.items(self.store, task.task_id):
                     acfun_uncertain = p["platform"] == "acfun" and p["status"] == "uploading_media" and bool(
@@ -221,7 +227,8 @@ class Scheduler:
         if self.closing:
             raise AppError("应用正在退出，不能添加任务。")
         needs_bili = targets is None or any(p["platform"] == "bilibili" and p["publication_id"] in targets for p in publications.items(self.store, task.task_id))
-        self.store.account(task.account_id, active=not repair and needs_bili)
+        if task.source_kind != "material":
+            self.store.account(task.account_id, active=not repair and needs_bili)
         with self.store.transaction():
             if self.closing:
                 raise AppError("应用正在退出，不能添加任务。")
@@ -355,7 +362,7 @@ class Scheduler:
                 if task.status == "uploading":
                     raise AppError("正在提交，请等待上传结束并核对结果。")
                 saved = self.store.get_job(task.task_id) or {}
-                if task.status in ("submitted", "submission_unknown"):
+                if task.status in ("submitted", "submission_unknown", "downloaded"):
                     raise AppError("该任务不能取消，请先核对投稿结果。")
                 item = self.active.get(task.task_id)
                 # Dispatched downloads can wait behind another video for a long time.
@@ -404,6 +411,37 @@ class Scheduler:
                     item.running_action = stage
                 with self.context(item):
                     if stage == "download":
+                        events.check_cancelled()
+                        if item.job.task.source_kind == "material":
+                            from screator.materials import download
+                            self.store.update(item.task_id, status="downloading")
+                            files = download(item.job.task, item.settings, item.job.work_dir)
+                            events.check_cancelled()
+                            self.materials.commit(item.job.task.library_id, item.task_id, files)
+                            self.store.update(item.task_id, status="downloaded", title_orig=files[0].name, error="")
+                            finished = True
+                            continue
+                        if item.job.task.source_kind == "local":
+                            task = item.job.task
+                            source = Path(task.local_path)
+                            if not source.is_file(): raise AppError("本地源视频已移动或删除，请恢复文件后重试。")
+                            # Copy in cancellable chunks; validation may quarantine or rewrite its input.
+                            copied = item.job.work_dir / ("source" + source.suffix.lower())
+                            partial = copied.with_suffix(copied.suffix + ".part")
+                            with source.open("rb") as reader, partial.open("wb") as writer:
+                                while True:
+                                    events.check_cancelled()
+                                    chunk = reader.read(1024 * 1024)
+                                    if not chunk: break
+                                    writer.write(chunk)
+                            partial.replace(copied)
+                            item.job.meta = YoutubeMeta(task.video_id, "", task.title_orig, task.desc_orig, "", None, "", None, "")
+                            item.job.meta.save(item.job.work_dir / "meta.json")
+                            item.job.source = copied
+                            task.video_path = str(copied)
+                            self.store.upsert(task)
+                            self.route(item, "validate")
+                            continue
                         if shutil.disk_usage(item.settings.work_dir).free < 512 * 1024 * 1024:
                             raise AppError("工作磁盘可用空间不足 512 MB。")
                         media.require_ffmpeg()
@@ -445,7 +483,7 @@ class Scheduler:
                         else:
                             self.route(item, "upload")
             except Exception as exc:
-                if stage == "validate" and item.mode != "submit" and isinstance(exc, InvalidMediaError) and item.job.attempts < pipeline.MAX_MEDIA_ATTEMPTS and not item.cancel.is_set():
+                if stage == "validate" and item.job.task.source_kind == "youtube" and item.mode != "submit" and isinstance(exc, InvalidMediaError) and item.job.attempts < pipeline.MAX_MEDIA_ATTEMPTS and not item.cancel.is_set():
                     try:
                         pipeline._reject_job_source(item.job)
                         with self.context(item):

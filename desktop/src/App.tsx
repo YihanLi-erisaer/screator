@@ -80,13 +80,14 @@ import { StatusBadge } from "./StatusBadge";
 import { SubmissionTrend, type SubmissionTrendData } from "./SubmissionTrend";
 import { ToastViewport, ReportError, useToast } from "./Toast";
 import { setUiLanguage, uiText } from "./i18n";
+import { Materials, LibraryPicker } from "./Materials";
 
 const SetupWizard = lazy(() => import("./SetupWizard"));
 const TranslationPanel = lazy(() => import("./TranslationPanel"));
 const DataCenter = lazy(() => import("./DataCenter").then((module) => ({ default: module.DataCenter })));
 const ResourceMonitor = lazy(() => import("./ResourceMonitor").then((module) => ({ default: module.ResourceMonitor })));
 
-type Page = "tasks" | "history" | "data" | "account" | "settings";
+type Page = "tasks" | "materials" | "history" | "data" | "account" | "settings";
 const PAGE_SIZE = 20;
 type ShutdownStatus = {
   closing?: boolean;
@@ -98,6 +99,7 @@ type ShutdownStatus = {
 };
 const titles = {
   tasks: "任务中心",
+  materials: "素材管理",
   history: "投稿记录",
   data: "数据中心",
   account: "账号与连接",
@@ -575,6 +577,7 @@ export default function App() {
   );
   const nav = [
     { id: "tasks", icon: ListVideo },
+    { id: "materials", icon: FolderOpen },
     { id: "history", icon: History },
     { id: "data", icon: ChartNoAxesCombined },
     { id: "account", icon: KeyRound },
@@ -661,6 +664,7 @@ export default function App() {
                 <span className="eyebrow">
                   {page === "tasks"
                     ? "YOUR LOCAL WORKFLOW"
+                    : page === "materials" ? "YOUR MATERIAL LIBRARIES"
                     : page === "history"
                       ? "PUBLISHING HISTORY"
                       : page === "data"
@@ -673,6 +677,7 @@ export default function App() {
                 <p>
                   {page === "tasks"
                     ? "从链接到投稿，每一步都清晰可见。"
+                    : page === "materials" ? "素材库 · 视频 / 图片 / 音频"
                     : page === "history"
                       ? "所有已提交稿件，以及需要你核对的结果。"
                       : page === "data"
@@ -734,6 +739,7 @@ export default function App() {
               )}
             </div>
             <Suspense fallback={<div className="help" role="status">{uiText("加载中…")}</div>}>
+            {page === "materials" && <Materials action={action} busy={busy} />}
             {page === "data" && <DataCenter paused={shutdownStarted} accounts={accountOptions} onOpenTask={(taskId) => {
               void action(async () => setSelected(await request("tasks.get", { task_id: taskId })));
             }} />}
@@ -865,7 +871,7 @@ export default function App() {
                             "partial_success",
                             "completed_with_abandon",
                           ]
-                        : ["ready", "failed"]
+                        : ["ready", "downloaded", "failed"]
                       ).map((status) => (
                         <button
                           key={status}
@@ -1168,6 +1174,18 @@ export default function App() {
         )}
         {selected && (selected.imported_history ? (
           <ImportedHistoryDetail task={selected} busy={busy} onDelete={deleteHistory} close={() => setSelected(null)} />
+        ) : selected.source_kind === "material" ? (
+          <Modal title="素材下载记录" close={() => setSelected(null)}>
+            <Status status={selected.status} /><h3 data-no-localize>{selected.title_orig}</h3>
+            <p className="material-path" data-no-localize>{selected.url}</p>
+            <p>素材文件在素材管理中预览、重命名或删除。重复下载不会查重。</p>
+            <ReportError message={selected.error} />
+            <div className="modal-actions">
+              <button className="secondary" onClick={() => { setSelected(null); navigate("materials"); }}>查看素材库</button>
+              {retryable(selected) && <button disabled={busy} onClick={() => action(async () => { await request("tasks.retry", { task_id: selected.task_id, operation_id: operationId() }); setSelected(null); await loadTasks(); })}>继续任务</button>}
+              {active(selected) && <button disabled={busy} onClick={() => action(async () => { await request("tasks.cancel", { task_id: selected.task_id }); setSelected(null); await loadTasks(); })}>取消任务</button>}
+            </div>
+          </Modal>
         ) : (
           <TaskDetail
             task={selected}
@@ -1264,7 +1282,41 @@ export default function App() {
 }
 
 type Action = (work: () => Promise<unknown>, success?: string) => Promise<void>;
-function NewTask({
+type NewTaskProps = {
+  accounts: BiliAccount[]; config: Config | null; busy: boolean; action: Action;
+  close: () => void; done: () => Promise<void>;
+};
+function NewTask(props: NewTaskProps) {
+  const [tab, setTab] = useState("download");
+  return <Modal title="新建任务" close={props.close}>
+    <div className="task-source-tabs" role="tablist" aria-label="任务类型">
+      <button role="tab" aria-selected={tab === "download"} className={tab === "download" ? "primary" : "secondary"} onClick={() => setTab("download")}>下载素材</button>
+      <button role="tab" aria-selected={tab === "publish"} className={tab === "publish" ? "primary" : "secondary"} onClick={() => setTab("publish")}>同步投稿</button>
+    </div>
+    {tab === "download" ? <DownloadTask {...props} /> : <PublishTask {...props} />}
+  </Modal>;
+}
+function DownloadTask({ busy, action, close, done }: NewTaskProps) {
+  const [url, setUrl] = useState("");
+  const [library, setLibrary] = useState("");
+  const [type, setType] = useState("video");
+  const op = useRef(operationId());
+  return <>
+    <p className="modal-copy">下载到指定素材库，仅保留下载记录，支持重复下载。</p>
+    <label className="field">素材链接<input autoFocus type="url" placeholder="https://…" value={url} onChange={e => { setUrl(e.target.value); op.current = operationId(); }} /></label>
+    <label className="field">素材类型<StyledSelect label="素材类型" value={type} onChange={value => { setType(value); op.current = operationId(); }} options={[{ value: "video", label: "视频" }, { value: "image", label: "图片" }, { value: "audio", label: "音频" }]} /></label>
+    <LibraryPicker value={library} onChange={value => { setLibrary(value); op.current = operationId(); }} action={action} />
+    <details className="download-platforms"><summary>支持的平台与下载说明</summary>
+      <p>视频 / 音频：YouTube、Bilibili、AcFun、抖音、TikTok、小红书、微博、X、Instagram、Facebook、Vimeo、Dailymotion、Twitch、SoundCloud、Bandcamp 等 yt-dlp 支持的网站。</p>
+      <p>图片：Instagram、X、Pinterest、Flickr、Reddit、Tumblr、DeviantArt、Pixiv 等 gallery-dl 支持的图片帖子。</p>
+      <p>也支持视频、图片和音频文件直链。音频模式可提取视频中的音轨。每次输入一个作品链接，图片帖子最多 100 张。</p>
+      <p>站点登录、地区限制或网站改版可能导致下载失败。请下载你拥有使用权的素材。</p>
+    </details>
+    <div className="modal-actions"><button className="secondary" onClick={close} disabled={busy}>取消</button><button className="primary" disabled={busy || !url.trim() || !library} onClick={() => action(async () => { await request("materials.download", { url, library_id: library, asset_type: type, operation_id: op.current }); await done(); }, "素材下载已加入队列。")}>加入下载队列</button></div>
+  </>;
+}
+
+function PublishTask({
   accounts,
   config,
   busy,
@@ -1279,6 +1331,10 @@ function NewTask({
   close: () => void;
   done: () => Promise<void>;
 }) {
+  const [source, setSource] = useState("youtube");
+  const [localPath, setLocalPath] = useState("");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [accountId, setAccountId] = useState("");
   const [text, setText] = useState("");
   const [mode, setMode] = useState("preview");
@@ -1306,9 +1362,21 @@ function NewTask({
   }, []);
   const op = useRef(operationId());
   return (
-    <Modal title="新建任务" close={close}>
+    <>
       <p className="modal-copy">每次添加一个视频，并选择本次投稿的账号。</p>
-      <label className="field">
+      <div className="task-source-tabs" role="group" aria-label="投稿来源">
+        <button className={source === "youtube" ? "primary" : "secondary"} onClick={() => { setSource("youtube"); op.current = operationId(); }}>YouTube 链接</button>
+        <button className={source === "local" ? "primary" : "secondary"} onClick={() => { setSource("local"); op.current = operationId(); }}>本地视频</button>
+      </div>
+      {source === "local" ? <>
+        <label className="field">视频文件
+          <input aria-label="视频文件路径" placeholder="选择或输入本地视频绝对路径" value={localPath} onChange={e => { setLocalPath(e.target.value); op.current = operationId(); }} />
+        </label>
+        <button className="secondary" disabled={busy} onClick={() => action(async () => { const path = await chooseFile(["mp4", "mkv", "webm", "mov", "avi", "m4v", "flv"]); if (path) { setLocalPath(path); op.current = operationId(); } })}><FolderOpen size={15} />选择视频文件</button>
+        <label className="field">标题<input maxLength={80} value={title} onChange={e => { setTitle(e.target.value); op.current = operationId(); }} /></label>
+        <label className="field">简介<textarea rows={3} maxLength={syncAcfun ? 1000 : 2000} value={description} onChange={e => { setDescription(e.target.value); op.current = operationId(); }} /></label>
+        <p className="help">跳过下载与翻译，校验后投稿。投稿成功后保留源视频和任务工作目录。</p>
+      </> : <label className="field">
         YouTube 视频链接
         <input
           autoFocus
@@ -1320,7 +1388,7 @@ function NewTask({
             op.current = operationId();
           }}
         />
-      </label>
+      </label>}
       <AccountSelector
         accounts={accounts}
         value={accountId}
@@ -1347,7 +1415,7 @@ function NewTask({
             <strong>
               准备素材并预览 <em>推荐</em>
             </strong>
-            <small>下载、校验和翻译完成后，由你确认投稿。</small>
+            <small>{source === "local" ? "校验完成后，由你确认投稿。" : "下载、校验和翻译完成后，由你确认投稿。"}</small>
           </span>
         </label>
         <label className={mode === "auto" ? "chosen" : ""}>
@@ -1403,7 +1471,7 @@ function NewTask({
             ? "AcFun 登录已失效，请在“账号与连接”重新扫码。"
             : "请先在“账号与连接”扫码登录 AcFun。"}
       </p>}
-      {acfun?.account?.auth_state === "valid" && <p className="help">AcFun 使用独立队列，并共用本任务的标签与简介；标题单独翻译且最多 50 字。{mode === "auto" ? "素材准备好后自动投稿。" : "预览后确认投稿。"}</p>}
+      {acfun?.account?.auth_state === "valid" && <p className="help">AcFun 使用独立队列，并共用本任务的标签与简介；标题最多 50 字。{mode === "auto" ? "素材准备好后自动投稿。" : "预览后确认投稿。"}</p>}
       <ReportError message={syncAcfun && mode === "auto" && !config?.acfun_channel_id
         ? "请先在设置中填写 AcFun 默认分区 ID，再创建自动投稿任务。" : null} />
       <label className="checkbox">
@@ -1423,7 +1491,7 @@ function NewTask({
           className="primary"
           disabled={
             busy ||
-            !text.trim() ||
+            (source === "local" ? !localPath.trim() || !title.trim() : !text.trim()) ||
             !authorized ||
             !accountId ||
             (syncDouyin &&
@@ -1434,7 +1502,8 @@ function NewTask({
           onClick={() =>
             action(async () => {
               const result = await request("tasks.create", {
-                url: text,
+                url: source === "local" ? "" : text,
+                ...(source === "local" ? { local_path: localPath, title, description } : {}),
                 account_id: accountId,
                 mode,
                 ...(syncDouyin
@@ -1461,7 +1530,7 @@ function NewTask({
           加入队列
         </button>
       </div>
-    </Modal>
+    </>
   );
 }
 
@@ -1700,7 +1769,7 @@ function TaskDetail({
       {task.translation?.state === "queued" && (
         <p className="help">旧译文已清空，{task.status === "translating" ? "正在重新翻译。" : "等待重新翻译。"}</p>
       )}
-      {task.translation && !["queued", "failed", "cancelled"].includes(task.translation.state || "") && (
+      {task.source_kind !== "local" && task.translation && !["queued", "failed", "cancelled"].includes(task.translation.state || "") && (
         <p className="help">
           翻译来源：
           {
@@ -1763,8 +1832,7 @@ function TaskDetail({
             />
           </label>
           <p className="help">
-            简介中会保留原作者。获得 BV
-            号后，任务素材将自动清理。
+            {task.source_kind === "local" ? "投稿成功后保留源视频和任务工作目录。" : "简介中会保留原作者。获得 BV 号后，任务素材将自动清理。"}
           </p>
           {editable(task) && (
             <div className="inline-controls">
@@ -1785,13 +1853,10 @@ function TaskDetail({
                 <Check size={15} />
                 保存修改
               </button>
-              <button
-                className="secondary"
-                disabled={busy}
+              {task.source_kind !== "local" && <button
+                className="secondary" disabled={busy}
                 onClick={() => setConfirm("retranslate")}
-              >
-                重新翻译
-              </button>
+              >重新翻译</button>}
             </div>
           )}
         </div>
@@ -1974,7 +2039,7 @@ function TaskDetail({
             确认投稿
           </button>
         )}
-        {task.status === "submitted" && task.bv_id && (
+        {task.status === "submitted" && task.bv_id && task.source_kind !== "local" && (
           <button
             className="secondary"
             disabled={busy}

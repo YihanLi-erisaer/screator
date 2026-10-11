@@ -40,7 +40,7 @@ def windows_branding_options():
 command = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--console",
            "--name", "screator-worker", "--paths", str(root),
            "--distpath", str(root / "packaging/staging"), "--workpath", str(root / "build/worker"),
-           "--specpath", str(root / "build"), "--collect-all", "yt_dlp", "--collect-all", "yt_dlp_ejs",
+           "--specpath", str(root / "build"), "--collect-all", "gallery_dl", "--collect-all", "yt_dlp", "--collect-all", "yt_dlp_ejs",
            "--collect-all", "keyring", "--collect-all", "qrcode", "--collect-all", "screator.translation"]
 if sys.platform == "win32":
     command.extend(windows_branding_options())

@@ -500,6 +500,8 @@ def _prepare_assets(settings, store, task, meta, work_dir: Path, video_path: Pat
     if not _ok(cover_path):
         raw_cover = work_dir / "thumb_raw"
         try:
+            if task.source_kind == "local":
+                raise AppError("本地视频使用抽帧封面。")
             youtube.download_thumbnail(meta.thumbnail_url, raw_cover)
             media.process_cover(
                 raw_cover,
@@ -524,6 +526,10 @@ def _prepare_assets(settings, store, task, meta, work_dir: Path, video_path: Pat
     task.cover_path = str(cover_path)
     store.upsert(task)
 
+    if task.source_kind == "local":
+        (work_dir / "title.txt").write_text(task.title_zh, encoding="utf-8")
+        (work_dir / "desc.txt").write_text(task.desc_zh, encoding="utf-8")
+        return
     task.status = "translating"
     store.upsert(task)
     from screator.translation.tasks import prepare

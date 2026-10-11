@@ -596,7 +596,7 @@ class AcfunTests(unittest.TestCase):
             db.commit()
         migrated = TaskStore(path)
         try:
-            self.assertEqual(migrated._conn.execute("PRAGMA user_version").fetchone()[0], 5)
+            self.assertEqual(migrated._conn.execute("PRAGMA user_version").fetchone()[0], 6)
             self.assertEqual([tuple(r) for r in migrated._conn.execute("SELECT * FROM task_publications")], rows)
             self.assertTrue(Path(str(path) + ".pre-v5.bak").is_file())
             self.assertEqual(migrated._conn.execute("PRAGMA foreign_key_check").fetchall(), [])

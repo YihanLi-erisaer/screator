@@ -53,6 +53,8 @@ class DesktopService:
         self.owner_lock.__enter__()
         try:
             self.store = TaskStore(paths.root / "data/tasks.sqlite", self.emit)
+            from screator.materials import MaterialLibrary
+            self.materials = MaterialLibrary(paths.root / "materials", self.store)
             history_transfer.initialize(self.store)
             self.accounts = AccountService(paths.root, self.store, self.emit)
             self.data_center = DataCenter(self.store, self.accounts)
@@ -61,6 +63,7 @@ class DesktopService:
             self.douyin = DouyinService(self.store, self.config, self.emit)
             self.acfun = AcfunService(self.store, self.config, self.emit)
             self.scheduler = Scheduler(self.store, self.config, self.emit, self.accounts, self.douyin, self.acfun)
+            self.scheduler.materials = self.materials
         except BaseException:
             self.owner_lock.__exit__(None, None, None)
             raise
@@ -140,6 +143,10 @@ class DesktopService:
         if self.scheduler.closing and method not in ("system.prepare_shutdown", "system.shutdown_status"):
             raise AppError("应用正在退出。")
         handlers = {
+            "materials.libraries": self.materials.libraries, "materials.create_library": self.materials.create,
+            "materials.list": self.materials.list, "materials.rename": self.materials.rename,
+            "materials.delete": self.materials.delete, "materials.open": self.materials.open,
+            "materials.download": self.create_download,
             "system.health": self.health, "system.diagnostics": self.diagnostics,
             "system.resources": self.resource_monitor.snapshot,
             "settings.get": self.config.public, "settings.status": self.config.service_status,
@@ -193,8 +200,8 @@ class DesktopService:
         return handler(**params)
 
     def health(self):
-        capabilities = ["single_url", "account_lanes", "graceful_shutdown", "local_translation_v1", "douyin_sync_v1", "acfun_sync_v1"]
-        return {"protocol_version": 2, "schema_version": 5, "account_limit": 5,
+        capabilities = ["single_url", "account_lanes", "graceful_shutdown", "local_translation_v1", "douyin_sync_v1", "acfun_sync_v1", "materials_v1", "local_publish_v1"]
+        return {"protocol_version": 2, "schema_version": 6, "account_limit": 5,
                 "capabilities": capabilities,
                 "migration_notes": self.migration_notes, "version": __version__,
                 "data_dir": str(self.paths.root)}
@@ -250,6 +257,8 @@ class DesktopService:
         def action():
             self.ensure_inactive(task_id)
             task = self.task(task_id)
+            if task.source_kind != "youtube":
+                raise AppError("只有 YouTube 搬运任务可以重新翻译。")
             if task.status != "ready":
                 raise AppError("只能重新翻译尚未投稿且已准备好的任务。")
             record = self.store.translation(task_id) or {}
@@ -364,12 +373,24 @@ class DesktopService:
             return result
 
     def create(self, url, operation_id, account_id=None, mode="preview", sync_douyin=False, douyin_account_id=None, douyin_binding_revision=None,
-               sync_acfun=False, acfun_account_id=None, acfun_binding_revision=None):
+               sync_acfun=False, acfun_account_id=None, acfun_binding_revision=None,
+               local_path=None, title="", description=""):
         if type(sync_douyin) is not bool: raise AppError("同步抖音必须为开关值。")
         if type(sync_acfun) is not bool: raise AppError("同步 AcFun 必须为开关值。")
         dy_account = ac_account = None
         ac_tags = None
-        video_id, canonical = parse_single_video_url(url)
+        if local_path is not None:
+            from screator.materials import EXTENSIONS
+            path = Path(local_path)
+            if not path.is_absolute() or not path.is_file() or path.suffix.lower() not in EXTENSIONS["video"]:
+                raise AppError("请选择一个存在的本地视频文件。")
+            if not isinstance(title, str) or not title.strip() or len(title.strip()) > 80:
+                raise AppError("请填写 1 至 80 字的标题。")
+            if not isinstance(description, str) or len(description) > (1000 if sync_acfun else 2000):
+                raise AppError("简介超出平台长度限制。")
+            video_id, canonical = "local-" + uuid.uuid4().hex, ""
+        else:
+            video_id, canonical = parse_single_video_url(url)
         if mode not in ("preview", "auto"):
             raise AppError("任务模式无效。")
         if not account_id or not isinstance(account_id, str):
@@ -387,7 +408,7 @@ class DesktopService:
                 if self.config.values["acfun_channel_id"]:
                     self.acfun.validate_channel(self.config.values["acfun_channel_id"])
             account = self.store.account(account_id)
-            if self.translation_jobs.active():
+            if local_path is None and self.translation_jobs.active():
                 raise AppError("请等待翻译组件操作结束后创建任务。")
             if mode == "auto" and account["auth_state"] != "valid":
                 self.accounts.verify(account_id)
@@ -402,6 +423,10 @@ class DesktopService:
                 return {"task_id": old.task_id, "account_id": account_id, "created": False, "status": old.status}
             task = Task(video_id, canonical, "pending", task_id=str(uuid.uuid4()), account_id=account_id,
                         account_uid_snapshot=account["uid"], account_name_snapshot=account["nickname"] or account["uid"])
+            if local_path is not None:
+                task.source_kind, task.local_path = "local", str(path.resolve())
+                task.title_orig = task.title_zh = title.strip()
+                task.desc_orig = task.desc_zh = description
             self.store.upsert(task)
             publications.ensure_bili(self.store, task)
             if sync_douyin:
@@ -427,9 +452,28 @@ class DesktopService:
             self.scheduler.add(task, mode)
             return {"task_id": task.task_id, "account_id": account_id, "created": True, "status": task.status}
         params = {"url": canonical, "account_id": account_id, "mode": mode}
+        if local_path is not None:
+            params.update(local_path=str(path.resolve()), title=title, description=description)
         if sync_douyin: params.update(sync_douyin=True, douyin_account_id=douyin_account_id, douyin_binding_revision=douyin_binding_revision)
         if sync_acfun: params.update(sync_acfun=True, acfun_account_id=acfun_account_id, acfun_binding_revision=acfun_binding_revision)
         return self.operation(operation_id, "tasks.create", action, params, preflight)
+
+    def create_download(self, url, library_id, asset_type, operation_id):
+        from screator.materials import validate_url, EXTENSIONS
+        url = validate_url(url)
+        self.materials.folder(library_id)
+        if asset_type not in EXTENSIONS:
+            raise AppError("请选择视频、图片或音频。")
+        def action():
+            identity = str(uuid.uuid4())
+            task = Task("material-" + identity, url, "pending", task_id=identity,
+                        source_kind="material", library_id=library_id, asset_type=asset_type,
+                        title_orig=url, account_name_snapshot="素材下载")
+            self.store.upsert(task)
+            self.scheduler.add(task, "download")
+            return {"created": True, "task_id": identity}
+        return self.operation(operation_id, "materials.download", action,
+                              {"url": url, "library_id": library_id, "asset_type": asset_type})
 
     def bind_legacy(self, task_id, account_id):
         with self.mutation, self.store.transaction():
@@ -578,7 +622,7 @@ class DesktopService:
                 record = self.store.translation(task_id) or {}
                 record["config_snapshot"] = {k: self.config.values[k] for k in DEFAULTS}
                 self.store.save_translation(task, record)
-            self.scheduler.add(task, "preview", settings)
+            self.scheduler.add(task, "download" if task.source_kind == "material" else "preview", settings)
             return {"queued": True}
         return self.operation(operation_id, "tasks.retry", action, {"task_id": task_id, "use_current_translation_settings": use_current_translation_settings})
 
@@ -760,10 +804,13 @@ class DesktopService:
             task.metadata_revision += 1
             task.title_zh = title.strip().replace("\n", " ")
             body = re.split(r"\n\n————————\n(?:原标题|原作者)：", description, maxsplit=1)[0]
-            task.desc_zh = translate.build_description(body, task.uploader, desc_limit)
+            task.desc_zh = description if task.source_kind == "local" else translate.build_description(body, task.uploader, desc_limit)
             record = self.store.translation(task_id) or {}
             record.update(state="edited", user_edited=True, description=body)
-            self.store.save_translation(task, record)
+            if task.source_kind == "local":
+                self.store.upsert(task)
+            else:
+                self.store.save_translation(task, record)
             p = publications.for_platform(self.store, task.task_id, "bilibili")
             if p: publications.change(self.store, p["publication_id"], text=task.title_zh)
             if ac and ac["status"] == "ready":
@@ -956,7 +1003,7 @@ class DesktopService:
                 raise AppError("请选择另一个有效项目的数据目录。")
             with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as old:
                 version = old.execute("PRAGMA user_version").fetchone()[0]
-                if version > 5:
+                if version > 6:
                     raise AppError("不支持的来源数据库版本。")
                 old.row_factory = sqlite3.Row
                 rows = [dict(r) for r in old.execute("SELECT * FROM tasks")]

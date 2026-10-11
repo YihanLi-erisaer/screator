@@ -11,6 +11,10 @@ export interface Publication {
   snapshot?: string;
 }
 export interface Task {
+  source_kind?: "youtube" | "local" | "material";
+  local_path?: string;
+  library_id?: string;
+  asset_type?: string;
   imported_history?: boolean;
   publications?: Publication[];
   task_id: string;
@@ -115,6 +119,7 @@ export interface ResourceSnapshot {
   }[];
 }
 export const labels: Record<string, string> = {
+  downloaded: "下载完成",
   partial_success: "部分已提交",
   completed_with_abandon: "已结束（部分放弃）",
   pending_assets: "等待共享素材",
@@ -151,6 +156,7 @@ export const retryable = (task: Task) =>
   ["failed", "cancelled", "interrupted"].includes(task.status);
 export const active = (task: Task) =>
   ![
+    "downloaded",
     "ready",
     "submitted",
     "failed",

@@ -4,7 +4,7 @@ test("data center loads account metrics and pages through recorded submissions",
   await page.setViewportSize({ width: 1024, height: 680 });
   await page.goto("/?preview&accounts=2&populated&manyTasks&slowData");
   const nav = page.getByRole("navigation", { name: "主导航" }).getByRole("button");
-  await expect(nav).toHaveText(["任务中心", "投稿记录", "数据中心", "账号与连接", "设置"]);
+  await expect(nav).toHaveText(["任务中心", "素材管理", "投稿记录", "数据中心", "账号与连接", "设置"]);
   await page.getByRole("button", { name: "数据中心", exact: true }).click();
   await expect(page.getByRole("status", { name: "正在加载稿件数据" })).toBeVisible();
   await expect(page.locator(".data-account-card")).toHaveCount(2);
@@ -307,6 +307,7 @@ test("AcFun login enables task selection without an account page switch", async 
   await expect(page.locator(".status-heading").filter({ hasText: "AcFun 同步投稿" })).toContainText("已连接");
   await page.getByRole("button", { name: "任务中心", exact: true }).click();
   await page.getByRole("button", { name: /新建任务/ }).click();
+  await page.getByRole("tab", { name: "同步投稿" }).click();
   await expect(page.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeEnabled();
 });
 
@@ -323,6 +324,7 @@ test("unconnected Douyin and AcFun show status without error toasts", async ({ p
 
   await page.getByRole("button", { name: "任务中心", exact: true }).click();
   await page.getByRole("button", { name: /新建任务/ }).click();
+  await page.getByRole("tab", { name: "同步投稿" }).click();
   const dialog = page.getByRole("dialog", { name: "新建任务" });
   await expect(dialog.getByRole("checkbox", { name: /同步上传抖音/ })).toBeDisabled();
   await expect(dialog.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeDisabled();
@@ -332,6 +334,7 @@ test("unconnected Douyin and AcFun show status without error toasts", async ({ p
 test("new task explains a stale AcFun backend without showing its obsolete error", async ({ page }) => {
   await page.goto("/?preview&accounts=1&acfun=1&acfunLegacyWorker");
   await page.getByRole("button", { name: /新建任务/ }).click();
+  await page.getByRole("tab", { name: "同步投稿" }).click();
   const dialog = page.getByRole("dialog", { name: "新建任务" });
   await expect(dialog.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeDisabled();
   await expect(dialog).toContainText("AcFun 账号已登录，但后台仍使用旧版配置。请使用最新构建，完整退出并重新打开应用后重试。");
@@ -401,6 +404,7 @@ test("empty workspace, preview default, and modal keyboard focus", async ({
   await page.goto("/?preview&accounts=5");
   await expect(page.getByText("你的下一条视频，从这里开始")).toBeVisible();
   await page.getByRole("button", { name: /新建任务/ }).click();
+  await page.getByRole("tab", { name: "同步投稿" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("radio").first()).toBeChecked();
@@ -420,6 +424,7 @@ test("errors appear as dismissible floating toasts for five seconds", async ({ p
   await page.goto("/?preview&accounts=1");
   await page.clock.install();
   await page.getByRole("button", { name: /新建任务/ }).click();
+  await page.getByRole("tab", { name: "同步投稿" }).click();
   const dialog = page.getByRole("dialog", { name: "新建任务" });
   await dialog.getByRole("textbox").fill("https://youtu.be/abcdefghijk");
   await dialog.getByRole("checkbox", { name: /我拥有该视频的版权/ }).check();
@@ -613,6 +618,7 @@ test("select popups remain visible beyond clipped cards and inside dialogs", asy
   await page.setViewportSize({ width: 1024, height: 680 });
   await page.getByRole("button", { name: "任务中心", exact: true }).click();
   await page.getByRole("button", { name: /新建任务/ }).click();
+  await page.getByRole("tab", { name: "同步投稿" }).click();
   const dialog = page.getByRole("dialog", { name: "新建任务" });
   await dialog.getByRole("combobox", { name: "目标 Bilibili 账号" }).click();
   const dialogMenu = dialog.getByRole("listbox", { name: "目标 Bilibili 账号" });

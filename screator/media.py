@@ -518,10 +518,13 @@ def process_cover(src: Path, dest: Path, width: int, height: int) -> Path:
 def extract_frame_cover(video: Path, dest: Path) -> Path:
     require_ffmpeg()
     dest.parent.mkdir(parents=True, exist_ok=True)
+    info = probe_brief(video) or {}
+    duration = _positive_float(info.get("duration"))
+    position = min(3, duration / 2) if duration else 0
     _run_ffmpeg(
         [
             "-ss",
-            "3",
+            str(position),
             "-i",
             str(video),
             "-frames:v",
@@ -555,4 +558,5 @@ def _run_ffmpeg(args: list[str]) -> None:
     cmd = [ffmpeg_tool("ffmpeg"), "-nostdin", "-y", "-hide_banner", "-loglevel", "error", "-stats", *args]
     result = process_manager.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     if result.returncode != 0:
-        raise AppError("ffmpeg 失败，请查看上方输出。")
+        detail = (result.stderr or b"").decode("utf-8", errors="replace")[-2000:]
+        raise AppError("ffmpeg 失败：" + detail)

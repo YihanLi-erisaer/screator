@@ -141,6 +141,7 @@ def for_platform(store, task_id, platform):
 def project(store, task_id):
     with store.transaction():
         pubs = items(store, task_id)
+        if not pubs: return
         states = {p["status"] for p in pubs}
         if "submission_unknown" in states: status = "submission_unknown"
         elif states <= TERMINAL: status = "submitted" if states == {"submitted"} else "completed_with_abandon"
@@ -161,6 +162,7 @@ def project(store, task_id):
 
 
 def can_cleanup(store, task_id):
+    if store.require(task_id).source_kind != "youtube": return False
     pubs = items(store, task_id)
     return bool(pubs) and all(p["status"] in TERMINAL and not p["retain_assets"] for p in pubs)
 

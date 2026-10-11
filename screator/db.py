@@ -10,11 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from screator.exceptions import AppError
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 STATUSES = ("pending", "fetching_meta", "downloading", "queued_download", "queued_validation",
             "validating", "queued_upload", "processing_cover", "translating", "ready", "uploading",
             "submitted", "failed", "cancel_requested", "cancelled", "interrupted", "submission_unknown",
-            "partial_success", "completed_with_abandon")
+            "partial_success", "completed_with_abandon", "downloaded")
 
 
 @dataclass
@@ -44,6 +44,10 @@ class Task:
     wait_reason: str = ""
     cleanup_state: str = "none"
     cancel_requested: int = 0
+    source_kind: str = "youtube"
+    local_path: str = ""
+    library_id: str = ""
+    asset_type: str = "video"
 
 
 class TaskStore:
@@ -71,7 +75,7 @@ class TaskStore:
                 raise AppError("检测到其他分支的同版本数据库，请先进行联合迁移；原库未修改。")
         if version < SCHEMA_VERSION:
             if db_path.stat().st_size:
-                suffix = ".pre-v5.bak" if version == 4 else (".pre-desktop.bak" if version == 0 else (".pre-v4.bak" if version == 3 else ".pre-v3.bak"))
+                suffix = ".pre-v6.bak" if version == 5 else (".pre-v5.bak" if version == 4 else (".pre-desktop.bak" if version == 0 else (".pre-v4.bak" if version == 3 else ".pre-v3.bak")))
                 backup_path = Path(str(db_path) + suffix)
                 if backup_path.exists():
                     backup_path = Path(str(backup_path) + "." + uuid.uuid4().hex)
@@ -82,12 +86,19 @@ class TaskStore:
                 if version < 4:
                     self._migrate()
                     publications.migrate(self)
-                publications.migrate_acfun(self)
+                if version < 5:
+                    publications.migrate_acfun(self)
             except BaseException:
                 self._conn.close()
                 raise
-        # Additive indexes are safe for existing schema-v5 profiles too.
+        # Version six adds task source/retention semantics; older workers must not open it.
         with self.transaction() as conn:
+            columns = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
+            for name, default in (("source_kind", "youtube"), ("local_path", ""), ("library_id", ""), ("asset_type", "video")):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
+            conn.execute("PRAGMA user_version=6")
+            conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(6,?)", (_now(),))
             conn.execute("CREATE INDEX IF NOT EXISTS ix_task_updated ON tasks(updated_at DESC,task_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_task_status_updated ON tasks(status,updated_at DESC,task_id)")
             conn.execute("""CREATE INDEX IF NOT EXISTS ix_job_session_state ON desktop_jobs(
