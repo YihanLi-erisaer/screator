@@ -4,11 +4,12 @@ use serde_json::{json, Value};
 use std::{collections::HashMap, fs::OpenOptions, io::{BufRead, BufReader, Write}, path::PathBuf,
     process::{Child, ChildStdin, Command, Stdio}, sync::{Arc, Mutex, OnceLock, atomic::{AtomicBool, AtomicU64, Ordering}}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use tauri::{Emitter, Manager, State};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 
 type Pending = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>;
 static SHELL_LOG: OnceLock<PathBuf> = OnceLock::new();
 static EXPECTED_EXIT: AtomicBool = AtomicBool::new(false);
+static FRONTEND_READY_LOGGED: AtomicBool = AtomicBool::new(false);
 
 fn log_shell(message: &str) {
     let Some(path) = SHELL_LOG.get() else { return };
@@ -24,6 +25,82 @@ struct Worker {
     next: AtomicU64,
     #[cfg(windows)]
     job: Mutex<Option<usize>>,
+}
+
+#[derive(Clone)]
+enum WorkerStatus {
+    Starting,
+    Ready(Arc<Worker>),
+    Failed(String),
+    Stopped,
+}
+
+#[derive(Clone)]
+struct WorkerManager {
+    status: Arc<watch::Sender<WorkerStatus>>,
+    closing: Arc<Mutex<bool>>,
+    startup: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
+}
+
+impl WorkerManager {
+    fn new() -> Self {
+        let (status, _) = watch::channel(WorkerStatus::Starting);
+        Self { status: Arc::new(status), closing: Arc::new(Mutex::new(false)),
+            startup: Arc::new(Mutex::new(None)) }
+    }
+
+    fn publish(&self, result: Result<Worker, String>) {
+        let closing = self.closing.lock().unwrap();
+        if *closing {
+            drop(closing);
+            if let Ok(worker) = result {
+                force_stop_worker(take_worker_process(&worker));
+            }
+            return;
+        }
+        let status = match result {
+            Ok(worker) => WorkerStatus::Ready(Arc::new(worker)),
+            Err(error) => WorkerStatus::Failed(error),
+        };
+        self.status.send_replace(status);
+    }
+
+    async fn get(&self) -> Result<Arc<Worker>, String> {
+        let mut receiver = self.status.subscribe();
+        let wait = async {
+            loop {
+                let current = receiver.borrow_and_update().clone();
+                match current {
+                    WorkerStatus::Ready(worker) => return Ok(worker),
+                    WorkerStatus::Failed(error) => return Err(format!("后台启动失败：{error}")),
+                    WorkerStatus::Stopped => return Err("后台已停止，请重新启动应用。".into()),
+                    WorkerStatus::Starting => receiver.changed().await
+                        .map_err(|_| "后台启动状态已断开。".to_string())?,
+                }
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(60), wait).await
+            .map_err(|_| "后台启动超过 60 秒，请检查日志后重新启动应用。".to_string())?
+    }
+
+    fn stop(&self) -> Option<WorkerProcess> {
+        let mut closing = self.closing.lock().unwrap();
+        *closing = true;
+        match self.status.send_replace(WorkerStatus::Stopped) {
+            WorkerStatus::Ready(worker) => Some(take_worker_process(&worker)),
+            _ => None,
+        }
+    }
+
+    fn set_startup_thread(&self, thread: std::thread::JoinHandle<()>) {
+        *self.startup.lock().unwrap() = Some(thread);
+    }
+
+    fn join_startup(&self) {
+        if let Some(thread) = self.startup.lock().unwrap().take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 struct WorkerProcess {
@@ -62,8 +139,13 @@ async fn request_worker(worker: &Worker, method: String, params: Value) -> Resul
 }
 
 #[tauri::command]
-async fn backend_request(worker: State<'_, Worker>, method: String, params: Value) -> Result<Value, String> {
-    request_worker(&worker, method, params).await
+async fn backend_request(manager: State<'_, WorkerManager>, method: String, params: Value) -> Result<Value, String> {
+    let health = method == "system.health";
+    if health { log_shell("frontend health request"); }
+    let worker = manager.get().await?;
+    let result = request_worker(&worker, method, params).await;
+    if health { log_shell(if result.is_ok() { "frontend health response" } else { "frontend health failed" }); }
+    result
 }
 
 fn take_worker_process(worker: &Worker) -> WorkerProcess {
@@ -126,7 +208,8 @@ fn close_worker_job(mut process: WorkerProcess) {
 fn close_worker_job(_: WorkerProcess) {}
 
 #[tauri::command]
-async fn finish_close(app: tauri::AppHandle, worker: State<'_, Worker>) -> Result<(), String> {
+async fn finish_close(app: tauri::AppHandle, manager: State<'_, WorkerManager>) -> Result<(), String> {
+    let worker = manager.get().await?;
     let status = request_worker(&worker, "system.shutdown_status".into(), json!({})).await?;
     if status["ready"] != true { return Err("后台仍在收尾，请等待上传完成。".into()); }
     log_shell("confirmed shutdown: worker is ready");
@@ -137,7 +220,7 @@ async fn finish_close(app: tauri::AppHandle, worker: State<'_, Worker>) -> Resul
         Err(error) => log_shell(&format!("shutdown finalization fallback: {error}")),
     }
     EXPECTED_EXIT.store(true, Ordering::Release);
-    let process = take_worker_process(&worker);
+    let process = manager.stop().ok_or("后台已停止，请重新启动应用。")?;
     tauri::async_runtime::spawn_blocking(move || reap_worker(process, deadline)).await
         .map_err(|_| "后台退出任务未完成，请重试。".to_string())?;
     log_shell(&format!("shutdown reap elapsed_ms={}", started.elapsed().as_millis()));
@@ -147,12 +230,13 @@ async fn finish_close(app: tauri::AppHandle, worker: State<'_, Worker>) -> Resul
 }
 
 #[tauri::command]
-async fn force_close(app: tauri::AppHandle, worker: State<'_, Worker>) -> Result<(), String> {
+async fn force_close(app: tauri::AppHandle, manager: State<'_, WorkerManager>) -> Result<(), String> {
     let started = Instant::now();
     log_shell("forced shutdown: stopping worker process tree; in-flight submissions need review");
-    let process = take_worker_process(&worker);
-    tauri::async_runtime::spawn_blocking(move || force_stop_worker(process)).await
-        .map_err(|_| "无法停止后台进程，请重试。".to_string())?;
+    if let Some(process) = manager.stop() {
+        tauri::async_runtime::spawn_blocking(move || force_stop_worker(process)).await
+            .map_err(|_| "无法停止后台进程，请重试。".to_string())?;
+    }
     EXPECTED_EXIT.store(true, Ordering::Release);
     record_shutdown_smoke("forced", started.elapsed());
     app.exit(0);
@@ -161,6 +245,9 @@ async fn force_close(app: tauri::AppHandle, worker: State<'_, Worker>) -> Result
 
 #[tauri::command]
 fn frontend_ready(app: tauri::AppHandle, health: Value) {
+    if !FRONTEND_READY_LOGGED.swap(true, Ordering::AcqRel) {
+        log_shell("frontend health ready");
+    }
     if smoke_enabled() {
         if let Some(report) = std::env::var_os("SCREATOR_NATIVE_SMOKE_REPORT") {
             let value = json!({"ok":health["protocol_version"] == 2,"webview_loaded":true,
@@ -169,14 +256,17 @@ fn frontend_ready(app: tauri::AppHandle, health: Value) {
             if let Ok(mode) = std::env::var("SCREATOR_NATIVE_SMOKE_SHUTDOWN") {
                 let handle = app.clone();
                 tauri::async_runtime::spawn(async move {
-                    let worker = handle.state::<Worker>();
+                    let manager = handle.state::<WorkerManager>();
                     let result = if mode == "graceful" {
-                        match request_worker(&worker, "system.prepare_shutdown".into(), json!({})).await {
-                            Ok(_) => finish_close(handle.clone(), worker).await,
+                        match manager.get().await {
+                            Ok(worker) => match request_worker(&worker, "system.prepare_shutdown".into(), json!({})).await {
+                                Ok(_) => finish_close(handle.clone(), manager).await,
+                                Err(error) => Err(error),
+                            },
                             Err(error) => Err(error),
                         }
                     } else if mode == "forced" {
-                        force_close(handle.clone(), worker).await
+                        force_close(handle.clone(), manager).await
                     } else { Err("无效退出测试模式".into()) };
                     if let Err(error) = result {
                         log_shell(&format!("shutdown smoke failed: {error}"));
@@ -250,20 +340,23 @@ fn attach_job(child: &Child) -> Result<usize, String> {
 fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Error>> {
     let project = std::env::var_os("SCREATOR_PROJECT_ROOT").map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf());
+    let data = if let Some(override_dir) = std::env::var_os("SCREATOR_DESKTOP_DATA") {
+        PathBuf::from(override_dir)
+    } else {
+        let data_parent = app.path().local_data_dir()?.join("StarDazz");
+        let current_data = data_parent.join("screator");
+        let legacy_data = data_parent.join("yt2bili");
+        if !current_data.exists() && legacy_data.exists() { legacy_data } else { current_data }
+    };
+    let log_dir = data.join("logs");
+    std::fs::create_dir_all(&log_dir)?;
+    let _ = SHELL_LOG.set(log_dir.join("desktop-shell.log"));
+    log_shell("desktop starting");
     let resources = if cfg!(debug_assertions) {
         std::env::var_os("SCREATOR_RESOURCES").map(PathBuf::from).unwrap_or_else(|| project.clone())
     } else {
         app.path().resource_dir()?
     };
-    let data_parent = app.path().local_data_dir()?.join("StarDazz");
-    let current_data = data_parent.join("screator");
-    let legacy_data = data_parent.join("yt2bili");
-    let data = std::env::var_os("SCREATOR_DESKTOP_DATA").map(PathBuf::from)
-        .unwrap_or_else(|| if !current_data.exists() && legacy_data.exists() { legacy_data } else { current_data });
-    let log_dir = data.join("logs");
-    std::fs::create_dir_all(&log_dir)?;
-    let _ = SHELL_LOG.set(log_dir.join("desktop-shell.log"));
-    log_shell("desktop starting");
     let mut command = if !cfg!(debug_assertions) {
         Command::new(resources.join("worker").join(if cfg!(windows) { "screator-worker.exe" } else { "screator-worker" }))
     } else if let Some(frozen) = std::env::var_os("SCREATOR_WORKER") {
@@ -288,8 +381,18 @@ fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Er
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
+    if smoke_enabled() {
+        if let Some(milliseconds) = std::env::var("SCREATOR_NATIVE_SMOKE_SPAWN_DELAY_MS").ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| (1..=15_000).contains(value)) {
+            log_shell(&format!("smoke worker spawn delay_ms={milliseconds}"));
+            std::thread::sleep(Duration::from_millis(milliseconds));
+        }
+    }
+    log_shell("worker spawn begin");
+    let spawn_started = Instant::now();
     let mut child = command.spawn()?;
-    log_shell(&format!("worker spawned pid={}", child.id()));
+    log_shell(&format!("worker spawned pid={} spawn_ms={}", child.id(), spawn_started.elapsed().as_millis()));
     #[cfg(windows)]
     let job = match attach_job(&child) { Ok(job) => job, Err(error) => { let _ = child.kill(); return Err(error.into()); } };
     let stdin = child.stdin.take();
@@ -304,6 +407,9 @@ fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Er
         for line in BufReader::new(stdout).lines() {
             let Ok(line) = line else { break };
             let Ok(value) = serde_json::from_str::<Value>(&line) else { continue };
+            if value.get("event").and_then(Value::as_str) == Some("worker.ready") {
+                log_shell("worker ready");
+            }
             if let Some(id) = value.get("request_id").and_then(Value::as_str) {
                 if let Some(sender) = replies.lock().unwrap().remove(id) {
                     let answer = if let Some(error) = value.get("error") {
@@ -338,8 +444,28 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            app.manage(start_worker(app.handle())?);
+            app.manage(WorkerManager::new());
+            let manager = app.state::<WorkerManager>().inner().clone();
+            let handle = app.handle().clone();
+            let startup = std::thread::Builder::new().name("screator-worker-start".into()).spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| start_worker(&handle)))
+                    .map_err(|_| "后台启动时发生内部错误。".to_string())
+                    .and_then(|result| result.map_err(|error| error.to_string()));
+                if let Err(error) = &result { log_shell(&format!("worker startup failed: {error}")); }
+                manager.publish(result);
+            })?;
+            app.state::<WorkerManager>().set_startup_thread(startup);
             if smoke_enabled() {
+                if let Some(milliseconds) = std::env::var("SCREATOR_NATIVE_SMOKE_EARLY_EXIT_MS").ok()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .filter(|value| (1..=5_000).contains(value)) {
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(milliseconds)).await;
+                        EXPECTED_EXIT.store(true, Ordering::Release);
+                        handle.exit(0);
+                    });
+                }
                 if let Some(window) = app.get_webview_window("main") {
                     if smoke_inspect_seconds().is_some() { let _ = window.show(); }
                     else { let _ = window.hide(); }
@@ -360,8 +486,11 @@ fn main() {
     app.run(|app, event| {
         if let tauri::RunEvent::Exit = event {
             log_shell(if EXPECTED_EXIT.load(Ordering::Acquire) { "desktop expected exit" } else { "desktop unexpected event-loop exit" });
-            let worker = app.state::<Worker>();
-            force_stop_worker(take_worker_process(&worker));
+            let manager = app.state::<WorkerManager>();
+            if let Some(process) = manager.stop() {
+                force_stop_worker(process);
+            }
+            manager.join_startup();
         }
     });
 }

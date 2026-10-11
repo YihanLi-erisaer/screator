@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import argparse
 import json
 import os
+import re
 import sys
 import subprocess
 import tempfile
@@ -29,7 +30,40 @@ def isolated_data_dir():
                 time.sleep(0.2)
 
 
-def inspect_process_tree(command, environment, folder, seconds, release):
+def window_responds(pid):
+    """Probe the native window thread while the test worker is delayed."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
+                                           wintypes.LPARAM, wintypes.UINT, wintypes.UINT,
+                                           ctypes.POINTER(ctypes.c_size_t)]
+    user32.SendMessageTimeoutW.restype = wintypes.LPARAM
+    windows = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def collect(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        title = ctypes.create_unicode_buffer(128)
+        user32.GetWindowTextW(hwnd, title, len(title))
+        if owner.value == pid and title.value == "screator":
+            windows.append(hwnd)
+        return True
+
+    user32.EnumWindows(collect, 0)
+    for hwnd in windows:
+        result = ctypes.c_size_t()
+        if user32.SendMessageTimeoutW(hwnd, 0, 0, 0, 0x0002, 1000, ctypes.byref(result)):
+            return True
+    return False
+
+
+def inspect_process_tree(command, environment, folder, seconds, release, startup_delay_ms=0,
+                         early_exit_ms=0):
     import psutil
 
     def is_active(child):
@@ -42,6 +76,8 @@ def inspect_process_tree(command, environment, folder, seconds, release):
     with subprocess.Popen(command, env=environment, cwd=folder, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                           **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {})) as process:
         try:
+            launched = time.monotonic()
+            responsive_before_worker = False
             owner = psutil.Process(process.pid)
             root_row = {"pid": owner.pid, "parent_pid": owner.ppid(), "name": owner.name()}
             deadline = time.monotonic() + 60 + seconds
@@ -58,6 +94,9 @@ def inspect_process_tree(command, environment, folder, seconds, release):
                         rows.setdefault(identity, row)
                     except psutil.NoSuchProcess:
                         continue
+                if (startup_delay_ms and not early_exit_ms and not responsive_before_worker
+                        and time.monotonic() - launched < startup_delay_ms / 1000):
+                    responsive_before_worker = window_responds(process.pid)
                 if time.monotonic() >= deadline:
                     raise subprocess.TimeoutExpired(command, 60 + seconds)
                 time.sleep(0.1)
@@ -71,10 +110,14 @@ def inspect_process_tree(command, environment, folder, seconds, release):
             assert not alive, f"Native smoke left child processes running: {[child.pid for child in alive]}"
             proof = {"root_pid": owner.pid, "processes": [root_row, *rows.values()],
                      "descendants_exited": True, "source": "observed native process descendants"}
+            if startup_delay_ms and not early_exit_ms:
+                assert responsive_before_worker, "Native window did not respond before worker creation"
+                proof["responsive_before_worker"] = True
             if release and os.name == "nt" and process.returncode == 0:
                 assert root_row["name"].lower() == "screator.exe", proof
                 names = {row["name"].lower() for row in rows.values()}
-                assert {"screator-worker.exe", "msedgewebview2.exe"} <= names, proof
+                required = {"msedgewebview2.exe"} if early_exit_ms else {"screator-worker.exe", "msedgewebview2.exe"}
+                assert required <= names, proof
             return subprocess.CompletedProcess(command, process.returncode, output, error), proof
         finally:
             # Only touch descendants observed beneath this isolated smoke app.
@@ -94,11 +137,20 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--release", type=Path)
 parser.add_argument("--shutdown", choices=("graceful", "forced"), help="Exercise the real native close command after frontend startup")
 parser.add_argument("--inspect-seconds", type=int, default=0, help="Show the isolated smoke app for 1-120 seconds and inspect its process tree")
+parser.add_argument("--startup-delay-ms", type=int, default=0,
+                    help="Windows regression check: delay worker creation and probe the native window thread")
+parser.add_argument("--early-exit-ms", type=int, default=0,
+                    help="Exit during the delayed worker start and check that the worker does not survive")
 args = parser.parse_args()
 if not 0 <= args.inspect_seconds <= 120:
     parser.error("--inspect-seconds must be between 0 and 120")
 if args.inspect_seconds and args.shutdown:
     parser.error("--inspect-seconds cannot be combined with --shutdown")
+if args.startup_delay_ms and (os.name != "nt" or not 2000 <= args.startup_delay_ms <= 15000):
+    parser.error("--startup-delay-ms requires Windows and a delay of 2000-15000 ms")
+if args.early_exit_ms and (args.shutdown or args.inspect_seconds
+                           or not 100 <= args.early_exit_ms <= args.startup_delay_ms - 1000):
+    parser.error("--early-exit-ms requires a startup delay at least 1000 ms longer, without shutdown or inspection")
 root = Path(__file__).resolve().parent.parent
 executable = args.release.resolve() if args.release else root / "desktop/src-tauri/target/debug" / ("screator.exe" if os.name == "nt" else "screator")
 with isolated_data_dir() as folder:
@@ -111,6 +163,14 @@ with isolated_data_dir() as folder:
         # A separate WebView2 profile also prevents sharing browser processes
         # with an already running installed app during process-tree inspection.
         environment["WEBVIEW2_USER_DATA_FOLDER"] = str(Path(folder) / "webview2")
+    if args.startup_delay_ms:
+        environment["SCREATOR_NATIVE_SMOKE_SPAWN_DELAY_MS"] = str(args.startup_delay_ms)
+    else:
+        environment.pop("SCREATOR_NATIVE_SMOKE_SPAWN_DELAY_MS", None)
+    if args.early_exit_ms:
+        environment["SCREATOR_NATIVE_SMOKE_EARLY_EXIT_MS"] = str(args.early_exit_ms)
+    else:
+        environment.pop("SCREATOR_NATIVE_SMOKE_EARLY_EXIT_MS", None)
     if args.shutdown:
         environment["SCREATOR_NATIVE_SMOKE_SHUTDOWN"] = args.shutdown
     else:
@@ -123,20 +183,27 @@ with isolated_data_dir() as folder:
     command = [str(executable), "--smoke-test"]
     process_tree = None
     if args.inspect_seconds or os.name == "nt":
-        result, process_tree = inspect_process_tree(command, environment, folder, args.inspect_seconds, bool(args.release))
+        result, process_tree = inspect_process_tree(command, environment, folder, args.inspect_seconds,
+                                                    bool(args.release), args.startup_delay_ms, args.early_exit_ms)
     else:
         result = subprocess.run(command, env=environment, cwd=folder, timeout=60, capture_output=True,
                                 **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}))
     if result.returncode:
         raise RuntimeError(result.stderr.decode("utf-8", errors="replace"))
-    value = json.loads(report.read_text(encoding="utf-8"))
-    assert value.get("ok") and value.get("protocol_version") == 2, value
     shell_log = (Path(folder) / "logs/desktop-shell.log").read_text(encoding="utf-8")
     assert "worker spawned pid=" in shell_log and "desktop expected exit" in shell_log, shell_log
-    if args.shutdown:
-        assert value["shutdown"]["mode"] == args.shutdown and value["shutdown"]["completed"], value
-        if args.shutdown == "graceful":
-            assert "shutdown resources finalized" in shell_log, shell_log
+    if args.early_exit_ms:
+        import psutil
+        worker_pid = int(re.search(r"worker spawned pid=(\d+)", shell_log).group(1))
+        assert not psutil.pid_exists(worker_pid), f"Worker survived early exit: {worker_pid}"
+        value = {"early_exit_before_worker": True, "worker_exited": True}
+    else:
+        value = json.loads(report.read_text(encoding="utf-8"))
+        assert value.get("ok") and value.get("protocol_version") == 2, value
+        if args.shutdown:
+            assert value["shutdown"]["mode"] == args.shutdown and value["shutdown"]["completed"], value
+            if args.shutdown == "graceful":
+                assert "shutdown resources finalized" in shell_log, shell_log
     if process_tree:
         value["process_tree"] = process_tree
     print(json.dumps(value))
