@@ -3,6 +3,7 @@ import sqlite3
 import threading
 import unittest
 import uuid
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -240,7 +241,7 @@ class SocialTests(unittest.TestCase):
         self.service.export_history(str(path))
         for secret in ("private-access-token", "private-upload-token"):
             self.assertNotIn(secret, contents)
-            self.assertNotIn(secret, path.read_text())
+            self.assertNotIn(secret, path.read_text(encoding="utf-8"))
 
     def test_account_rebinding_and_archive_protect_original_identity(self):
         fake, pub = self.ready("facebook")
@@ -267,8 +268,8 @@ class SocialTests(unittest.TestCase):
     def test_v9_migration_preserves_youtube_and_acfun_attempt_references(self):
         self.ready("twitter")
         path = self.paths.root / "v9.sqlite"
-        with sqlite3.connect(path) as db: self.service.store._conn.backup(db)
-        with sqlite3.connect(path) as db:
+        with closing(sqlite3.connect(path)) as db, db: self.service.store._conn.backup(db)
+        with closing(sqlite3.connect(path)) as db, db:
             db.execute("PRAGMA foreign_keys=OFF")
             db.execute("DELETE FROM task_publications WHERE platform='twitter'")
             db.execute("DROP TABLE social_upload_attempts")

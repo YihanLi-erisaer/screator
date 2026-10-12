@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import uuid
+from contextlib import closing
 
 from screator import publications
 from screator.db import Task
@@ -12,9 +13,7 @@ from test_history_transfer import Vault
 
 class TaskFilterTests(unittest.TestCase):
     def test_all_platforms_combine_with_status_search_and_pagination(self):
-        with tempfile.TemporaryDirectory() as folder:
-            service = DesktopService(AppPaths.default(folder, folder), lambda *_: None, Vault())
-            self.addCleanup(service.close)
+        with tempfile.TemporaryDirectory() as folder, closing(DesktopService(AppPaths.default(folder, folder), lambda *_: None, Vault())) as service:
             task_ids = {}
             for platform in sorted(publications.PLATFORMS):
                 for index, status in enumerate(("ready", "downloaded", "failed")):
