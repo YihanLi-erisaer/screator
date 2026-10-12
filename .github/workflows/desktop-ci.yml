@@ -50,7 +50,18 @@ jobs:
       - name: Install Python dependencies and local media tools
         run: |
           python -m pip install -r requirements-desktop-lock.txt -r services/douyin-broker/requirements.txt
-          choco install ffmpeg --yes --no-progress
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            choco install ffmpeg --yes --no-progress
+            if ((Get-Command ffmpeg -ErrorAction SilentlyContinue) -and (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
+              break
+            }
+            if ($attempt -eq 3) {
+              throw "FFmpeg and ffprobe were not installed after three Chocolatey attempts."
+            }
+            Start-Sleep -Seconds 10
+          }
+          ffmpeg -version
+          ffprobe -version
       - name: Backend regression
         env:
           PYTHONIOENCODING: utf-8
