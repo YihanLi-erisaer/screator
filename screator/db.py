@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from screator.exceptions import AppError
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 11
 STATUSES = ("pending", "fetching_meta", "downloading", "queued_download", "queued_validation",
             "validating", "queued_upload", "processing_cover", "translating", "ready", "uploading",
             "submitted", "failed", "cancel_requested", "cancelled", "interrupted", "submission_unknown",
@@ -46,8 +46,11 @@ class Task:
     cancel_requested: int = 0
     source_kind: str = "youtube"
     local_path: str = ""
+    local_cover_path: str = ""
     library_id: str = ""
     asset_type: str = "video"
+    source_image_paths: str = "[]"
+    image_paths: str = "[]"
 
 
 class TaskStore:
@@ -75,7 +78,7 @@ class TaskStore:
                 raise AppError("检测到其他分支的同版本数据库，请先进行联合迁移；原库未修改。")
         if version < SCHEMA_VERSION:
             if db_path.stat().st_size:
-                suffix = ".pre-v6.bak" if version == 5 else (".pre-v5.bak" if version == 4 else (".pre-desktop.bak" if version == 0 else (".pre-v4.bak" if version == 3 else ".pre-v3.bak")))
+                suffix = f".pre-v{version + 1}.bak" if version >= 9 else (".pre-v9.bak" if version == 8 else (".pre-v8.bak" if version == 7 else (".pre-v7.bak" if version == 6 else (".pre-v6.bak" if version == 5 else (".pre-v5.bak" if version == 4 else (".pre-desktop.bak" if version == 0 else (".pre-v4.bak" if version == 3 else ".pre-v3.bak")))))))
                 backup_path = Path(str(db_path) + suffix)
                 if backup_path.exists():
                     backup_path = Path(str(backup_path) + "." + uuid.uuid4().hex)
@@ -99,10 +102,46 @@ class TaskStore:
                     conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
             conn.execute("PRAGMA user_version=6")
             conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(6,?)", (_now(),))
+            if "local_cover_path" not in columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN local_cover_path TEXT NOT NULL DEFAULT ''")
+            conn.execute("PRAGMA user_version=7")
+            conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(7,?)", (_now(),))
+            for name in ("source_image_paths", "image_paths"):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} TEXT NOT NULL DEFAULT '[]'")
+            conn.execute("PRAGMA user_version=8")
+            conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(8,?)", (_now(),))
             conn.execute("CREATE INDEX IF NOT EXISTS ix_task_updated ON tasks(updated_at DESC,task_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_task_status_updated ON tasks(status,updated_at DESC,task_id)")
             conn.execute("""CREATE INDEX IF NOT EXISTS ix_job_session_state ON desktop_jobs(
                 json_extract(payload,'$.owner_session_id'),json_extract(payload,'$.execution_state'))""")
+        if version < 9:
+            from screator.publications import migrate_youtube
+            try:
+                migrate_youtube(self)
+            except BaseException:
+                self._conn.close()
+                raise
+        else:
+            self._conn.execute("PRAGMA user_version=9")
+        if version < 10:
+            from screator.publications import migrate_social
+            try:
+                migrate_social(self)
+            except BaseException:
+                self._conn.close()
+                raise
+        else:
+            self._conn.execute("PRAGMA user_version=10")
+        if version < 11:
+            from screator.publications import migrate_xiaohongshu
+            try:
+                migrate_xiaohongshu(self)
+            except BaseException:
+                self._conn.close()
+                raise
+        else:
+            self._conn.execute("PRAGMA user_version=11")
 
     def _migrate(self):
         with self.transaction():
@@ -301,7 +340,7 @@ class TaskStore:
                 ORDER BY t.updated_at DESC,t.task_id""").fetchall()
             return [Task(**dict(row)) for row in rows]
 
-    def desktop_page(self, *, offset, limit, search, status, account_id, history_statuses=()):
+    def desktop_page(self, *, offset, limit, search, status, account_id, history_statuses=(), platform=""):
         """Filter/count in SQLite; decode only the requested page, including imports."""
         with self._lock:
             where, params = [], []
@@ -317,6 +356,9 @@ class TaskStore:
             if history_statuses:
                 where.append("t.status IN (" + ",".join("?" for _ in history_statuses) + ")")
                 params.extend(history_statuses)
+            if platform:
+                where.append("EXISTS (SELECT 1 FROM task_publications p WHERE p.task_id=t.task_id AND p.platform=?)")
+                params.append(platform)
             matched = "SELECT t.task_id,t.updated_at,'local' AS source FROM tasks t"
             if where:
                 matched += " WHERE " + " AND ".join(where)
@@ -332,6 +374,9 @@ class TaskStore:
                 if status:
                     imported_where.append("json_extract(payload,'$.status')=?")
                     params.append(status)
+                if platform:
+                    imported_where.append("EXISTS (SELECT 1 FROM json_each(payload,'$.publications') p WHERE json_extract(p.value,'$.platform')=?)")
+                    params.append(platform)
                 matched += " UNION ALL SELECT task_id,json_extract(payload,'$.updated_at'),'imported' FROM imported_publishing_history"
                 if imported_where:
                     matched += " WHERE " + " AND ".join(imported_where)

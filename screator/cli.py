@@ -119,7 +119,9 @@ def _dispatch(args, service):
     op = str(uuid.uuid4())
     if args.command == "run":
         result = service.create(args.url, op, args.account, "auto" if args.auto else "preview", sync_douyin=getattr(args, "sync_douyin", False),
-                                sync_acfun=getattr(args, "sync_acfun", False))
+                                sync_acfun=getattr(args, "sync_acfun", False),
+                                sync_youtube=getattr(args, "sync_youtube", False),
+                                sync_social=[{"platform": platform} for platform in ("twitter", "facebook", "tiktok") if getattr(args, "sync_" + platform, False)])
         task_id = result["task_id"]
         if not result["created"]:
             logger.info("已存在同账号任务：%s；不会重复执行。", task_id)
@@ -185,6 +187,9 @@ def _build_parser():
     run.add_argument("url")
     run.add_argument("--account", required=True)
     run.add_argument("--sync-douyin", action="store_true", help="同步到已绑定的抖音账号；需预先配置官方授权服务")
+    for platform in ("twitter", "facebook", "tiktok"):
+        run.add_argument("--sync-" + platform, action="store_true", help="同步到已绑定的 " + platform + "；TikTok 仅支持预览确认")
+    run.add_argument("--sync-youtube", action="store_true", help="同步到桌面版已授权的 YouTube 频道")
     run.add_argument("--sync-acfun", action="store_true", help="同步到已绑定的 AcFun 账号；实验性网页接入，自动模式需配置 AcFun 默认分区 ID")
     mode = run.add_mutually_exclusive_group()
     mode.add_argument("--auto", action="store_true", help="素材准备好后自动投稿")

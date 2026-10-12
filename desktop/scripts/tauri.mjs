@@ -26,6 +26,7 @@ const python = path.join(
 if (!env.SCREATOR_PYTHON && existsSync(python)) env.SCREATOR_PYTHON = python;
 env.SCREATOR_PROJECT_ROOT = root;
 if (process.argv[2] === "dev" && !env.SCREATOR_WORKER) {
+  env.PYTHONDONTWRITEBYTECODE = "1";
   const check = spawnSync(
     env.SCREATOR_PYTHON || python,
     [

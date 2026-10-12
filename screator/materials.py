@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -59,14 +60,17 @@ class MaterialLibrary:
         self.root.mkdir(parents=True, exist_ok=True)
         with store.transaction() as db:
             db.execute("CREATE TABLE IF NOT EXISTS material_libraries(id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE)")
+            if "path" not in {row[1] for row in db.execute("PRAGMA table_info(material_libraries)")}:
+                db.execute("ALTER TABLE material_libraries ADD COLUMN path TEXT NOT NULL DEFAULT ''")
 
     def folder(self, library_id):
         with self.store._lock:
-            row = self.store._conn.execute("SELECT name FROM material_libraries WHERE id=?", (library_id,)).fetchone()
+            row = self.store._conn.execute("SELECT name, path FROM material_libraries WHERE id=?", (library_id,)).fetchone()
         if not row:
             raise AppError("素材库不存在，请重新选择。")
-        path = self.root / safe_name(row[0])
-        if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()) or path.resolve().parent != self.root.resolve() or not path.is_dir():
+        path = Path(row[1]) if row[1] else self.root / safe_name(row[0])
+        if (path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction())
+                or (not row[1] and path.resolve().parent != self.root.resolve()) or not path.is_dir()):
             raise AppError("素材库目录不可用。")
         return path
 
@@ -74,15 +78,27 @@ class MaterialLibrary:
         with self.guard, self.store._lock:
             return {"items": [dict(row) for row in self.store._conn.execute("SELECT * FROM material_libraries ORDER BY name COLLATE NOCASE")], "root": str(self.root)}
 
-    def create(self, name):
-        name = safe_name(name)
+    def create(self, directory):
+        if not isinstance(directory, str) or not directory.strip() or "\x00" in directory:
+            raise AppError("请选择有效的素材库文件夹。")
+        path = Path(directory).expanduser()
+        if (not path.is_absolute() or not path.is_dir() or path.is_symlink()
+                or (hasattr(path, "is_junction") and path.is_junction())):
+            raise AppError("素材库文件夹不存在或不可用。")
+        path = path.resolve()
+        name = path.name
+        if not name:
+            raise AppError("请选择一个有名称的素材库文件夹。")
         with self.guard, self.store.transaction() as db:
-            if db.execute("SELECT 1 FROM material_libraries WHERE name=?", (name,)).fetchone() or (self.root / name).exists():
+            for row in db.execute("SELECT id, name, path FROM material_libraries"):
+                existing_path = Path(row["path"]) if row["path"] else self.root / safe_name(row["name"])
+                if existing_path.resolve() == path:
+                    return {"id": row["id"], "name": row["name"], "path": str(path)}
+            if db.execute("SELECT 1 FROM material_libraries WHERE name=?", (name,)).fetchone():
                 raise AppError("同名素材库已存在。")
             identity = str(uuid.uuid4())
-            (self.root / name).mkdir()
-            db.execute("INSERT INTO material_libraries VALUES(?,?)", (identity, name))
-            return {"id": identity, "name": name}
+            db.execute("INSERT INTO material_libraries(id,name,path) VALUES(?,?,?)", (identity, name, str(path)))
+            return {"id": identity, "name": name, "path": str(path)}
 
     def file(self, library_id, name):
         folder = self.folder(library_id)
@@ -100,6 +116,49 @@ class MaterialLibrary:
                     stat = path.stat()
                     files.append(dict(name=path.name, kind=kind(path), size=stat.st_size, modified=stat.st_mtime))
             return {"items": sorted(files, key=lambda f: (-f["modified"], f["name"])), "path": str(folder)}
+
+    def import_files(self, library_id, paths):
+        if not isinstance(paths, list) or not paths:
+            raise AppError("请选择要添加的本地素材。")
+        with self.guard:
+            folder = self.folder(library_id)
+            sources, seen, skipped = [], set(), 0
+            for value in paths:
+                if not isinstance(value, str) or not value or "\x00" in value:
+                    raise AppError("本地素材路径无效。")
+                source = Path(value).expanduser()
+                if not source.is_absolute() or source.is_symlink() or not source.is_file():
+                    raise AppError("本地素材文件不存在或不可用。")
+                if not kind(source):
+                    raise AppError("只支持图片、音频和视频文件。")
+                safe_name(source.name)
+                source = source.resolve()
+                if source in seen or source.parent == folder.resolve():
+                    skipped += 1
+                    continue
+                seen.add(source)
+                sources.append(source)
+            created = []
+            try:
+                for source in sources:
+                    with source.open("rb") as reader:
+                        target, suffix = folder / source.name, 0
+                        while True:
+                            try:
+                                writer = target.open("xb")
+                                break
+                            except FileExistsError:
+                                suffix += 1
+                                ending = f" ({suffix}){source.suffix}"
+                                target = folder / f"{source.stem[:160 - len(ending)]}{ending}"
+                        created.append(target)
+                        with writer:
+                            shutil.copyfileobj(reader, writer, length=1024 * 1024)
+            except OSError as exc:
+                for target in created:
+                    target.unlink(missing_ok=True)
+                raise AppError("添加本地素材失败，请检查文件权限和素材库可用空间。") from exc
+            return {"added": len(created), "skipped": skipped}
 
     def rename(self, library_id, name, new_name):
         with self.guard:

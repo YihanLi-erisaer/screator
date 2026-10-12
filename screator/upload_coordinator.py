@@ -43,6 +43,8 @@ class UploadCoordinator:
         return result
 
     def _locked(self, item, task, account):
+        if task.source_kind == "image_post":
+            from screator import image_posts
         marker = coordination_dir(account["uid"]) / "attempt-state.json"
         gap = item.settings.upload_gap_seconds
         try:
@@ -83,7 +85,8 @@ class UploadCoordinator:
         bv = ""
         try:
             # Preflight and renewal do not consume an upload attempt.
-            bili_upload.renew(settings)
+            if task.source_kind != "image_post":
+                bili_upload.renew(settings)
             renewed = json.loads(private.read_text(encoding="utf-8"))
             if desktop_auth.credential_identity(renewed) != account["uid"]:
                 raise AppError("续期后的 UID 与目标账号不一致。")
@@ -107,12 +110,16 @@ class UploadCoordinator:
             def on_started(pid):
                 nonlocal started
                 started = True
-                atomic_json(marker, {"inflight": attempt_id, "owner_pid": os.getpid(), "child_pid": pid, "task_id": task.task_id})
+                atomic_json(marker, {"inflight": attempt_id, "owner_pid": os.getpid(), "task_id": task.task_id,
+                                     **({"child_pid": pid} if pid is not None else {})})
                 with self.store.transaction() as conn:
                     conn.execute("UPDATE upload_attempts SET command_started_at=? WHERE attempt_id=?", (_now(), attempt_id))
 
-            bv = bili_upload.upload(settings, Path(task.video_path), Path(task.cover_path), task.title_zh,
-                                    task.desc_zh, task.url, on_started=on_started)
+            if task.source_kind == "image_post":
+                bv = image_posts.upload(task, renewed, on_started=on_started)
+            else:
+                bv = bili_upload.upload(settings, Path(task.video_path), Path(task.cover_path), task.title_zh,
+                                        task.desc_zh, task.url, on_started=on_started)
             # Record actual completion before potentially slow DB/filesystem cleanup.
             atomic_json(marker, {"ended": time.time()})
             armed = False
@@ -125,6 +132,7 @@ class UploadCoordinator:
                     publications.change(self.store, pub["publication_id"], status="submitted" if bv else "submission_unknown", remote_id=bv, error="" if bv else "请核对创作中心。")
                     publications.project(self.store, task.task_id)
         except BaseException as exc:
+            rejected = task.source_kind == "image_post" and isinstance(exc, image_posts.Rejected)
             if armed:
                 try:
                     limited = bool(re.search(r"频繁|风控|限流|too many requests|rate.limit|\b429\b", str(exc), re.I))
@@ -133,12 +141,12 @@ class UploadCoordinator:
                     pass  # Keep inflight marker to block this UID until explicitly checked.
             with self.store.transaction() as conn:
                 conn.execute("UPDATE upload_attempts SET outcome=?,ended_at=?,error=? WHERE attempt_id=?",
-                             ("unknown" if started else "not_started", _now(), type(exc).__name__, attempt_id))
-                if started:
+                             ("rejected" if rejected else "unknown" if started else "not_started", _now(), type(exc).__name__, attempt_id))
+                if started and not rejected:
                     pub = publications.for_platform(self.store, task.task_id, "bilibili")
                     if pub: publications.change(self.store, pub["publication_id"], status="submitted" if bv else "submission_unknown", remote_id=bv, error="" if bv else "请核对创作中心。")
                     self.store.update(task.task_id, status="submitted" if bv else "submission_unknown", bv_id=bv,
-                                      error="已获得 BV，后续保存/清理异常。" if bv else "投稿结果待核对，请检查该账号创作中心。")
+                                      error="已获得稿件号，后续保存/清理异常。" if bv else "投稿结果待核对，请检查该账号动态。" if task.source_kind == "image_post" else "投稿结果待核对，请检查该账号创作中心。")
                 elif self.store.require(task.task_id).status == "uploading":
                     self.store.update(task.task_id, status="queued_upload")
             raise

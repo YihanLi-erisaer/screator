@@ -9,7 +9,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import test_desktop as fixtures
-from screator import events, materials, media, pipeline, publications, youtube
+from screator import bili_upload, events, materials, media, pipeline, publications, youtube
+from screator.db import SCHEMA_VERSION
 from screator.exceptions import AppError, InvalidMediaError
 
 
@@ -24,7 +25,82 @@ class MaterialTests(unittest.TestCase):
     mocks = fixtures.DesktopTests.mocks
 
     def library(self):
-        return self.service.dispatch("materials.create_library", {"name": "创作素材"})["id"]
+        folder = self.service.materials.root / "创作素材"
+        folder.mkdir()
+        return self.service.dispatch("materials.create_library", {"directory": str(folder)})["id"]
+
+    def test_custom_library_location_persists_and_receives_materials(self):
+        parent = Path(self.tmp.name) / "用户选择的素材目录"
+        parent.mkdir()
+        folder = parent / "旅行素材"
+        folder.mkdir()
+        (folder / "existing.png").write_bytes(b"existing material")
+        result = self.service.dispatch("materials.create_library", {"directory": str(folder)})
+        folder = folder.resolve()
+        self.assertEqual(result["name"], "旅行素材")
+        self.assertEqual(result["path"], str(folder))
+        self.assertTrue(folder.is_dir())
+        self.assertFalse((self.service.materials.root / "旅行素材").exists())
+        restored = materials.MaterialLibrary(self.service.materials.root, self.service.store)
+        self.assertEqual(restored.folder(result["id"]), folder)
+        source = Path(self.tmp.name) / "sample.png"
+        source.write_bytes(b"custom location material")
+        restored.commit(result["id"], "download-task", [source])
+        listing = restored.list(result["id"])
+        self.assertEqual(listing["path"], str(folder))
+        self.assertEqual(len(listing["items"]), 2)
+        downloaded = next(item for item in listing["items"] if item["name"] != "existing.png")
+        self.assertEqual(restored.file(result["id"], downloaded["name"]).read_bytes(), b"custom location material")
+        self.assertEqual((folder / "existing.png").read_bytes(), b"existing material")
+        self.assertFalse((folder / "旅行素材").exists())
+        self.assertEqual(restored.create(str(folder)), result)
+        self.assertEqual(len(restored.libraries()["items"]), 1)
+        with patch.object(materials, "open_native") as opened:
+            restored.open(result["id"])
+            opened.assert_called_once_with(folder)
+
+    def test_existing_libraries_keep_their_location_after_schema_upgrade(self):
+        folder = self.service.materials.root / "旧素材库"
+        folder.mkdir()
+        (folder / "original.png").write_bytes(b"original material")
+        with self.service.store.transaction() as db:
+            db.execute("DROP TABLE material_libraries")
+            db.execute("CREATE TABLE material_libraries(id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE)")
+            db.execute("INSERT INTO material_libraries VALUES(?,?)", ("legacy-library", "旧素材库"))
+        restored = materials.MaterialLibrary(self.service.materials.root, self.service.store)
+        self.assertEqual(restored.folder("legacy-library"), folder)
+        self.assertEqual(restored.list("legacy-library")["items"][0]["name"], "original.png")
+        self.assertEqual(restored.file("legacy-library", "original.png").read_bytes(), b"original material")
+        new_folder = self.service.materials.root / "新素材库"
+        new_folder.mkdir()
+        result = restored.create(str(new_folder))
+        self.assertTrue(restored.folder(result["id"]).is_dir())
+
+    def test_invalid_library_folders_do_not_create_records(self):
+        parent = Path(self.tmp.name) / "素材目录"
+        parent.mkdir()
+        existing = parent / "已存在"
+        existing.mkdir()
+        original = existing / "original.png"
+        original.write_bytes(b"preserved")
+        invalid = ("", "relative/path", str(parent / "missing"), str(original), 123, "bad\x00path", None, str(Path(parent.anchor)))
+        for directory in invalid:
+            with self.subTest(directory=directory), self.assertRaises(AppError):
+                self.service.materials.create(directory)
+        self.assertFalse((parent / "missing").exists())
+        self.assertEqual(original.read_bytes(), b"preserved")
+        self.assertEqual(self.service.materials.libraries()["items"], [])
+
+    def test_different_folders_with_the_same_name_do_not_replace_library(self):
+        first = Path(self.tmp.name) / "first" / "素材"
+        second = Path(self.tmp.name) / "second" / "素材"
+        first.mkdir(parents=True)
+        second.mkdir(parents=True)
+        result = self.service.materials.create(str(first))
+        with self.assertRaisesRegex(AppError, "同名素材库"):
+            self.service.materials.create(str(second))
+        self.assertEqual(self.service.materials.folder(result["id"]), first.resolve())
+        self.assertEqual(len(self.service.materials.libraries()["items"]), 1)
 
     def source_server(self):
         root = Path(self.tmp.name) / "http"
@@ -36,13 +112,70 @@ class MaterialTests(unittest.TestCase):
         self.addCleanup(server.shutdown)
         return root, f"http://127.0.0.1:{server.server_port}"
 
+    def test_local_material_import_preserves_sources_and_existing_files(self):
+        library = self.library()
+        folder = self.service.materials.folder(library)
+        (folder / "photo.PNG").write_bytes(b"existing image")
+        sources = []
+        for name, content in (("photo.PNG", b"new image"), ("music.mp3", b"new audio"), ("video.mp4", b"new video")):
+            source = Path(self.tmp.name) / name
+            source.write_bytes(content)
+            sources.append(str(source))
+        result = self.service.dispatch("materials.import", {"library_id": library, "paths": sources})
+        self.assertEqual(result, {"added": 3, "skipped": 0})
+        self.assertEqual((folder / "photo.PNG").read_bytes(), b"existing image")
+        self.assertEqual((folder / "photo (1).PNG").read_bytes(), b"new image")
+        for value in sources:
+            self.assertTrue(Path(value).is_file())
+        self.assertEqual((folder / "music.mp3").read_bytes(), Path(sources[1]).read_bytes())
+        self.assertEqual((folder / "video.mp4").read_bytes(), Path(sources[2]).read_bytes())
+        self.assertEqual({item["kind"] for item in self.service.materials.list(library)["items"]}, {"image", "audio", "video"})
+        result = self.service.materials.import_files(library, [str(folder / "photo.PNG"), sources[0], sources[0]])
+        self.assertEqual(result, {"added": 1, "skipped": 2})
+        self.assertEqual((folder / "photo (2).PNG").read_bytes(), b"new image")
+
+    def test_local_material_import_validates_the_entire_selection_before_copying(self):
+        library = self.library()
+        image = Path(self.tmp.name) / "valid.png"
+        image.write_bytes(b"image")
+        unsupported = Path(self.tmp.name) / "document.pdf"
+        unsupported.write_bytes(b"document")
+        for paths in (None, "file.png", [], [123], ["bad\x00path"], ["relative.png"], [str(image), str(unsupported)], [str(image), str(image.parent)], [str(image), str(image.parent / "missing.mp4")]):
+            with self.subTest(paths=paths), self.assertRaises(AppError):
+                self.service.materials.import_files(library, paths)
+        self.assertEqual(self.service.materials.list(library)["items"], [])
+        self.assertEqual(image.read_bytes(), b"image")
+
+    def test_local_material_import_cleans_up_copies_if_a_copy_fails(self):
+        library = self.library()
+        sources = []
+        for name in ("first.png", "second.mp4"):
+            source = Path(self.tmp.name) / name
+            source.write_bytes(b"original")
+            sources.append(str(source))
+        copy = materials.shutil.copyfileobj
+        attempts = 0
+        def fail_second(reader, writer, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            writer.write(b"partial")
+            if attempts == 2:
+                raise OSError("disk full")
+            copy(reader, writer, **kwargs)
+        with patch.object(materials.shutil, "copyfileobj", side_effect=fail_second):
+            with self.assertRaisesRegex(AppError, "添加本地素材失败"):
+                self.service.materials.import_files(library, sources)
+        self.assertEqual(self.service.materials.list(library)["items"], [])
+        for source in sources:
+            self.assertEqual(Path(source).read_bytes(), b"original")
+
     def test_material_dispatch_respects_parameter_and_shutdown_guards(self):
         with self.assertRaisesRegex(AppError, "请求参数必须为对象"):
             self.service.dispatch("materials.libraries", None)
         self.service.scheduler.closing = True
         try:
             with self.assertRaisesRegex(AppError, "应用正在退出"):
-                self.service.dispatch("materials.create_library", {"name": "退出期间"})
+                self.service.dispatch("materials.create_library", {"directory": str(self.service.materials.root)})
         finally:
             self.service.scheduler.closing = False
         self.assertEqual(self.service.dispatch("materials.libraries", {})["items"], [])
@@ -80,10 +213,7 @@ class MaterialTests(unittest.TestCase):
         self.assertEqual(self.service.list_tasks()["total"], 2)
 
     def test_library_traversal_and_extension_changes_rejected(self):
-        for name in ("..", "../outside", "C:\\outside", "CON", "test.", "bad/name"):
-            with self.subTest(name=name), self.assertRaises(AppError): self.service.materials.create(name)
         library = self.library()
-        with self.assertRaises(AppError): self.service.materials.create("创作素材")
         path = self.service.materials.folder(library) / "a.png"
         path.write_bytes(b"image")
         with self.assertRaises(AppError): self.service.materials.rename(library, "a.png", "a.exe")
@@ -141,6 +271,99 @@ class MaterialTests(unittest.TestCase):
             translate.assert_not_called(); thumb.assert_not_called()
         self.assertEqual(task.title_zh, "用户标题")
         self.assertEqual(task.desc_zh, "用户简介")
+
+    def test_local_custom_cover_used_for_preview_and_auto_publish(self):
+        from PIL import Image
+        source = Path(self.tmp.name) / "user-video.mp4"
+        source.write_bytes(b"original video")
+        cover = Path(self.tmp.name) / "user-cover.png"
+        Image.new("RGBA", (200, 200), (255, 0, 0, 255)).save(cover)
+        original_cover = cover.read_bytes()
+        real_prepare = pipeline._prepare_assets
+        for mode in ("preview", "auto"):
+            with self.subTest(mode=mode), self.mocks(), patch.object(pipeline, "_prepare_assets", side_effect=real_prepare), patch.object(media, "extract_frame_cover") as frame, patch.object(youtube, "download_thumbnail") as thumb, patch("screator.translation.tasks.prepare") as translate, patch.object(bili_upload, "upload", side_effect=self.upload) as upload:
+                params = dict(url="", operation_id="custom-cover-" + mode, account_id=self.account["account_id"],
+                              mode=mode, local_path=str(source), cover_path=str(cover), title="Custom title")
+                result = self.service.dispatch("tasks.create", params)
+                self.assertEqual(self.service.dispatch("tasks.create", params), result)
+                self.wait_idle()
+                task = self.service.task(result["task_id"])
+                self.assertEqual(task.status, "ready" if mode == "preview" else "submitted", task.error)
+                self.assertEqual(task.local_cover_path, str(cover.resolve()))
+                self.assertEqual(Path(task.cover_path), Path(task.work_dir) / "cover.jpg")
+                with Image.open(task.cover_path) as prepared:
+                    settings = self.service.config.build()
+                    self.assertEqual(prepared.size, (settings.cover_width, settings.cover_height))
+                    self.assertEqual(prepared.format, "JPEG")
+                    self.assertGreater(prepared.getpixel((0, 0))[0], 250)
+                self.assertIsNotNone(self.service.cover(task.task_id)["image"])
+                frame.assert_not_called(); thumb.assert_not_called(); translate.assert_not_called()
+                if mode == "auto":
+                    self.assertEqual(upload.call_args.args[2], Path(task.cover_path))
+                else:
+                    upload.assert_not_called()
+        self.assertEqual(cover.read_bytes(), original_cover)
+        self.assertEqual(source.read_bytes(), b"original video")
+
+    def test_invalid_custom_covers_rejected_before_queueing(self):
+        from PIL import Image
+        source = Path(self.tmp.name) / "user-video.mp4"
+        source.write_bytes(b"video")
+        folder = Path(self.tmp.name)
+        (folder / "corrupt.png").write_bytes(b"not an image")
+        Image.new("RGB", (20, 20)).save(folder / "unsupported.gif")
+        invalid_covers = [str(folder / "missing.png"), str(folder), "relative.png",
+                          str(folder / "corrupt.png"), str(folder / "unsupported.gif"), 123]
+        for cover in invalid_covers:
+            with self.subTest(cover=cover), self.assertRaises(AppError):
+                self.service.create("", "invalid-cover-test", account_id=self.account["account_id"],
+                                    local_path=str(source), cover_path=cover, title="Title")
+        self.assertFalse(self.service.store.list_all())
+        with self.assertRaisesRegex(AppError, "仅支持本地视频"):
+            self.service.create("https://youtu.be/abcdefghijk", "youtube-cover-test", account_id=self.account["account_id"],
+                                cover_path=str(folder / "corrupt.png"))
+
+    def test_missing_custom_cover_fails_and_retry_uses_restored_image(self):
+        from PIL import Image
+        source = Path(self.tmp.name) / "user-video.mp4"
+        source.write_bytes(b"video")
+        cover = Path(self.tmp.name) / "cover.jpg"
+        Image.new("RGB", (200, 100), "blue").save(cover)
+        real_prepare = pipeline._prepare_assets
+        def remove_cover(*args):
+            cover.unlink()
+            return real_prepare(*args)
+        with self.mocks(), patch.object(pipeline, "_prepare_assets", side_effect=remove_cover), patch.object(media, "extract_frame_cover") as frame:
+            result = self.service.create("", "missing-cover-test", account_id=self.account["account_id"],
+                                         local_path=str(source), cover_path=str(cover), title="Title", mode="auto")
+            self.wait_idle()
+            task = self.service.task(result["task_id"])
+            self.assertEqual(task.status, "failed")
+            self.assertIn("封面图片已移动或删除", task.error)
+            frame.assert_not_called()
+            self.assertFalse(self.uploads)
+        Image.new("RGB", (200, 100), "blue").save(cover)
+        with self.mocks(), patch.object(pipeline, "_prepare_assets", side_effect=real_prepare):
+            self.service.retry(task.task_id, "restored-cover-retry")
+            self.wait_idle()
+            self.assertEqual(self.service.task(task.task_id).status, "ready")
+            self.service.submit(task.task_id, "restored-cover-submit")
+            self.wait_idle()
+        self.assertEqual(self.service.task(task.task_id).status, "submitted")
+
+    def test_custom_cover_participates_in_operation_identity(self):
+        from PIL import Image
+        source = Path(self.tmp.name) / "user-video.mp4"
+        source.write_bytes(b"video")
+        cover = Path(self.tmp.name) / "cover.png"
+        Image.new("RGB", (20, 20)).save(cover)
+        params = dict(url="", operation_id="cover-identity-test", account_id=self.account["account_id"],
+                      local_path=str(source), title="Title")
+        with self.mocks():
+            self.service.create(**params)
+            self.wait_idle()
+            with self.assertRaises(AppError):
+                self.service.create(**params, cover_path=str(cover))
 
     def test_local_invalid_media_does_not_redownload_or_quarantine_source(self):
         source = Path(self.tmp.name) / "invalid.mp4"
@@ -209,7 +432,7 @@ class MaterialTests(unittest.TestCase):
         store = TaskStore(path)
         task = Task("abcdefghijk", "https://youtu.be/abcdefghijk", "ready")
         store.upsert(task)
-        for name in ("source_kind", "local_path", "library_id", "asset_type"):
+        for name in ("source_kind", "local_path", "local_cover_path", "library_id", "asset_type"):
             store._conn.execute(f"ALTER TABLE tasks DROP COLUMN {name}")
         store._conn.execute("PRAGMA user_version=5")
         store.close()
@@ -218,7 +441,31 @@ class MaterialTests(unittest.TestCase):
         self.assertEqual(store.require(task.task_id).source_kind, "youtube")
         self.assertEqual(store.require(task.task_id).status, "ready")
         self.assertTrue(Path(str(path) + ".pre-v6.bak").is_file())
-        self.assertEqual(store._conn.execute("PRAGMA user_version").fetchone()[0], 6)
+        self.assertEqual(store._conn.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
+
+    def test_schema_six_migration_preserves_local_tasks_and_cover_paths(self):
+        from screator.db import Task, TaskStore
+        path = Path(self.tmp.name) / "migration-v6.sqlite"
+        store = TaskStore(path)
+        task = Task("local-existing", "", "ready", source_kind="local", local_path="/user/video.mp4",
+                    cover_path="/work/cover.jpg", title_zh="Existing title")
+        store.upsert(task)
+        store._conn.execute("ALTER TABLE tasks DROP COLUMN local_cover_path")
+        store._conn.execute("PRAGMA user_version=6")
+        store.close()
+        store = TaskStore(path)
+        restored = store.require(task.task_id)
+        self.assertEqual((restored.source_kind, restored.local_path, restored.cover_path, restored.title_zh),
+                         (task.source_kind, task.local_path, task.cover_path, task.title_zh))
+        self.assertEqual(restored.local_cover_path, "")
+        restored.local_cover_path = "/user/custom.png"
+        store.upsert(restored)
+        store.close()
+        store = TaskStore(path)
+        self.addCleanup(store.close)
+        self.assertEqual(store.require(task.task_id).local_cover_path, "/user/custom.png")
+        self.assertTrue(Path(str(path) + ".pre-v7.bak").is_file())
+        self.assertEqual(store._conn.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
 
     def test_real_local_video_validation_cover_and_submission(self):
         import subprocess

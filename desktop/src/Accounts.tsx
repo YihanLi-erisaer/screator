@@ -306,6 +306,11 @@ export function QueueOverview({
         { label: "共享封面 / 翻译", ...queue?.prepare },
         { label: "抖音独立上传", ...queue?.douyin },
         { label: "AcFun 独立上传", ...queue?.acfun },
+        { label: "小红书独立上传", ...queue?.xiaohongshu },
+        { label: "YouTube 独立上传", ...queue?.youtube },
+        { label: "X（Twitter）独立上传", ...queue?.social?.twitter },
+        { label: "Facebook Page 独立上传", ...queue?.social?.facebook },
+        { label: "TikTok 独立上传", ...queue?.social?.tiktok },
         ...(queue?.uploads || []).map((q: any) => ({
           ...q,
           label: accounts.find((a) => a.account_id === q.account_id)

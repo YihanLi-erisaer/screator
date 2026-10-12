@@ -17,7 +17,7 @@ FORMAT = "screator-publishing-history"
 VERSION = 1
 HISTORY_STATUSES = {"submitted", "submission_unknown", "partial_success", "completed_with_abandon"}
 DELETEABLE_STATUSES = HISTORY_STATUSES | {"ready", "failed", "cancelled", "interrupted", "downloaded"}
-PLATFORMS = {"bilibili", "douyin", "acfun"}
+PLATFORMS = publications.PLATFORMS
 MAX_BYTES = 100 * 1024 * 1024
 MAX_RECORDS = 100_000
 TEXT_FIELDS = ("task_id", "video_id", "url", "status", "title_orig", "title_zh", "desc_orig",
@@ -37,6 +37,7 @@ def initialize(store):
 def _local_record(store, task):
     values = asdict(task)
     record = {key: values.get(key) or "" for key in TEXT_FIELDS}
+    record["source_kind"] = task.source_kind
     record["publications"] = [
         {key: item.get(key) or "" for key in PUBLICATION_FIELDS}
         for item in publications.items(store, task.task_id)
@@ -112,12 +113,16 @@ def _validated_record(value):
     if not isinstance(value, dict) or not isinstance(value.get("publications"), list):
         raise AppError("投稿记录结构无效。")
     record = {key: _string(value.get(key), key) for key in TEXT_FIELDS}
+    record["source_kind"] = _string(value.get("source_kind", "youtube"), "source_kind", 30)
+    if record["source_kind"] not in ("youtube", "local", "image_post"):
+        raise AppError("投稿记录的来源类型无效。")
     if not ID.fullmatch(record["task_id"]) or record["status"] not in HISTORY_STATUSES:
         raise AppError("投稿记录的任务身份或状态无效。")
-    if record["bv_id"] and not BV.fullmatch(record["bv_id"]):
+    receipt_pattern = r"[1-9][0-9]{0,29}" if record["source_kind"] == "image_post" else BV
+    if record["bv_id"] and not re.fullmatch(receipt_pattern, record["bv_id"]):
         raise AppError("投稿记录中的 BV 号无效。")
     items = value["publications"]
-    if len(items) > 3:
+    if len(items) > len(PLATFORMS):
         raise AppError("单条投稿记录的平台数量无效。")
     record["publications"] = []
     for item in items:
@@ -194,6 +199,12 @@ def import_file(store, path):
 
 
 def _delete_local_rows(db, task_id, tables):
+    if "xiaohongshu_attempts" in tables:
+        db.execute("DELETE FROM xiaohongshu_attempts WHERE publication_id IN (SELECT publication_id FROM task_publications WHERE task_id=?)", (task_id,))
+    if "social_upload_attempts" in tables:
+        db.execute("DELETE FROM social_upload_attempts WHERE publication_id IN (SELECT publication_id FROM task_publications WHERE task_id=?)", (task_id,))
+    if "youtube_attempts" in tables:
+        db.execute("DELETE FROM youtube_attempts WHERE publication_id IN (SELECT publication_id FROM task_publications WHERE task_id=?)", (task_id,))
     if "acfun_attempts" in tables:
         db.execute("DELETE FROM acfun_attempts WHERE publication_id IN (SELECT publication_id FROM task_publications WHERE task_id=?)", (task_id,))
     db.execute("DELETE FROM task_publications WHERE task_id=?", (task_id,))

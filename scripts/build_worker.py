@@ -41,7 +41,7 @@ command = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--one
            "--name", "screator-worker", "--paths", str(root),
            "--distpath", str(root / "packaging/staging"), "--workpath", str(root / "build/worker"),
            "--specpath", str(root / "build"), "--collect-all", "gallery_dl", "--collect-all", "yt_dlp", "--collect-all", "yt_dlp_ejs",
-           "--collect-all", "keyring", "--collect-all", "qrcode", "--collect-all", "screator.translation"]
+           "--collect-all", "keyring", "--collect-all", "qrcode", "--collect-all", "playwright", "--collect-all", "screator.translation"]
 if sys.platform == "win32":
     command.extend(windows_branding_options())
 command.append(str(root / "packaging/worker_entry.py"))

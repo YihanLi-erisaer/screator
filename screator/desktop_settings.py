@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -35,6 +36,7 @@ class DesktopSettings:
         self.vault_service = service + str(paths.root)
         self.translation_upgrade_notice = False
         self.values = dict(work_dir=str(paths.root / "work"), bili_tid=171, bili_tags="转载", acfun_channel_id=0,
+                           youtube_category_id="22", youtube_privacy_status="private", youtube_made_for_kids=False,
                            youtube_max_height=0, youtube_audio_language="auto",
                            bili_line="tx", upload_gap_seconds=20, theme="system", ui_language="zh-CN",
                            hwaccel="auto", validation_cache=True, douyin_broker_url="", **DEFAULTS)
@@ -93,6 +95,10 @@ class DesktopSettings:
         if not isinstance(incoming, dict) or set(incoming) - set(self.values):
             raise AppError("包含不支持的设置项。")
         merged = {**self.values, **incoming}
+        if not isinstance(merged["youtube_category_id"], str) or not re.fullmatch(r"[1-9][0-9]{0,4}", merged["youtube_category_id"]):
+            raise AppError("YouTube 分类 ID 无效。")
+        if merged["youtube_privacy_status"] not in ("private", "unlisted", "public") or type(merged["youtube_made_for_kids"]) is not bool:
+            raise AppError("YouTube 可见性或儿童内容设置无效。")
         if not isinstance(merged["douyin_broker_url"], str):
             raise AppError("抖音服务地址格式无效。")
         if merged["douyin_broker_url"]:

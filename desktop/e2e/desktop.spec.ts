@@ -24,6 +24,8 @@ test("data center loads account metrics and pages through recorded submissions",
 test("data center account filter stays aligned with tabs and clear of the table", async ({ page }) => {
   await page.goto("/?preview&accounts=2&populated");
   await page.getByRole("button", { name: "数据中心", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "按账号筛选" })).toBeHidden();
+  await page.getByRole("button", { name: "Bilibili", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "按账号筛选" })).toBeVisible();
   for (const width of [1024, 600]) {
     await page.setViewportSize({ width, height: 680 });
@@ -45,6 +47,10 @@ test("data center account filter stays aligned with tabs and clear of the table"
     expect(menu!.x + menu!.width).toBeLessThanOrEqual(width + 1);
     await page.keyboard.press("Escape");
   }
+  await page.getByRole("button", { name: "AcFun", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "按账号筛选" })).toBeHidden();
+  await page.getByRole("button", { name: "全部平台", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "按账号筛选" })).toBeHidden();
 });
 
 test("display language is saved in general settings and updates the interface", async ({ page }) => {
@@ -73,7 +79,7 @@ test("display language is saved in general settings and updates the interface", 
 
 test("task center shows today's successful submissions for each Bilibili account", async ({ page }) => {
   await page.goto("/?preview&accounts=5&populated&slowTasks");
-  await expect(page.locator(".queue-overview-skeleton .queue-card")).toHaveCount(10);
+  await expect(page.locator(".queue-overview-skeleton .queue-card")).toHaveCount(15);
   const loadingQueueHeight = await page.locator(".queue-overview").evaluate((element) => element.getBoundingClientRect().height);
   await expect(page.locator(".queue-overview-skeleton")).toHaveCount(0);
   const loadedQueueHeight = await page.locator(".queue-overview").evaluate((element) => element.getBoundingClientRect().height);
@@ -91,7 +97,7 @@ test("task center shows skeletons while records are loading", async ({ page }) =
   await page.goto("/?preview&populated&accounts=1&slowTasks");
   await expect(page.locator(".tasks-rows-skeleton .task-row")).toHaveCount(3);
   await expect(page.locator(".stat-skeleton")).toHaveCount(1);
-  await expect(page.locator(".queue-overview-skeleton .queue-card")).toHaveCount(6);
+  await expect(page.locator(".queue-overview-skeleton .queue-card")).toHaveCount(11);
   const loadingStatsHeight = await page.locator(".stats-strip").evaluate((element) => element.getBoundingClientRect().height);
   const loadingQueueHeight = await page.locator(".queue-overview").evaluate((element) => element.getBoundingClientRect().height);
   const loadingPanelHeight = await page.locator(".task-panel").evaluate((element) => element.getBoundingClientRect().height);
@@ -106,7 +112,8 @@ test("task center shows skeletons while records are loading", async ({ page }) =
   expect(Math.abs(loadingQueueHeight - loadedQueueHeight)).toBeLessThan(2);
   expect(Math.abs(loadingPanelHeight - loadedPanelHeight)).toBeLessThan(2);
 
-  await page.getByRole("button", { name: "待预览", exact: true }).click();
+  await page.getByRole("combobox", { name: "按任务状态筛选" }).click();
+  await page.getByRole("option", { name: "待预览", exact: true }).click();
   await expect(page.locator(".tasks-rows-skeleton .task-row")).toHaveCount(3);
   await expect(page.locator(".stat-skeleton")).toHaveCount(0);
   await expect(page.locator(".queue-overview-skeleton")).toHaveCount(0);
@@ -307,7 +314,7 @@ test("AcFun login enables task selection without an account page switch", async 
   await expect(page.locator(".status-heading").filter({ hasText: "AcFun 同步投稿" })).toContainText("已连接");
   await page.getByRole("button", { name: "任务中心", exact: true }).click();
   await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "同步投稿" }).click();
+  await page.getByRole("tab", { name: "一键上传" }).click();
   await expect(page.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeEnabled();
 });
 
@@ -324,7 +331,7 @@ test("unconnected Douyin and AcFun show status without error toasts", async ({ p
 
   await page.getByRole("button", { name: "任务中心", exact: true }).click();
   await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "同步投稿" }).click();
+  await page.getByRole("tab", { name: "一键上传" }).click();
   const dialog = page.getByRole("dialog", { name: "新建任务" });
   await expect(dialog.getByRole("checkbox", { name: /同步上传抖音/ })).toBeDisabled();
   await expect(dialog.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeDisabled();
@@ -334,7 +341,7 @@ test("unconnected Douyin and AcFun show status without error toasts", async ({ p
 test("new task explains a stale AcFun backend without showing its obsolete error", async ({ page }) => {
   await page.goto("/?preview&accounts=1&acfun=1&acfunLegacyWorker");
   await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "同步投稿" }).click();
+  await page.getByRole("tab", { name: "一键上传" }).click();
   const dialog = page.getByRole("dialog", { name: "新建任务" });
   await expect(dialog.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeDisabled();
   await expect(dialog).toContainText("AcFun 账号已登录，但后台仍使用旧版配置。请使用最新构建，完整退出并重新打开应用后重试。");
@@ -404,7 +411,7 @@ test("empty workspace, preview default, and modal keyboard focus", async ({
   await page.goto("/?preview&accounts=5");
   await expect(page.getByText("你的下一条视频，从这里开始")).toBeVisible();
   await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "同步投稿" }).click();
+  await page.getByRole("tab", { name: "一键上传" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("radio").first()).toBeChecked();
@@ -424,7 +431,7 @@ test("errors appear as dismissible floating toasts for five seconds", async ({ p
   await page.goto("/?preview&accounts=1");
   await page.clock.install();
   await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "同步投稿" }).click();
+  await page.getByRole("tab", { name: "一键上传" }).click();
   const dialog = page.getByRole("dialog", { name: "新建任务" });
   await dialog.getByRole("textbox").fill("https://youtu.be/abcdefghijk");
   await dialog.getByRole("checkbox", { name: /我拥有该视频的版权/ }).check();
@@ -554,38 +561,35 @@ test("no account cannot create and historical task requires binding", async ({
   ).toBeDisabled();
 });
 
-test("five copies of one video keep separate edits and fifth-account filter", async ({
+test("five copies of one video keep separate account edits", async ({
   page,
 }) => {
   const taskRows = page.locator("button.task-row");
   await page.goto("/?preview&populated&accounts=5&samevideo");
   await expect(taskRows).toHaveCount(5);
-  await page.getByRole("combobox", { name: "按账号筛选" }).click();
-  await page.getByRole("option", { name: /UID 10005/ }).click();
-  await expect(taskRows).toHaveCount(1);
-  await taskRows.click();
+  await expect(page.getByRole("combobox", { name: "按账号筛选" })).toHaveCount(0);
+  await taskRows.filter({ hasText: "UID 10005" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("UID 10005");
   await dialog.getByLabel(/中文标题/).fill("仅第五账号的标题");
   await dialog.getByRole("button", { name: "保存修改" }).click();
   await page.getByRole("button", { name: "关闭对话框" }).click();
-  await page.getByRole("combobox", { name: "按账号筛选" }).click();
-  await page.getByRole("option", { name: /UID 10001/ }).click();
-  await expect(taskRows).toContainText("用更少的工具");
+  await expect(taskRows.filter({ hasText: "UID 10001" })).toContainText("用更少的工具");
+  await expect(taskRows.filter({ hasText: "UID 10005" })).toContainText("仅第五账号的标题");
 });
 
-test("account dropdown supports keyboard selection and dismissal", async ({ page }) => {
-  await page.goto("/?preview&populated&accounts=5&samevideo");
-  const filter = page.getByRole("combobox", { name: "按账号筛选" });
+test("task status dropdown supports keyboard selection and dismissal", async ({ page }) => {
+  await page.goto("/?preview&populated&accounts=5");
+  const filter = page.getByRole("combobox", { name: "按任务状态筛选" });
   await filter.focus();
   await filter.press("ArrowDown");
   await expect(filter).toHaveAttribute("aria-expanded", "true");
   await filter.press("Escape");
   await expect(filter).toHaveAttribute("aria-expanded", "false");
-  await expect(filter).toContainText("全部账号");
+  await expect(filter).toContainText("全部状态");
   await filter.press("ArrowDown");
   await filter.press("Enter");
-  await expect(filter).toContainText("UID 10001");
+  await expect(filter).toContainText("待预览");
   await expect(page.locator("button.task-row")).toHaveCount(1);
 });
 
@@ -618,7 +622,7 @@ test("select popups remain visible beyond clipped cards and inside dialogs", asy
   await page.setViewportSize({ width: 1024, height: 680 });
   await page.getByRole("button", { name: "任务中心", exact: true }).click();
   await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "同步投稿" }).click();
+  await page.getByRole("tab", { name: "一键上传" }).click();
   const dialog = page.getByRole("dialog", { name: "新建任务" });
   await dialog.getByRole("combobox", { name: "目标 Bilibili 账号" }).click();
   const dialogMenu = dialog.getByRole("listbox", { name: "目标 Bilibili 账号" });
@@ -653,7 +657,7 @@ test("publishing history exposes transfer actions only in the desktop app", asyn
   await page.getByRole("button", { name: "投稿记录", exact: true }).click();
   await expect(page.getByRole("button", { name: "导入投稿记录" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "导出投稿记录" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: /全部记录/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /全部记录/ })).toBeVisible();
 });
 
 test("delete all submission history requires a modal confirmation", async ({ page }) => {

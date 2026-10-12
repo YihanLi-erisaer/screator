@@ -9,6 +9,7 @@ description = "Download a YouTube video you are allowed to reprint, translate wi
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "requests>=2.32,<3",
     "gallery-dl==1.32.16",
     "yt-dlp[default]>=2026.8.19",
     "deepl==1.32.0",
@@ -21,7 +22,7 @@ screator = "screator.cli:main"
 screator-worker = "screator.desktop_worker:main"
 
 [project.optional-dependencies]
-desktop = ["keyring>=25,<26", "qrcode[pil]>=8,<9", "psutil==7.2.2"]
+desktop = ["keyring>=25,<26", "qrcode[pil]>=8,<9", "psutil==7.2.2", "playwright==1.58.0"]
 douyin-broker = ["cryptography>=43.0.0"]
 
 [tool.setuptools.packages.find]

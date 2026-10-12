@@ -6,11 +6,28 @@ import {
   Play,
   Pencil,
   Trash2,
+  Upload,
 } from "lucide-react";
-import { request } from "./bridge";
+import { chooseDirectory, chooseFiles, request } from "./bridge";
 import { bytes } from "./types";
 import { StyledSelect } from "./StyledSelect";
 import { uiText } from "./i18n";
+import { useToast } from "./Toast";
+
+const materialExtensions = [
+  "mp4", "mkv", "webm", "mov", "avi", "flv", "m4v", "ts",
+  "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "weba",
+  "jpg", "jpeg", "png", "webp", "gif", "avif", "bmp", "tiff",
+];
+const selectedLibraryKey = "screator.materials.selectedLibrary";
+
+function savedLibrary() {
+  try {
+    return localStorage.getItem(selectedLibraryKey) ?? "";
+  } catch {
+    return "";
+  }
+}
 
 export type Library = { id: string; name: string };
 type Material = { name: string; kind: string; size: number; modified: number };
@@ -30,7 +47,8 @@ export function LibraryPicker({
 }) {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
+  const [directory, setDirectory] = useState("");
+  const [saving, setSaving] = useState(false);
   const load = useCallback(async () => {
     const result = await request("materials.libraries");
     setLibraries(result.items);
@@ -61,26 +79,44 @@ export function LibraryPicker({
           className="library-create"
           onSubmit={(e) => {
             e.preventDefault();
+            if (saving || !directory.trim()) return;
+            setSaving(true);
             void action(async () => {
               const result = await request("materials.create_library", {
-                name,
+                directory,
               });
               await load();
               onChange(result.id);
-              setName("");
+              setDirectory("");
               setCreating(false);
-            }, "素材库已创建。");
+            }, "素材库已创建。").finally(() => setSaving(false));
           }}
         >
-          <input
-            autoFocus
-            aria-label="素材库名称"
-            placeholder="素材库名称"
-            maxLength={120}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <button className="primary" disabled={!name.trim()}>
+          <label className="field library-location">
+            素材库文件夹
+            <div className="inline-controls">
+              <input
+                aria-label="素材库文件夹"
+                placeholder="请选择素材库文件夹"
+                value={directory}
+                readOnly
+              />
+              <button
+                type="button"
+                className="secondary"
+                disabled={saving}
+                onClick={() => action(async () => {
+                  const selected = await chooseDirectory();
+                  if (selected) setDirectory(selected);
+                })}
+              >
+                <FolderOpen size={15} />
+                选择文件夹
+              </button>
+            </div>
+          </label>
+          <p className="help">所选文件夹将作为素材库，素材库名称自动使用文件夹名称。</p>
+          <button className="primary" disabled={saving || !directory.trim()}>
             创建
           </button>
         </form>
@@ -96,7 +132,15 @@ export function Materials({
   action: MaterialAction;
   busy: boolean;
 }) {
-  const [library, setLibrary] = useState("");
+  const { showSuccess, showError } = useToast();
+  const [library, setLibrary] = useState(savedLibrary);
+  const selectLibrary = useCallback((id: string) => {
+    setLibrary(id);
+    try {
+      if (id) localStorage.setItem(selectedLibraryKey, id);
+      else localStorage.removeItem(selectedLibraryKey);
+    } catch { /* The selection remains available for the current page. */ }
+  }, []);
   const [items, setItems] = useState<Material[]>([]);
   const [path, setPath] = useState("");
   const [search, setSearch] = useState("");
@@ -106,20 +150,34 @@ export function Materials({
   const [name, setName] = useState("");
   const [deleting, setDeleting] = useState<Material | null>(null);
   const [offset, setOffset] = useState(0);
-  const load = useCallback(async () => {
+  const load = useCallback(async (isCurrent: () => boolean = () => true) => {
     if (!library) {
       setItems([]);
       setPath("");
+      setLoaded("");
+      return;
+    }
+    const libraries = await request("materials.libraries");
+    if (!isCurrent()) return;
+    if (!libraries.items.some((item: Library) => item.id === library)) {
+      selectLibrary("");
       return;
     }
     const result = await request("materials.list", { library_id: library });
+    if (!isCurrent()) return;
     setItems(result.items);
     setPath(result.path);
     setLoaded(library);
-  }, [library]);
+  }, [library, selectLibrary]);
   useEffect(() => {
-    void action(load);
-  }, [load]);
+    let current = true;
+    // Read independently of the picker load so restoring a library cannot be
+    // skipped by the application's single mutation/busy guard.
+    void load(() => current).catch(error => {
+      if (current) showError(String(error instanceof Error ? error.message : error));
+    });
+    return () => { current = false; };
+  }, [load, showError]);
   useEffect(() => {
     setOffset(0);
     setEditing(null);
@@ -133,7 +191,7 @@ export function Materials({
   return (
     <section className="materials-page">
       <div className="section-card section-body">
-        <LibraryPicker value={library} onChange={setLibrary} action={action} />
+        <LibraryPicker value={library} onChange={selectLibrary} action={action} />
         <p className="help">
           在任务中心新建任务，选择“下载素材”即可保存到素材库。同一链接可以重复下载。
         </p>
@@ -173,6 +231,23 @@ export function Materials({
             </button>
             <button
               className="secondary"
+              disabled={busy}
+              onClick={() => action(async () => {
+                const paths = await chooseFiles(materialExtensions);
+                if (!paths?.length) return;
+                await request("materials.import", { library_id: library, paths });
+                await load();
+                setSearch("");
+                setFilter("");
+                setOffset(0);
+                showSuccess("本地素材导入完成。");
+              })}
+            >
+              <Upload size={15} />
+              添加本地素材
+            </button>
+            <button
+              className="secondary"
               onClick={() =>
                 action(() => request("materials.open", { library_id: library }))
               }
@@ -189,7 +264,7 @@ export function Materials({
                 <div className="empty-state">
                   <FolderOpen size={36} />
                   <h3>暂无素材</h3>
-                  <p>在任务中心下载素材后，点击刷新查看。</p>
+                  <p>添加本地素材，或在任务中心下载素材后点击刷新查看。</p>
                 </div>
               )}
               <div className="material-grid">

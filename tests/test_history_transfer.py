@@ -75,6 +75,42 @@ class HistoryTransferTests(unittest.TestCase):
         target.dispatch("history.export", {"path": str(second)})
         self.assertEqual(self.service("third").dispatch("history.import", {"path": str(second)})["imported"], 1)
 
+    def test_history_platform_status_search_and_pagination_include_imports(self):
+        source = self.service("filter-source")
+        template = self.task(source, "abcdefghijk")
+        statuses = ["submitted", "submission_unknown", "partial_success", "completed_with_abandon"]
+        for index in range(25):
+            task = template if index == 0 else Task(
+                task_id=str(uuid.uuid4()), video_id=f"filter{index:05d}", url="https://youtu.be/example",
+                account_id=template.account_id, account_uid_snapshot=template.account_uid_snapshot,
+                title_zh=f"筛选记录 {index}", status=statuses[index % 4])
+            source.store.upsert(task)
+            publications.ensure_bili(source.store, task)
+            if index % 2 == 0:
+                with source.store.transaction() as db:
+                    for platform in publications.PLATFORMS - {"bilibili"}:
+                        db.execute("INSERT INTO task_publications(publication_id,task_id,platform,account_id,source_video_id,status) VALUES(?,?,?,?,?,?)",
+                                   (str(uuid.uuid4()), task.task_id, platform, "filter-account", task.video_id, "submitted"))
+        path = self.root / "filters.json"
+        source.dispatch("history.export", {"path": str(path)})
+        imported = self.service("filter-imported")
+        self.assertEqual(imported.dispatch("history.import", {"path": str(path)})["imported"], 25)
+        for service in (source, imported):
+            with self.subTest(imported=service is imported):
+                first = service.list_tasks(history=True, platform="bilibili")
+                second = service.list_tasks(history=True, platform="bilibili", offset=20)
+                self.assertEqual((first["total"], len(first["items"]), len(second["items"])), (25, 20, 5))
+                self.assertFalse({row["task_id"] for row in first["items"]} & {row["task_id"] for row in second["items"]})
+                for platform in publications.PLATFORMS - {"bilibili"}:
+                    self.assertEqual(service.list_tasks(history=True, platform=platform)["total"], 13)
+                    self.assertEqual(service.list_tasks(history=True, platform=platform, status="partial_success")["total"], 6)
+                    self.assertEqual(service.list_tasks(history=True, platform=platform, status="submission_unknown")["total"], 0)
+                    self.assertEqual(service.list_tasks(history=True, platform=platform, search="FILTER00002")["total"], 1)
+                    self.assertEqual(service.list_tasks(history=True, platform=platform, search="筛选记录 3")["total"], 0)
+                self.assertEqual(service.list_tasks(history=True, status="completed_with_abandon")["total"], 6)
+        with self.assertRaises(AppError):
+            source.list_tasks(history=True, platform="invalid")
+
     def test_invalid_file_does_not_import_any_record(self):
         source = self.service("source")
         self.task(source, "abcdefghijk")

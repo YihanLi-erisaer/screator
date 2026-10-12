@@ -1,7 +1,7 @@
 export interface Publication {
   account_label?: string;
   publication_id: string;
-  platform: "bilibili" | "douyin" | "acfun";
+  platform: "bilibili" | "douyin" | "acfun" | "youtube" | "twitter" | "facebook" | "tiktok" | "xiaohongshu";
   account_id: string;
   status: string;
   revision: number;
@@ -10,9 +10,38 @@ export interface Publication {
   error: string;
   snapshot?: string;
 }
+
+export const platformOptions: { value: Publication["platform"]; label: string }[] = [
+  { value: "bilibili", label: "Bilibili" },
+  { value: "acfun", label: "AcFun" },
+  { value: "douyin", label: "抖音" },
+  { value: "youtube", label: "YouTube" },
+  { value: "twitter", label: "X（Twitter）" },
+  { value: "facebook", label: "Facebook Page" },
+  { value: "tiktok", label: "TikTok" },
+  { value: "xiaohongshu", label: "小红书" },
+];
+
+export function canConfirmPublication(pub: Publication) {
+  if (pub.platform === "xiaohongshu") {
+    try {
+      const value = JSON.parse(pub.snapshot || "{}");
+      return typeof value.title === "string" && !!value.title.trim() && value.title.length <= 20 &&
+        typeof value.description === "string" && !!value.description.trim() && value.description.length <= 1000;
+    } catch { return false; }
+  }
+  if (pub.platform !== "tiktok") return true;
+  try {
+    const value = JSON.parse(pub.snapshot || "{}");
+    return !!value.privacy_level && value.consent === true && value.original_content === true;
+  } catch { return false; }
+}
 export interface Task {
-  source_kind?: "youtube" | "local" | "material";
+  source_kind?: "youtube" | "local" | "material" | "image_post";
+  source_image_paths?: string;
+  image_paths?: string;
   local_path?: string;
+  local_cover_path?: string;
   library_id?: string;
   asset_type?: string;
   imported_history?: boolean;
@@ -56,6 +85,9 @@ export interface Config {
   work_dir: string;
   bili_tid: number;
   acfun_channel_id: number;
+  youtube_category_id: string;
+  youtube_privacy_status: "private" | "unlisted" | "public";
+  youtube_made_for_kids: boolean;
   bili_tags: string;
   bili_line: string;
   youtube_max_height: number;
@@ -85,7 +117,7 @@ export interface Config {
 export interface Progress {
   task_id?: string;
   publication_id?: string;
-  platform?: "bilibili" | "douyin" | "acfun";
+  platform?: "bilibili" | "douyin" | "acfun" | "youtube" | "twitter" | "facebook" | "tiktok" | "xiaohongshu";
   run_id?: string;
   stage: string;
   percent?: number | null;

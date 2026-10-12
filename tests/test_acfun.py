@@ -12,7 +12,7 @@ import test_desktop as desktop_tests
 from test_multi_account import credentials
 from screator import publications
 from screator.acfun import AcfunService, BusinessError, UnknownResult, VerificationRequired, WebClient, verification_page
-from screator.db import TaskStore
+from screator.db import SCHEMA_VERSION, TaskStore
 from screator.db import Task
 from screator.desktop_service import DesktopService
 from screator.exceptions import AppError
@@ -596,7 +596,7 @@ class AcfunTests(unittest.TestCase):
             db.commit()
         migrated = TaskStore(path)
         try:
-            self.assertEqual(migrated._conn.execute("PRAGMA user_version").fetchone()[0], 6)
+            self.assertEqual(migrated._conn.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
             self.assertEqual([tuple(r) for r in migrated._conn.execute("SELECT * FROM task_publications")], rows)
             self.assertTrue(Path(str(path) + ".pre-v5.bak").is_file())
             self.assertEqual(migrated._conn.execute("PRAGMA foreign_key_check").fetchall(), [])

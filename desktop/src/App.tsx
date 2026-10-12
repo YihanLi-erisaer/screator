@@ -14,14 +14,13 @@ import {
   ArrowDownToLine,
   ArrowRight,
   Check,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  CircleAlert,
   ExternalLink,
   FileText,
   FolderOpen,
   History,
+  ImagePlus,
   ChartNoAxesCombined,
   KeyRound,
   Link2,
@@ -50,7 +49,6 @@ import {
   preview,
   chooseFile,
   chooseDirectory,
-  saveLog,
   saveHistory,
   external,
   operationId,
@@ -65,6 +63,7 @@ import {
   bytes,
   editable,
   labels,
+  platformOptions,
   retryable,
   transferRate,
   type Config,
@@ -74,13 +73,17 @@ import {
 import { AccountsPanel, AccountSelector, QueueOverview } from "./Accounts";
 import { DouyinAccountPanel, PublicationDetails } from "./Douyin";
 import { AcfunAccountPanel, AcfunChannelSelect } from "./Acfun";
-import { accountLabel, type BiliAccount } from "./types";
+import { YoutubeAccountPanel, YoutubeCategorySelect, YoutubePrivacySelect } from "./Youtube";
+import { SocialAccountPanels, SocialTargets, type SocialTarget } from "./Social";
+import { accountLabel, canConfirmPublication, type BiliAccount } from "./types";
 import { StyledSelect } from "./StyledSelect";
 import { StatusBadge } from "./StatusBadge";
 import { SubmissionTrend, type SubmissionTrendData } from "./SubmissionTrend";
 import { ToastViewport, ReportError, useToast } from "./Toast";
 import { setUiLanguage, uiText } from "./i18n";
 import { Materials, LibraryPicker } from "./Materials";
+import { ImagePostForm, PostImages, type PostImage } from "./ImagePost";
+import { XiaohongshuAccountPanel } from "./Xiaohongshu";
 
 const SetupWizard = lazy(() => import("./SetupWizard"));
 const TranslationPanel = lazy(() => import("./TranslationPanel"));
@@ -228,7 +231,8 @@ export default function App() {
   const [diagnostics, setDiagnostics] = useState<any>(null);
   const [closing, setClosing] = useState(false);
   const [queue, setQueue] = useState<any>(null);
-  const [accountFilter, setAccountFilter] = useState("");
+  const [taskPlatform, setTaskPlatform] = useState("");
+  const [historyPlatform, setHistoryPlatform] = useState("");
   const [accountOptions, setAccountOptions] = useState<BiliAccount[]>([]);
   const [shutdownStarted, setShutdownStarted] = useState(false);
   const [shutdownStatus, setShutdownStatus] = useState<ShutdownStatus | null>(null);
@@ -236,7 +240,8 @@ export default function App() {
   const finishingClose = useRef(false);
   const [forceClosing, setForceClosing] = useState(false);
   const taskRequest = useRef(0);
-  const listKey = JSON.stringify([page, accountFilter, query, filter, offset]);
+  const listPlatform = page === "history" ? historyPlatform : taskPlatform;
+  const listKey = JSON.stringify([page, listPlatform, query, filter, offset]);
   const taskRowsByKey = useRef(new Map<string, number>());
   const listLoading = (page === "tasks" || page === "history") && loadedListKey !== listKey;
   const historyLoading = page === "history" && listLoading;
@@ -280,7 +285,7 @@ export default function App() {
   const loadTasks = useCallback(async () => {
     const generation = ++taskRequest.current;
     const result = await request("tasks.list", {
-      account_id: accountFilter,
+      platform: listPlatform,
       search: query,
       status: filter,
       offset,
@@ -316,7 +321,7 @@ export default function App() {
           }
         : null,
     );
-  }, [query, filter, offset, page, accountFilter, listKey]);
+  }, [query, filter, offset, page, listPlatform, listKey]);
   const refreshAccount = useCallback(async () => {
     const [auth, accounts] = await Promise.all([request("auth.status"), request("accounts.list")]);
     setAuth(auth);
@@ -553,14 +558,6 @@ export default function App() {
       document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     setConfig(await request("settings.update", { values: { theme: next } }));
   };
-  const exportLogs = () =>
-    action(async () => {
-      const path = await saveLog();
-      if (path) {
-        await request("logs.export", { path });
-        showSuccess("诊断日志已导出。");
-      }
-    });
   const deleteHistory = (task: Task) =>
     action(async () => {
       await request("history.delete", {
@@ -709,7 +706,6 @@ export default function App() {
                       await loadTasks();
                       setFilter("");
                       setQuery("");
-                      setAccountFilter("");
                       setOffset(0);
                       showSuccess(`导入 ${result.imported} 条记录，跳过 ${result.skipped} 条已有记录。`);
                     })}
@@ -832,7 +828,7 @@ export default function App() {
                     : <SubmissionTrend trend={submissionTrend} accounts={accountOptions} />
                   : taskOverviewLoading
                     ? <div className="queue-overview queue-overview-skeleton" role="status" aria-label="正在加载任务">
-                        {Array.from({ length: 5 + activeAccounts.length }, (_, index) => (
+                        {Array.from({ length: 2 + platformOptions.length + activeAccounts.length }, (_, index) => (
                           <div className="queue-card" key={index} aria-hidden="true">
                             <strong className="skeleton-block skeleton-queue-title" />
                             <small className="skeleton-block skeleton-queue-detail" />
@@ -840,63 +836,61 @@ export default function App() {
                         ))}
                       </div>
                     : <QueueOverview queue={queue} accounts={auth.accounts || []} />}
-                <div className="field account-filter">
-                  按账号筛选
-                  <StyledSelect
-                    label="按账号筛选"
-                    value={accountFilter}
-                    onChange={(value) => {
-                      setAccountFilter(value);
-                      setOffset(0);
-                    }}
-                    options={[{ value: "", label: "全部账号" }, ...accountOptions.map((a) => ({ value: a.account_id, label: accountLabel(a) }))]}
-                  />
-                </div>
                 <div className="task-panel">
-                  <div className="panel-toolbar">
-                    <div className="tabs">
-                      <button
-                        className={!filter ? "current" : ""}
-                        onClick={() => {
-                          setFilter("");
-                          setOffset(0);
-                        }}
-                      >
-                        {page === "history" ? "全部记录" : "全部任务"} <span>{listLoading ? "…" : allTotal}</span>
-                      </button>
-                      {(page === "history"
-                        ? [
-                            "submitted",
-                            "submission_unknown",
-                            "partial_success",
-                            "completed_with_abandon",
-                          ]
-                        : ["ready", "downloaded", "failed"]
-                      ).map((status) => (
+                  <div className={`panel-toolbar platform-toolbar ${page}-toolbar`}>
+                    <div className="tabs" role="tablist" aria-label="投稿平台">
+                      {[
+                        { value: "", label: page === "history" ? "全部记录" : "全部任务" },
+                        ...platformOptions,
+                      ].map((platform) => (
                         <button
-                          key={status}
-                          className={filter === status ? "current" : ""}
+                          key={platform.value}
+                          role="tab"
+                          aria-selected={listPlatform === platform.value}
+                          className={listPlatform === platform.value ? "current" : ""}
                           onClick={() => {
-                            setFilter(status);
+                            if (page === "history") setHistoryPlatform(platform.value);
+                            else setTaskPlatform(platform.value);
                             setOffset(0);
                           }}
                         >
-                          {labels[status]}
+                          {platform.label}{!platform.value && <span>{listLoading ? "…" : allTotal}</span>}
                         </button>
                       ))}
                     </div>
-                    <label className="search">
-                      <Search size={16} />
-                      <input
-                        aria-label="搜索任务"
-                        placeholder="搜索标题或视频 ID"
-                        value={query}
-                        onChange={(e) => {
-                          setQuery(e.target.value);
+                    <div className="list-search-filters">
+                      <label className="search">
+                        <Search size={16} />
+                        <input
+                          aria-label="搜索任务"
+                          placeholder="搜索标题或视频 ID"
+                          value={query}
+                          onChange={(e) => {
+                            setQuery(e.target.value);
+                            setOffset(0);
+                          }}
+                        />
+                      </label>
+                      <StyledSelect
+                        label={page === "history" ? "按投稿状态筛选" : "按任务状态筛选"}
+                        className="list-status-filter"
+                        value={filter}
+                        onChange={(value) => {
+                          setFilter(value);
                           setOffset(0);
                         }}
+                        options={page === "history" ? [
+                          { value: "", label: "全部状态" },
+                          { value: "submitted", label: "已提交" },
+                          { value: "submission_unknown", label: "待核对" },
+                          { value: "partial_success", label: "部分已提交" },
+                          { value: "completed_with_abandon", label: "已结束" },
+                        ] : [
+                          { value: "", label: "全部状态" },
+                          ...["ready", "downloaded", "failed"].map((status) => ({ value: status, label: labels[status] })),
+                        ]}
                       />
-                    </label>
+                    </div>
                   </div>
                   <div className="table-head">
                     <span>视频 / 标题</span>
@@ -946,7 +940,7 @@ export default function App() {
                         >
                           <span className="task-title">
                             <span className="video-tile">
-                              <Video size={20} />
+                              {task.source_kind === "image_post" ? <ImagePlus size={20} /> : <Video size={20} />}
                             </span>
                             <span>
                               <strong>
@@ -1095,8 +1089,6 @@ export default function App() {
                 action={action}
                 refresh={loadConfig}
                 diagnostics={diagnostics}
-                setDiagnostics={setDiagnostics}
-                exportLogs={exportLogs}
               />
             )}
             </Suspense>
@@ -1288,12 +1280,20 @@ type NewTaskProps = {
 };
 function NewTask(props: NewTaskProps) {
   const [tab, setTab] = useState("download");
+  const [publishType, setPublishType] = useState("video");
   return <Modal title="新建任务" close={props.close}>
     <div className="task-source-tabs" role="tablist" aria-label="任务类型">
-      <button role="tab" aria-selected={tab === "download"} className={tab === "download" ? "primary" : "secondary"} onClick={() => setTab("download")}>下载素材</button>
-      <button role="tab" aria-selected={tab === "publish"} className={tab === "publish" ? "primary" : "secondary"} onClick={() => setTab("publish")}>同步投稿</button>
+      <button role="tab" aria-selected={tab === "download"} className={tab === "download" ? "primary" : "secondary"} disabled={props.busy} onClick={() => setTab("download")}>下载素材</button>
+      <button role="tab" aria-selected={tab === "publish"} className={tab === "publish" ? "primary" : "secondary"} disabled={props.busy} onClick={() => setTab("publish")}>一键上传</button>
     </div>
-    {tab === "download" ? <DownloadTask {...props} /> : <PublishTask {...props} />}
+    {tab === "download" ? <DownloadTask {...props} /> : <>
+      <div className="tabs upload-type-tabs" role="tablist" aria-label="上传类型">
+        <button role="tab" aria-selected={publishType === "video"} className={publishType === "video" ? "current" : ""} disabled={props.busy} onClick={() => setPublishType("video")}><Video size={16} />视频上传</button>
+        <button role="tab" aria-selected={publishType === "image"} className={publishType === "image" ? "current" : ""} disabled={props.busy} onClick={() => setPublishType("image")}><ImagePlus size={16} />图文上传</button>
+      </div>
+      <div role="tabpanel" aria-label="视频上传" hidden={publishType !== "video"}><PublishTask {...props} /></div>
+      <div role="tabpanel" aria-label="图文上传" hidden={publishType !== "image"}><ImagePostForm {...props} /></div>
+    </>}
   </Modal>;
 }
 function DownloadTask({ busy, action, close, done }: NewTaskProps) {
@@ -1303,12 +1303,14 @@ function DownloadTask({ busy, action, close, done }: NewTaskProps) {
   const op = useRef(operationId());
   return <>
     <p className="modal-copy">下载到指定素材库，仅保留下载记录，支持重复下载。</p>
+    <div className="task-form-fields">
     <label className="field">素材链接<input autoFocus type="url" placeholder="https://…" value={url} onChange={e => { setUrl(e.target.value); op.current = operationId(); }} /></label>
     <label className="field">素材类型<StyledSelect label="素材类型" value={type} onChange={value => { setType(value); op.current = operationId(); }} options={[{ value: "video", label: "视频" }, { value: "image", label: "图片" }, { value: "audio", label: "音频" }]} /></label>
     <LibraryPicker value={library} onChange={value => { setLibrary(value); op.current = operationId(); }} action={action} />
+    </div>
     <details className="download-platforms"><summary>支持的平台与下载说明</summary>
-      <p>视频 / 音频：YouTube、Bilibili、AcFun、抖音、TikTok、小红书、微博、X、Instagram、Facebook、Vimeo、Dailymotion、Twitch、SoundCloud、Bandcamp 等 yt-dlp 支持的网站。</p>
-      <p>图片：Instagram、X、Pinterest、Flickr、Reddit、Tumblr、DeviantArt、Pixiv 等 gallery-dl 支持的图片帖子。</p>
+      <p>视频 / 音频：YouTube、Bilibili、AcFun、抖音、TikTok、小红书、微博、X、Instagram、Facebook、Vimeo、Dailymotion、Twitch、SoundCloud、Bandcamp 等网站。</p>
+      <p>图片：Instagram、X、Pinterest、Flickr、Reddit、Tumblr、DeviantArt、Pixiv 等图片帖子。</p>
       <p>也支持视频、图片和音频文件直链。音频模式可提取视频中的音轨。每次输入一个作品链接，图片帖子最多 100 张。</p>
       <p>站点登录、地区限制或网站改版可能导致下载失败。请下载你拥有使用权的素材。</p>
     </details>
@@ -1333,6 +1335,7 @@ function PublishTask({
 }) {
   const [source, setSource] = useState("youtube");
   const [localPath, setLocalPath] = useState("");
+  const [coverPath, setCoverPath] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [accountId, setAccountId] = useState("");
@@ -1343,6 +1346,9 @@ function PublishTask({
   const [syncDouyin, setSyncDouyin] = useState(false);
   const [acfun, setAcfun] = useState<any>(null);
   const [syncAcfun, setSyncAcfun] = useState(false);
+  const [youtubeUpload, setYoutubeUpload] = useState<any>(null);
+  const [syncYoutube, setSyncYoutube] = useState(false);
+  const [syncSocial, setSyncSocial] = useState<SocialTarget[]>([]);
   useEffect(() => {
     let alive = true;
     request("douyin.auth.status")
@@ -1353,6 +1359,8 @@ function PublishTask({
         if (alive) setDouyin(s);
       })
       .catch(() => {});
+    request("youtube.auth.status", { verify: true })
+      .then((s) => { if (alive) setYoutubeUpload(s); }).catch(() => {});
     request("acfun.auth.status", { verify: true })
       .then((s) => { if (alive) setAcfun(s); })
       .catch(() => {});
@@ -1368,11 +1376,26 @@ function PublishTask({
         <button className={source === "youtube" ? "primary" : "secondary"} onClick={() => { setSource("youtube"); op.current = operationId(); }}>YouTube 链接</button>
         <button className={source === "local" ? "primary" : "secondary"} onClick={() => { setSource("local"); op.current = operationId(); }}>本地视频</button>
       </div>
+      <div className="task-form-fields">
       {source === "local" ? <>
+        <div className="file-field">
         <label className="field">视频文件
           <input aria-label="视频文件路径" placeholder="选择或输入本地视频绝对路径" value={localPath} onChange={e => { setLocalPath(e.target.value); op.current = operationId(); }} />
         </label>
-        <button className="secondary" disabled={busy} onClick={() => action(async () => { const path = await chooseFile(["mp4", "mkv", "webm", "mov", "avi", "m4v", "flv"]); if (path) { setLocalPath(path); op.current = operationId(); } })}><FolderOpen size={15} />选择视频文件</button>
+        <div className="button-row">
+          <button className="secondary" disabled={busy} onClick={() => action(async () => { const path = await chooseFile(["mp4", "mkv", "webm", "mov", "avi", "m4v", "flv"]); if (path) { setLocalPath(path); op.current = operationId(); } })}><FolderOpen size={15} />选择视频文件</button>
+        </div>
+        </div>
+        <div className="file-field">
+        <label className="field">封面图片（可选）
+          <input aria-label="封面文件路径" placeholder="选择或输入封面图片绝对路径" value={coverPath} onChange={e => { setCoverPath(e.target.value); op.current = operationId(); }} />
+        </label>
+        <div className="button-row">
+          <button className="secondary" disabled={busy} onClick={() => action(async () => { const path = await chooseFile(["jpg", "jpeg", "png", "webp", "bmp"]); if (path) { setCoverPath(path); op.current = operationId(); } })}><FolderOpen size={15} />选择封面图片</button>
+          {coverPath && <button className="secondary" disabled={busy} onClick={() => { setCoverPath(""); op.current = operationId(); }}>清除封面</button>}
+        </div>
+        <p className="help">支持 JPG、PNG、WebP、BMP；图片会裁剪为 16:9。未选择时自动从视频抽帧。</p>
+        </div>
         <label className="field">标题<input maxLength={80} value={title} onChange={e => { setTitle(e.target.value); op.current = operationId(); }} /></label>
         <label className="field">简介<textarea rows={3} maxLength={syncAcfun ? 1000 : 2000} value={description} onChange={e => { setDescription(e.target.value); op.current = operationId(); }} /></label>
         <p className="help">跳过下载与翻译，校验后投稿。投稿成功后保留源视频和任务工作目录。</p>
@@ -1400,6 +1423,7 @@ function PublishTask({
       {!accounts.length && (
         <p className="help">请先到账号与连接添加 Bilibili 账号。</p>
       )}
+      </div>
       <div className="mode-options">
         <label className={mode === "preview" ? "chosen" : ""}>
           <input
@@ -1472,8 +1496,17 @@ function PublishTask({
             : "请先在“账号与连接”扫码登录 AcFun。"}
       </p>}
       {acfun?.account?.auth_state === "valid" && <p className="help">AcFun 使用独立队列，并共用本任务的标签与简介；标题最多 50 字。{mode === "auto" ? "素材准备好后自动投稿。" : "预览后确认投稿。"}</p>}
+      <label className="checkbox">
+        <input type="checkbox" checked={syncYoutube} disabled={!youtubeUpload?.can_sync}
+          onChange={(e) => { setSyncYoutube(e.target.checked); op.current = operationId(); }} />
+        同步上传 YouTube{youtubeUpload?.account ? ` · ${youtubeUpload.account.nickname}` : ""}
+      </label>
+      <p className="help">{youtubeUpload?.can_sync
+        ? "YouTube 使用独立队列，共用视频、封面、简介和标签。预览时可单独编辑标题、分类与可见性。"
+        : "请先在“账号与连接”配置并授权 YouTube 频道。"}</p>
       <ReportError message={syncAcfun && mode === "auto" && !config?.acfun_channel_id
         ? "请先在设置中填写 AcFun 默认分区 ID，再创建自动投稿任务。" : null} />
+      <SocialTargets mode={mode} value={syncSocial} onChange={(value) => { setSyncSocial(value); op.current = operationId(); }} />
       <label className="checkbox">
         <input
           type="checkbox"
@@ -1494,6 +1527,7 @@ function PublishTask({
             (source === "local" ? !localPath.trim() || !title.trim() : !text.trim()) ||
             !authorized ||
             !accountId ||
+            (mode === "auto" && syncSocial.some((target) => target.platform === "tiktok")) ||
             (syncDouyin &&
               mode === "auto" &&
               !douyin?.capabilities?.auto_publish) ||
@@ -1503,7 +1537,7 @@ function PublishTask({
             action(async () => {
               const result = await request("tasks.create", {
                 url: source === "local" ? "" : text,
-                ...(source === "local" ? { local_path: localPath, title, description } : {}),
+                ...(source === "local" ? { local_path: localPath, cover_path: coverPath.trim(), title, description } : {}),
                 account_id: accountId,
                 mode,
                 ...(syncDouyin
@@ -1518,6 +1552,8 @@ function PublishTask({
                   acfun_account_id: acfun.account.account_id,
                   acfun_binding_revision: acfun.account.binding_revision,
                 } : {}),
+                sync_social: syncSocial,
+                ...(syncYoutube ? { sync_youtube: true, youtube_account_id: youtubeUpload.account.account_id, youtube_binding_revision: youtubeUpload.account.binding_revision } : {}),
                 operation_id: op.current,
               });
               if (!result.created)
@@ -1541,7 +1577,7 @@ function ImportedHistoryDetail({ task, busy, onDelete, close }: {
   close: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const platforms = { bilibili: "Bilibili", douyin: "抖音", acfun: "AcFun" };
+  const platforms = { bilibili: "Bilibili", douyin: "抖音", acfun: "AcFun", youtube: "YouTube", twitter: "X（Twitter）", facebook: "Facebook Page", tiktok: "TikTok", xiaohongshu: "小红书" };
   return (
     <Modal title="导入的投稿记录" close={close} wide>
       <div className="section-body history-detail">
@@ -1605,12 +1641,24 @@ function TaskDetail({
   const [title, setTitle] = useState(task.title_zh);
   const [description, setDescription] = useState(task.desc_zh);
   const [cover, setCover] = useState<string | null>(null);
+  const [postImages, setPostImages] = useState<PostImage[]>([]);
+  const [postImagesError, setPostImagesError] = useState("");
+  const isImagePost = task.source_kind === "image_post";
   const [logs, setLogs] = useState<any[]>([]);
   const [confirm, setConfirm] = useState("");
   const [bv, setBv] = useState("");
   const [douyinDirty, setDouyinDirty] = useState(false);
-  const descriptionLimit = task.publications?.some((p) => p.platform === "acfun" && p.status === "ready") ? 1000 : 2000;
+  const descriptionLimit = task.publications?.some((p) => (p.platform === "acfun" || p.platform === "xiaohongshu") && p.status === "ready") ? 1000 : 2000;
   const op = useRef(operationId());
+  useEffect(() => {
+    let alive = true;
+    setPostImages([]);
+    setPostImagesError("");
+    if (isImagePost) request<{ items: PostImage[] }>("image_posts.images", { task_id: task.task_id })
+      .then(value => { if (alive) setPostImages(value.items); })
+      .catch(error => { if (alive) setPostImagesError(String(error)); });
+    return () => { alive = false; };
+  }, [isImagePost, task.task_id, task.image_paths]);
   useEffect(() => {
     setTitle(task.title_zh);
     setDescription(task.desc_zh);
@@ -1661,17 +1709,17 @@ function TaskDetail({
     <Modal title="任务详情" close={close} wide>
       <div className="detail-summary">
         {cover ? (
-          <img className="cover" src={cover} alt="视频封面" />
+          <img className="cover" src={cover} alt={isImagePost ? "图文首图" : "视频封面"} />
         ) : (
           <div className="cover placeholder">
-            <Video size={35} />
+            {isImagePost ? <ImagePlus size={35} /> : <Video size={35} />}
           </div>
         )}
         <div>
           <Status status={task.status} />
           <h3 data-no-localize>{task.title_zh || task.title_orig || task.video_id}</h3>
           <p>
-            {task.uploader || "等待读取作者"} · {task.video_id}
+            {isImagePost ? "Bilibili 图文动态" : task.uploader || "等待读取作者"} · {task.video_id}
             <br />
             {task.account_name_snapshot || "历史账号待确认"}
             {task.account_uid_snapshot
@@ -1694,7 +1742,7 @@ function TaskDetail({
             <button
               className="text-button"
               onClick={() =>
-                external(`https://www.bilibili.com/video/${task.bv_id}`)
+                external(isImagePost ? `https://t.bilibili.com/${task.bv_id}` : `https://www.bilibili.com/video/${task.bv_id}`)
               }
             >
               <ExternalLink size={14} />
@@ -1769,7 +1817,7 @@ function TaskDetail({
       {task.translation?.state === "queued" && (
         <p className="help">旧译文已清空，{task.status === "translating" ? "正在重新翻译。" : "等待重新翻译。"}</p>
       )}
-      {task.source_kind !== "local" && task.translation && !["queued", "failed", "cancelled"].includes(task.translation.state || "") && (
+      {task.source_kind !== "local" && !isImagePost && task.translation && !["queued", "failed", "cancelled"].includes(task.translation.state || "") && (
         <p className="help">
           翻译来源：
           {
@@ -1812,6 +1860,8 @@ function TaskDetail({
       </div>
       {tab === "metadata" && (
         <div className="detail-form">
+          {isImagePost && <><ReportError message={postImagesError} /><PostImages images={postImages} /></>}
+          {!isImagePost &&
           <label className="field">
             中文标题 <span>{title.length} / 80</span>
             <input
@@ -1820,9 +1870,9 @@ function TaskDetail({
               readOnly={!editable(task)}
               onChange={(e) => setTitle(e.target.value)}
             />
-          </label>
+          </label>}
           <label className="field">
-            简介 <span>{description.length} / {descriptionLimit}</span>
+            {isImagePost ? "图文正文" : "简介"} <span>{description.length} / {descriptionLimit}</span>
             <textarea
               rows={7}
               value={description}
@@ -1832,7 +1882,7 @@ function TaskDetail({
             />
           </label>
           <p className="help">
-            {task.source_kind === "local" ? "投稿成功后保留源视频和任务工作目录。" : "简介中会保留原作者。获得 BV 号后，任务素材将自动清理。"}
+            {isImagePost ? "动态发布后保留源图片和任务工作目录。" : task.source_kind === "local" ? "投稿成功后保留源视频和任务工作目录。" : "简介中会保留原作者。获得 BV 号后，任务素材将自动清理。"}
           </p>
           {editable(task) && (
             <div className="inline-controls">
@@ -1843,7 +1893,7 @@ function TaskDetail({
                   action(async () => {
                     await request("tasks.update_metadata", {
                       task_id: task.task_id,
-                      title,
+                      title: isImagePost ? description.trim().split("\n")[0].slice(0, 80) : title,
                       description,
                     });
                     await refresh();
@@ -1853,7 +1903,7 @@ function TaskDetail({
                 <Check size={15} />
                 保存修改
               </button>
-              {task.source_kind !== "local" && <button
+              {task.source_kind !== "local" && !isImagePost && <button
                 className="secondary" disabled={busy}
                 onClick={() => setConfirm("retranslate")}
               >重新翻译</button>}
@@ -1887,24 +1937,24 @@ function TaskDetail({
       {task.status === "submission_unknown" &&
         !task.publications?.some((p) => p.platform !== "bilibili") && (
           <div className="resolve-box">
-            <strong>先核对创作中心，再继续处理</strong>
-            <p>网络中断不一定代表投稿失败。登记 BV 号会保留本地素材。</p>
+            <strong>{isImagePost ? "先核对账号动态，再继续处理" : "先核对创作中心，再继续处理"}</strong>
+            <p>{isImagePost ? "网络中断不一定代表发布失败。登记动态 ID 会保留本地图片。" : "网络中断不一定代表投稿失败。登记 BV 号会保留本地素材。"}</p>
             <button
               className="text-button"
               onClick={() =>
                 external(
-                  "https://member.bilibili.com/platform/upload-manager/article",
+                  isImagePost ? `https://space.bilibili.com/${task.account_uid_snapshot}/dynamic` : "https://member.bilibili.com/platform/upload-manager/article",
                 )
               }
             >
-              打开创作中心 <ExternalLink size={14} />
+              {isImagePost ? "打开账号动态" : "打开创作中心"} <ExternalLink size={14} />
             </button>
             <div className="inline-controls">
               <input
-                aria-label="登记 BV 号"
+                aria-label={isImagePost ? "登记动态 ID" : "登记 BV 号"}
                 value={bv}
                 onChange={(e) => setBv(e.target.value)}
-                placeholder="BV…"
+                placeholder={isImagePost ? "数字动态 ID" : "BV…"}
               />
               <button
                 className="secondary"
@@ -1916,7 +1966,7 @@ function TaskDetail({
                       bv_id: bv,
                     });
                     await refresh();
-                  }, "BV 号已登记。")
+                  }, isImagePost ? "动态 ID 已登记。" : "BV 号已登记。")
                 }
               >
                 登记已提交稿件
@@ -1930,7 +1980,7 @@ function TaskDetail({
             </button>
           </div>
         )}
-      {retryable(task) && (
+      {retryable(task) && task.source_kind !== "local" && !isImagePost && (
         <button
           className="text-button"
           disabled={busy}
@@ -1954,12 +2004,12 @@ function TaskDetail({
             {confirm === "retranslate"
               ? "将立即清空当前中文标题和简介（含人工修改），按当前设置重新进入翻译队列。若翻译失败，旧译文不会恢复；完成后需重新预览。确定继续？"
               : confirm === "submit"
-                ? `确认投稿到 ${task.account_name_snapshot} · UID ${task.account_uid_snapshot}${task.publications?.some((p) => p.platform === "douyin") ? "，并同步到抖音" : ""}${task.publications?.some((p) => p.platform === "acfun") ? "，并同步到 AcFun" : ""}？`
+                ? `确认投稿到 ${task.account_name_snapshot} · UID ${task.account_uid_snapshot}${task.publications?.some((p) => p.platform === "douyin") ? "，并同步到抖音" : ""}${task.publications?.some((p) => p.platform === "acfun") ? "，并同步到 AcFun" : ""}${task.publications?.some((p) => p.platform === "youtube") ? "，并同步到 YouTube" : ""}${task.publications?.some((p) => p.platform === "xiaohongshu") ? "，并同步到小红书" : ""}${task.publications?.some((p) => ["twitter", "facebook", "tiktok"].includes(p.platform)) ? "，并提交所选同步平台" : ""}？`
                 : confirm === "repair"
                   ? "准备原稿件的替换视频？此操作不会投稿。"
                   : confirm === "delete_history"
                     ? "确定从本机删除这条任务及其所有平台投稿记录？不会删除平台上的稿件。未投稿成功的任务会一并删除本机素材；已提交或待核对的任务会保留素材。删除后只能从备份恢复记录。"
-                  : "确认创作中心没有这条稿件？"}
+                  : isImagePost ? "确认账号动态中没有这条图文？" : "确认创作中心没有这条稿件？"}
           </strong>
           <div>
             <button className="secondary" onClick={() => setConfirm("")}>
@@ -2030,7 +2080,8 @@ function TaskDetail({
               !task.account_id ||
               title !== task.title_zh ||
               description !== task.desc_zh ||
-              douyinDirty
+              douyinDirty ||
+              task.publications?.some((pub) => pub.status === "ready" && !canConfirmPublication(pub))
             }
             title="请先保存修改"
             onClick={() => setConfirm("submit")}
@@ -2039,7 +2090,7 @@ function TaskDetail({
             确认投稿
           </button>
         )}
-        {task.status === "submitted" && task.bv_id && task.source_kind !== "local" && (
+        {task.status === "submitted" && task.bv_id && task.source_kind !== "local" && !isImagePost && (
           <button
             className="secondary"
             disabled={busy}
@@ -2110,6 +2161,9 @@ function Account({
       <AccountsPanel auth={auth} refresh={refresh} />
       <DouyinAccountPanel />
       <AcfunAccountPanel />
+      <XiaohongshuAccountPanel />
+      <YoutubeAccountPanel />
+      <SocialAccountPanels />
       <TranslationPanel
         config={config}
         busy={busy}
@@ -2175,8 +2229,6 @@ function Settings({
   action,
   refresh,
   diagnostics,
-  setDiagnostics,
-  exportLogs,
 }: {
   paused: boolean;
   config: Config;
@@ -2184,19 +2236,13 @@ function Settings({
   action: Action;
   refresh: () => Promise<void>;
   diagnostics: any;
-  setDiagnostics: (v: any) => void;
-  exportLogs: () => void;
 }) {
   const [form, setForm] = useState(config);
-  const [importConfirm, setImportConfirm] = useState(false);
   useEffect(() => setForm(config), [config]);
   const update = (key: keyof Config, value: unknown) =>
     setForm((old) => ({ ...old, [key]: value }));
   const unsaved = (...keys: (keyof Config)[]) => keys.some((key) => form[key] !== config[key]);
   const supportsAudioLanguage = typeof config.youtube_audio_language === "string";
-  const toolsReady = diagnostics &&
-    ["ffmpeg", "ffprobe", "biliup"].every((name) => diagnostics.tools.some((tool: any) => tool.name === name && tool.available)) &&
-    diagnostics.tools.some((tool: any) => ["deno", "node"].includes(tool.name) && tool.available);
   return (
     <div className="settings-stack">
       <ResourceMonitor paused={paused} />
@@ -2304,8 +2350,8 @@ function Settings({
             <h2>投稿默认值</h2>
             <p>新建任务时保存参数快照，修改默认值不影响已有任务。</p>
           </div>
-          <StatusBadge tone={unsaved("bili_tid", "acfun_channel_id", "bili_tags", "bili_line", "upload_gap_seconds") ? "error" : "success"}>
-            {unsaved("bili_tid", "acfun_channel_id", "bili_tags", "bili_line", "upload_gap_seconds") ? "待保存" : "已保存"}
+          <StatusBadge tone={unsaved("youtube_category_id", "youtube_privacy_status", "youtube_made_for_kids", "bili_tid", "acfun_channel_id", "bili_tags", "bili_line", "upload_gap_seconds") ? "error" : "success"}>
+            {unsaved("youtube_category_id", "youtube_privacy_status", "youtube_made_for_kids", "bili_tid", "acfun_channel_id", "bili_tags", "bili_line", "upload_gap_seconds") ? "待保存" : "已保存"}
           </StatusBadge>
         </div>
         <div className="section-body form-grid">
@@ -2322,6 +2368,12 @@ function Settings({
           <AcfunChannelSelect label="AcFun 默认分区（自动投稿必填）"
             value={form.acfun_channel_id} disabled={busy}
             onChange={(value) => update("acfun_channel_id", value)} />
+          <YoutubeCategorySelect value={form.youtube_category_id || "22"} disabled={busy}
+            onChange={(value) => update("youtube_category_id", value)} />
+          <YoutubePrivacySelect value={form.youtube_privacy_status || "private"} disabled={busy}
+            onChange={(value) => update("youtube_privacy_status", value as Config["youtube_privacy_status"])} />
+          <label className="checkbox"><input type="checkbox" checked={form.youtube_made_for_kids || false} disabled={busy}
+            onChange={(e) => update("youtube_made_for_kids", e.target.checked)} />YouTube 默认面向儿童</label>
           <div className="field">
             上传线路
             <StyledSelect
@@ -2445,6 +2497,9 @@ function Settings({
                 work_dir,
                 bili_tid,
                 acfun_channel_id,
+                youtube_category_id,
+                youtube_privacy_status,
+                youtube_made_for_kids,
                 bili_tags,
                 bili_line,
                 youtube_max_height,
@@ -2460,6 +2515,9 @@ function Settings({
                   work_dir,
                   bili_tid,
                   acfun_channel_id,
+                  youtube_category_id,
+                  youtube_privacy_status,
+                  youtube_made_for_kids,
                   bili_tags,
                   bili_line,
                   youtube_max_height,
@@ -2479,96 +2537,6 @@ function Settings({
           保存设置
         </button>
       </div>
-      <section className="settings-card">
-        <div className="section-title">
-          <div>
-            <h2>环境与数据</h2>
-            <p>检查本地工具，或导入命令行版本的任务记录。</p>
-          </div>
-          <div className="section-actions">
-            <StatusBadge tone={!diagnostics ? "neutral" : toolsReady ? "success" : "error"}>
-              {!diagnostics ? "待检测" : toolsReady ? "工具就绪" : "需处理"}
-            </StatusBadge>
-            <button
-              className="text-button"
-              disabled={busy}
-              onClick={() =>
-                action(async () =>
-                  setDiagnostics(await request("system.diagnostics")),
-                )
-              }
-            >
-              <RefreshCw size={14} />
-              重新检测
-            </button>
-          </div>
-        </div>
-        <div className="section-body">
-          <div className="tool-list">
-            {diagnostics?.tools.map((tool: any) => (
-              <div className="tool-row" key={tool.name}>
-                <span>
-                  {tool.available ? (
-                    <CheckCircle2 size={16} />
-                  ) : (
-                    <CircleAlert size={16} />
-                  )}
-                  {tool.name}
-                </span>
-                <small title={tool.path}>{tool.version}</small>
-              </div>
-            ))}
-          </div>
-          <p className="help">
-            YouTube 解析需要 Deno 或 Node.js
-            中至少一个。第一期开发版使用本机工具，后续安装包将随附依赖。
-          </p>
-          <div className="button-row">
-            <button
-              className="secondary"
-              disabled={busy}
-              onClick={() => setImportConfirm(true)}
-            >
-              导入旧项目任务
-            </button>
-            <button className="secondary" disabled={busy} onClick={exportLogs}>
-              <ArrowDownToLine size={15} />
-              导出诊断日志
-            </button>
-          </div>
-        </div>
-      </section>
-      {importConfirm && (
-        <Modal title="导入旧项目记录" close={() => setImportConfirm(false)}>
-          <p className="modal-copy">
-            请先停止旧命令行程序。将复制任务记录并保留原素材位置，不会移动视频或导入密钥。已存在的视频
-            ID 会跳过。
-          </p>
-          <div className="modal-actions">
-            <button
-              className="secondary"
-              onClick={() => setImportConfirm(false)}
-            >
-              取消
-            </button>
-            <button
-              className="primary"
-              disabled={busy}
-              onClick={() =>
-                action(async () => {
-                  const path = await chooseDirectory();
-                  if (path) {
-                    await request("data.import", { path });
-                    setImportConfirm(false);
-                  }
-                }, "旧任务记录已导入。")
-              }
-            >
-              选择旧项目目录
-            </button>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }

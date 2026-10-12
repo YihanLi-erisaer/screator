@@ -4,7 +4,7 @@ import { request } from "./bridge";
 import { StyledSelect } from "./StyledSelect";
 import { labels, type BiliAccount } from "./types";
 
-type Platform = "bilibili" | "acfun" | "douyin";
+type Platform = "bilibili" | "acfun" | "douyin" | "youtube" | "twitter" | "facebook" | "tiktok" | "xiaohongshu";
 type Summary = { account_id: string; uid: string; name: string; followers: number | null; views: number | null; publications: number | null };
 type Submission = {
   publication_id: string; task_id: string; platform: Platform; account_id: string;
@@ -16,7 +16,7 @@ type Result = { items: Submission[]; total: number; accounts: Summary[]; updated
 const PAGE_SIZE = 20;
 const REFRESH_MS = 300_000;
 const format = (value: number | null | undefined) => value == null ? "--" : value.toLocaleString();
-const platformName: Record<Platform, string> = { bilibili: "Bilibili", acfun: "AcFun", douyin: "抖音" };
+const platformName: Record<Platform, string> = { bilibili: "Bilibili", acfun: "AcFun", douyin: "抖音", youtube: "YouTube", twitter: "X（Twitter）", facebook: "Facebook Page", tiktok: "TikTok", xiaohongshu: "小红书" };
 
 export function DataCenter({ accounts, onOpenTask, paused = false }: { accounts: BiliAccount[]; onOpenTask: (taskId: string) => void; paused?: boolean }) {
   const [platform, setPlatform] = useState("");
@@ -67,10 +67,10 @@ export function DataCenter({ accounts, onOpenTask, paused = false }: { accounts:
     <section className="task-panel data-panel" aria-label="稿件数据">
       <div className="panel-toolbar data-toolbar">
         <div className="tabs" aria-label="平台筛选">
-          {[["", "全部平台"], ["bilibili", "Bilibili"], ["acfun", "AcFun"], ["douyin", "抖音"]].map(([value, label]) =>
+          {[["", "全部平台"], ["bilibili", "Bilibili"], ["acfun", "AcFun"], ["douyin", "抖音"], ["youtube", "YouTube"], ["twitter", "X（Twitter）"], ["facebook", "Facebook Page"], ["tiktok", "TikTok"], ["xiaohongshu", "小红书"]].map(([value, label]) =>
             <button key={value} className={platform === value ? "current" : ""} onClick={() => { setPlatform(value); setAccountId(""); setOffset(0); }}>{label}</button>)}
         </div>
-        {(platform === "" || platform === "bilibili") && <div className="data-account-filter"><span>按账号筛选</span>
+        {platform === "bilibili" && <div className="data-account-filter"><span>按账号筛选</span>
           <StyledSelect label="按账号筛选" value={accountId} onChange={(value) => { setAccountId(value); setOffset(0); }}
             options={[{ value: "", label: "全部账号" }, ...accounts.filter((a) => a.lifecycle === "active").map((a) =>
               ({ value: a.account_id, label: a.remark || a.nickname || `UID ${a.uid}` }))]} />

@@ -6,7 +6,7 @@ test("Douyin synchronization is disabled without login", async ({ page }) => {
     .getByRole("button", { name: /新建任务/ })
     .first()
     .click();
-  await page.getByRole("tab", { name: "同步投稿" }).click();
+  await page.getByRole("tab", { name: "一键上传" }).click();
   const dialog = page.getByRole("dialog");
   await expect(
     dialog.getByRole("checkbox", { name: /同步上传抖音/ }),
@@ -22,7 +22,7 @@ test("one logged-in Douyin account enables opt-in in both modes", async ({
     .getByRole("button", { name: /新建任务/ })
     .first()
     .click();
-  await page.getByRole("tab", { name: "同步投稿" }).click();
+  await page.getByRole("tab", { name: "一键上传" }).click();
   const dialog = page.getByRole("dialog");
   const sync = dialog.getByRole("checkbox", { name: /同步上传抖音/ });
   await expect(sync).toBeEnabled();
@@ -36,7 +36,7 @@ test("one logged-in Douyin account enables opt-in in both modes", async ({
     .getByRole("button", { name: /新建任务/ })
     .first()
     .click();
-  await page.getByRole("tab", { name: "同步投稿" }).click();
+  await page.getByRole("tab", { name: "一键上传" }).click();
   await expect(
     page.getByRole("dialog").getByRole("checkbox", { name: /同步上传抖音/ }),
   ).not.toBeChecked();

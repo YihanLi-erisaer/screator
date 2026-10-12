@@ -60,9 +60,15 @@ class DesktopService:
             self.data_center = DataCenter(self.store, self.accounts)
             from screator.douyin import DouyinService
             from screator.acfun import AcfunService
+            from screator.youtube_upload import YoutubeUploadService
             self.douyin = DouyinService(self.store, self.config, self.emit)
             self.acfun = AcfunService(self.store, self.config, self.emit)
-            self.scheduler = Scheduler(self.store, self.config, self.emit, self.accounts, self.douyin, self.acfun)
+            self.youtube_upload = YoutubeUploadService(self.store, self.config, self.emit)
+            from screator.social_upload import PLATFORMS, SocialUploadService
+            self.social = {platform: SocialUploadService(self.store, self.config, self.emit, platform) for platform in PLATFORMS}
+            from screator.xiaohongshu import XiaohongshuService
+            self.xiaohongshu = XiaohongshuService(self.store, self.config, self.emit)
+            self.scheduler = Scheduler(self.store, self.config, self.emit, self.accounts, self.douyin, self.acfun, self.youtube_upload, self.social, self.xiaohongshu)
             self.scheduler.materials = self.materials
         except BaseException:
             self.owner_lock.__exit__(None, None, None)
@@ -88,6 +94,14 @@ class DesktopService:
         os.environ["SCREATOR_VALIDATION_CACHE"] = "1" if self.config.values["validation_cache"] else "0"
 
     def emit(self, event, payload):
+        if event in ("xiaohongshu.auth.changed", "xiaohongshu.queue.resume") and hasattr(self, "scheduler"):
+            lane = self.scheduler.xiaohongshu_lane
+            if event == "xiaohongshu.auth.changed":
+                lane.wake(credentials=True)
+            else:
+                with lane.condition:
+                    for item in lane.items: item.wait_reason, item.deadline = "", 0
+                    lane.condition.notify_all()
         if event == "auth.status":
             if self.login and payload.get("session_id") != self.login.session_id:
                 return
@@ -100,6 +114,21 @@ class DesktopService:
             self.scheduler.douyin_lane.wake(credentials=True)
         if event == "acfun.auth.changed" and hasattr(self, "scheduler"):
             self.scheduler.acfun_lane.wake(credentials=True)
+        if event == "youtube.auth.changed" and hasattr(self, "scheduler"):
+            self.scheduler.youtube_lane.wake(credentials=True)
+        if event in ("social.auth.changed", "social.queue.resume") and hasattr(self, "scheduler"):
+            lane = self.scheduler.social_lanes[payload["platform"]]
+            if event == "social.auth.changed": lane.wake(credentials=True)
+            else:
+                with lane.condition:
+                    for item in lane.items: item.wait_reason, item.deadline = "", None
+                    lane.condition.notify_all()
+        if event == "youtube.queue.resume" and hasattr(self, "scheduler"):
+            lane = self.scheduler.youtube_lane
+            with lane.condition:
+                for item in lane.items:
+                    item.wait_reason, item.deadline = "", None
+                lane.condition.notify_all()
         if event == "acfun.queue.resume" and hasattr(self, "scheduler"):
             lane = self.scheduler.acfun_lane
             with lane.condition:
@@ -145,6 +174,7 @@ class DesktopService:
         handlers = {
             "materials.libraries": self.materials.libraries, "materials.create_library": self.materials.create,
             "materials.list": self.materials.list, "materials.rename": self.materials.rename,
+            "materials.import": self.materials.import_files,
             "materials.delete": self.materials.delete, "materials.open": self.materials.open,
             "materials.download": self.create_download,
             "system.health": self.health, "system.diagnostics": self.diagnostics,
@@ -164,6 +194,15 @@ class DesktopService:
             "tasks.repair": self.repair, "tasks.update_metadata": self.update_metadata,
             "tasks.resolve": self.resolve, "tasks.cover": self.cover,
             "tasks.open_folder": self.open_folder,
+            "image_posts.inspect": self.inspect_images, "image_posts.create": self.create_image_post,
+            "image_posts.images": self.post_images,
+            "xiaohongshu.auth.status": self.xiaohongshu.status,
+            "xiaohongshu.auth.start": self.xiaohongshu.start,
+            "xiaohongshu.auth.poll": self.xiaohongshu.poll,
+            "xiaohongshu.auth.cancel": self.xiaohongshu.cancel,
+            "xiaohongshu.auth.clear": self.xiaohongshu.clear,
+            "xiaohongshu.accounts.archive": self.xiaohongshu.archive,
+            "xiaohongshu.accounts.resume_uploads": self.xiaohongshu.resume,
             "auth.status": self.auth_status, "auth.login.start": self.login_start,
             "auth.login.cancel": self.login_cancel, "auth.renew": self.renew,
             "auth.import": self.import_cookies, "auth.youtube_export": self.export_youtube,
@@ -184,6 +223,17 @@ class DesktopService:
             "acfun.auth.clear": self.acfun.clear, "acfun.accounts.archive": self.acfun.archive,
             "acfun.accounts.resume_uploads": self.acfun.resume,
             "acfun.channels": self.acfun.channels,
+            "youtube.auth.status": self.youtube_upload.status, "youtube.auth.start": self.youtube_upload.start,
+            "youtube.auth.configure": self.configure_youtube,
+            "youtube.auth.poll": self.youtube_upload.poll, "youtube.auth.cancel": self.youtube_upload.cancel,
+            "youtube.auth.clear": self.youtube_upload.clear, "youtube.accounts.archive": self.youtube_upload.archive,
+            "youtube.accounts.resume_uploads": self.youtube_upload.resume,
+            "youtube.categories": self.youtube_upload.categories,
+            "social.auth.status": self.social_status, "social.auth.bind": self.bind_social,
+            "social.auth.clear": self.clear_social, "social.accounts.archive": self.archive_social,
+            "social.accounts.resume_uploads": self.resume_social,
+            "social.creator_info": self.social_creator, "social.publications.check": self.check_social_publication,
+            "social.publications.preview": self.preview_social_video,
             "acfun.verification": self.acfun.verification,
             "acfun.verification.complete": self.complete_acfun_verification,
             "acfun.verification.refresh": self.refresh_acfun_verification,
@@ -200,8 +250,10 @@ class DesktopService:
         return handler(**params)
 
     def health(self):
-        capabilities = ["single_url", "account_lanes", "graceful_shutdown", "local_translation_v1", "douyin_sync_v1", "acfun_sync_v1", "materials_v1", "local_publish_v1"]
-        return {"protocol_version": 2, "schema_version": 6, "account_limit": 5,
+        from screator.db import SCHEMA_VERSION
+        capabilities = ["single_url", "account_lanes", "graceful_shutdown", "local_translation_v1", "douyin_sync_v1", "acfun_sync_v1", "youtube_sync_v1", "social_sync_v1", "materials_v1", "local_publish_v1", "image_posts_v1"]
+        capabilities.append("xiaohongshu_sync_v1")
+        return {"protocol_version": 2, "schema_version": SCHEMA_VERSION, "account_limit": 5,
                 "capabilities": capabilities,
                 "migration_notes": self.migration_notes, "version": __version__,
                 "data_dir": str(self.paths.root)}
@@ -283,9 +335,10 @@ class DesktopService:
                     publications.change(self.store, publication["publication_id"], text="")
                 elif publication["platform"] == "douyin" and publication["text"] == old_title:
                     publications.change(self.store, publication["publication_id"], text="")
-                elif publication["platform"] == "acfun":
+                elif publication["platform"] in ("acfun", "youtube", "twitter", "facebook", "tiktok"):
                     preview = json.loads(publication["snapshot"])
                     preview["description"] = ""
+                    if publication["platform"] == "tiktok": preview["consent"] = False
                     if preview.get("title_source") == "generated":
                         preview["title"] = ""
                     publications.change(self.store, publication["publication_id"],
@@ -374,11 +427,38 @@ class DesktopService:
 
     def create(self, url, operation_id, account_id=None, mode="preview", sync_douyin=False, douyin_account_id=None, douyin_binding_revision=None,
                sync_acfun=False, acfun_account_id=None, acfun_binding_revision=None,
-               local_path=None, title="", description=""):
+               sync_youtube=False, youtube_account_id=None, youtube_binding_revision=None,
+               local_path=None, title="", description="", cover_path=None, sync_social=None):
         if type(sync_douyin) is not bool: raise AppError("同步抖音必须为开关值。")
         if type(sync_acfun) is not bool: raise AppError("同步 AcFun 必须为开关值。")
+        if type(sync_youtube) is not bool: raise AppError("同步 YouTube 必须为开关值。")
         dy_account = ac_account = None
+        yt_account = None
+        social_accounts = {}
+        social_targets = sync_social if sync_social is not None else []
+        if (not isinstance(social_targets, list) or len(social_targets) > 3 or any(not isinstance(v, dict)
+                or set(v) - {"platform", "account_id", "binding_revision"} or v.get("platform") not in self.social for v in social_targets)
+                or len({v["platform"] for v in social_targets}) != len(social_targets)):
+            raise AppError("同步平台目标无效。")
         ac_tags = None
+        local_cover = ""
+        if cover_path is not None:
+            if not isinstance(cover_path, str):
+                raise AppError("封面文件路径必须为字符串。")
+            local_cover = cover_path.strip()
+        if local_cover:
+            if local_path is None:
+                raise AppError("自定义封面仅支持本地视频任务。")
+            cover = Path(local_cover)
+            if not cover.is_absolute() or not cover.is_file() or cover.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}:
+                raise AppError("请选择一个存在的封面图片文件（JPG、PNG、WebP、BMP）。")
+            try:
+                from PIL import Image
+                with Image.open(cover) as image:
+                    image.verify()
+            except Exception as exc:
+                raise AppError("封面图片无法读取，请选择有效的图片文件。") from exc
+            local_cover = str(cover.resolve())
         if local_path is not None:
             from screator.materials import EXTENSIONS
             path = Path(local_path)
@@ -396,7 +476,12 @@ class DesktopService:
         if not account_id or not isinstance(account_id, str):
             raise AppError("请选择本次投稿的 Bilibili 账号。")
         def preflight():
-            nonlocal dy_account, ac_account, ac_tags
+            nonlocal dy_account, ac_account, ac_tags, yt_account
+            for target in social_targets:
+                platform = target["platform"]
+                social_accounts[platform] = self.social[platform].check(target.get("account_id"), target.get("binding_revision"), auto=mode == "auto")
+            if sync_youtube:
+                yt_account = self.youtube_upload.check(youtube_account_id, youtube_binding_revision, auto=mode == "auto")
             if sync_douyin:
                 dy_account = self.douyin.check(douyin_account_id, douyin_binding_revision, auto=mode == "auto")
             if sync_acfun:
@@ -416,7 +501,8 @@ class DesktopService:
             account = self.store.account(account_id)
             old = self.store.for_account(video_id, account_id)
             if old:
-                selected = {"bilibili"} | ({"douyin"} if sync_douyin else set()) | ({"acfun"} if sync_acfun else set())
+                selected = {"bilibili"} | ({"douyin"} if sync_douyin else set()) | ({"acfun"} if sync_acfun else set()) | ({"youtube"} if sync_youtube else set())
+                selected.update(social_accounts)
                 existing = {p["platform"] for p in publications.items(self.store, old.task_id)}
                 if selected != existing:
                     raise AppError("此 Bilibili 账号已有同视频任务，目标不可追加；请继续原任务。")
@@ -425,6 +511,7 @@ class DesktopService:
                         account_uid_snapshot=account["uid"], account_name_snapshot=account["nickname"] or account["uid"])
             if local_path is not None:
                 task.source_kind, task.local_path = "local", str(path.resolve())
+                task.local_cover_path = local_cover
                 task.title_orig = task.title_zh = title.strip()
                 task.desc_orig = task.desc_zh = description
             self.store.upsert(task)
@@ -449,14 +536,101 @@ class DesktopService:
                 publications.change(self.store, ac["publication_id"], snapshot=json.dumps({"user_id": ac_account["user_id"], "nickname": ac_account["nickname"],
                     "binding_revision": ac_account["binding_revision"], "adapter_version": ac_account["adapter_version"],
                     "channel_id": self.config.values["acfun_channel_id"], "tags": ac_tags}, ensure_ascii=False))
+            if sync_youtube:
+                from screator.youtube_upload import tags_from_bilibili
+                if self.youtube_upload.account() != yt_account:
+                    raise AppError("YouTube 账号状态已变化，请重试。")
+                if self.store._conn.execute("SELECT 1 FROM task_publications WHERE platform='youtube' AND account_id=? AND source_video_id=?", (yt_account["account_id"], video_id)).fetchone():
+                    raise AppError("此 YouTube 频道已有同视频任务，请继续原任务。")
+                self.store._conn.execute("INSERT INTO task_publications(publication_id,task_id,platform,account_id,source_video_id) VALUES(?,?,'youtube',?,?)", (str(uuid.uuid4()), task.task_id, yt_account["account_id"], video_id))
+                yt = publications.for_platform(self.store, task.task_id, "youtube")
+                publications.change(self.store, yt["publication_id"], snapshot=json.dumps({
+                    "channel_id": yt_account["channel_id"], "nickname": yt_account["nickname"],
+                    "binding_revision": yt_account["binding_revision"], "category_id": self.config.values["youtube_category_id"],
+                    "privacy_status": self.config.values["youtube_privacy_status"], "made_for_kids": self.config.values["youtube_made_for_kids"],
+                    "tags": tags_from_bilibili(self.config.values["bili_tags"])}, ensure_ascii=False))
+            for platform, social_account in social_accounts.items():
+                if self.social[platform].account() != social_account: raise AppError("同步账号状态已变化，请重试。")
+                if self.store._conn.execute("SELECT 1 FROM task_publications WHERE platform=? AND account_id=? AND source_video_id=?", (platform, social_account["account_id"], video_id)).fetchone():
+                    raise AppError("此平台账号已有同视频任务，请继续原任务。")
+                publication_id = str(uuid.uuid4())
+                self.store._conn.execute("INSERT INTO task_publications(publication_id,task_id,platform,account_id,source_video_id) VALUES(?,?,?,?,?)", (publication_id, task.task_id, platform, social_account["account_id"], video_id))
+                snapshot = {"subject_id": social_account["subject_id"], "nickname": social_account["nickname"], "binding_revision": social_account["binding_revision"],
+                    "title_source": "generated", "privacy_level": "", "allow_comment": False, "allow_duet": False, "allow_stitch": False,
+                    "content_disclosure": False, "brand_organic": False, "brand_content": False, "is_aigc": False, "consent": False, "original_content": False, "cover_timestamp_ms": 0}
+                publications.change(self.store, publication_id, snapshot=json.dumps(snapshot, ensure_ascii=False))
             self.scheduler.add(task, mode)
             return {"task_id": task.task_id, "account_id": account_id, "created": True, "status": task.status}
         params = {"url": canonical, "account_id": account_id, "mode": mode}
         if local_path is not None:
-            params.update(local_path=str(path.resolve()), title=title, description=description)
+            params.update(local_path=str(path.resolve()), title=title, description=description, cover_path=local_cover)
         if sync_douyin: params.update(sync_douyin=True, douyin_account_id=douyin_account_id, douyin_binding_revision=douyin_binding_revision)
         if sync_acfun: params.update(sync_acfun=True, acfun_account_id=acfun_account_id, acfun_binding_revision=acfun_binding_revision)
+        if sync_youtube: params.update(sync_youtube=True, youtube_account_id=youtube_account_id, youtube_binding_revision=youtube_binding_revision)
+        if sync_social is not None: params["sync_social"] = sync_social
         return self.operation(operation_id, "tasks.create", action, params, preflight)
+
+    def inspect_images(self, paths):
+        from screator.image_posts import inspect
+        return inspect(paths)
+
+    def post_images(self, task_id):
+        from screator.image_posts import prepared_paths, inspect
+        task = self.task(task_id)
+        if task.source_kind != "image_post" or task.image_paths == "[]":
+            return {"items": []}
+        return inspect([str(p) for p in prepared_paths(task)])
+
+    def create_image_post(self, paths, text, account_id, operation_id, mode="preview",
+                          sync_xiaohongshu=False, xiaohongshu_account_id=None,
+                          xiaohongshu_binding_revision=None, xiaohongshu_title=""):
+        from screator import image_posts
+        if type(sync_xiaohongshu) is not bool: raise AppError("同步小红书必须为开关值。")
+        image_posts.validate_text(text)
+        sources = image_posts.paths_list(paths)
+        if sync_xiaohongshu:
+            from screator.xiaohongshu import validate_metadata
+            validate_metadata({"title": xiaohongshu_title, "description": text})
+            if not isinstance(xiaohongshu_account_id, str) or not xiaohongshu_account_id or type(xiaohongshu_binding_revision) is not int:
+                raise AppError("请选择已绑定的小红书账号并刷新登录状态。")
+        if mode not in ("preview", "auto"):
+            raise AppError("任务模式无效。")
+        if not isinstance(account_id, str) or not account_id:
+            raise AppError("请选择本次投稿的 Bilibili 账号。")
+        def preflight():
+            for path in sources:
+                info = image_posts.image_info(path)
+                if sync_xiaohongshu and info["extension"] not in (".jpg", ".png"):
+                    raise AppError("同步小红书的图片仅支持 JPG、PNG，请替换 GIF 图片。")
+            if sync_xiaohongshu:
+                self.xiaohongshu.check(xiaohongshu_account_id, xiaohongshu_binding_revision)
+            account = self.store.account(account_id)
+            if mode == "auto" and account["auth_state"] != "valid":
+                self.accounts.verify(account_id)
+        def action():
+            account = self.store.account(account_id)
+            xhs_account = self.xiaohongshu.check(xiaohongshu_account_id, xiaohongshu_binding_revision) if sync_xiaohongshu else None
+            identity = str(uuid.uuid4())
+            title = text.strip().splitlines()[0][:80]
+            task = Task("image-" + identity, "", "pending", task_id=identity, source_kind="image_post", asset_type="image",
+                        account_id=account_id, account_uid_snapshot=account["uid"],
+                        account_name_snapshot=account["nickname"] or account["uid"],
+                        title_orig=title, title_zh=title, desc_orig=text, desc_zh=text,
+                        source_image_paths=json.dumps([str(p.resolve()) for p in sources], ensure_ascii=False))
+            self.store.upsert(task)
+            publications.ensure_bili(self.store, task)
+            if xhs_account:
+                self.store._conn.execute("INSERT INTO task_publications(publication_id,task_id,platform,account_id,source_video_id,snapshot,text) VALUES(?,?,'xiaohongshu',?,?,?,?)",
+                    (str(uuid.uuid4()), task.task_id, xhs_account["account_id"], task.video_id,
+                     json.dumps({"user_id": xhs_account["user_id"], "nickname": xhs_account["nickname"],
+                                 "title": xiaohongshu_title.strip(), "description": text}, ensure_ascii=False), xiaohongshu_title.strip()))
+            self.scheduler.add(task, mode)
+            return {"created": True, "task_id": identity, "account_id": account_id, "status": task.status}
+        params = {"paths": [str(p.resolve()) for p in sources], "text": text, "account_id": account_id, "mode": mode}
+        if sync_xiaohongshu:
+            params.update(sync_xiaohongshu=True, xiaohongshu_account_id=xiaohongshu_account_id,
+                          xiaohongshu_binding_revision=xiaohongshu_binding_revision, xiaohongshu_title=xiaohongshu_title)
+        return self.operation(operation_id, "image_posts.create", action, params, preflight)
 
     def create_download(self, url, library_id, asset_type, operation_id):
         from screator.materials import validate_url, EXTENSIONS
@@ -490,12 +664,15 @@ class DesktopService:
             self.store._conn.execute("UPDATE task_publications SET account_id=? WHERE task_id=? AND platform='bilibili' AND account_id IS NULL", (account_id, task.task_id))
             return asdict(task)
 
-    def list_tasks(self, offset=0, limit=20, search="", status="", history=False, account_id=""):
+    def list_tasks(self, offset=0, limit=20, search="", status="", history=False, account_id="", platform=""):
         if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 20:
             raise AppError("分页参数无效。")
+        if platform and platform not in publications.PLATFORMS:
+            raise AppError("投稿记录平台筛选参数无效。")
         page, total, counts, all_total = self.store.desktop_page(
             offset=offset, limit=limit, search=search, status=status, account_id=account_id,
-            history_statuses=tuple(sorted(history_transfer.HISTORY_STATUSES)) if history else ())
+            history_statuses=tuple(sorted(history_transfer.HISTORY_STATUSES)) if history else (),
+            platform=platform)
         items = [history_transfer.view(item) if isinstance(item, dict) else
                  {**{key: value for key, value in asdict(item).items() if key not in ("desc_orig", "desc_zh")},
                   "publications": publications.items(self.store, item.task_id),
@@ -627,7 +804,7 @@ class DesktopService:
         return self.operation(operation_id, "tasks.retry", action, {"task_id": task_id, "use_current_translation_settings": use_current_translation_settings})
 
     def submit(self, task_id, operation_id, targets=None, revisions=None):
-        if targets is not None and (not isinstance(targets, list) or not targets or len(targets) > 3 or any(not isinstance(v, str) for v in targets) or len(set(targets)) != len(targets)):
+        if targets is not None and (not isinstance(targets, list) or not targets or len(targets) > len(publications.PLATFORMS) or any(not isinstance(v, str) for v in targets) or len(set(targets)) != len(targets)):
             raise AppError("投稿目标列表无效。")
         if revisions is not None and not isinstance(revisions, dict): raise AppError("投稿版本快照无效。")
         def action():
@@ -643,6 +820,15 @@ class DesktopService:
             if not selected or any(p["status"] != "ready" for p in selected): raise AppError("投稿目标尚未准备好。")
             if revisions is not None and any(revisions.get(p["publication_id"]) != p["revision"] for p in selected): raise AppError("文案已变化，请刷新预览后确认。")
             for p in selected:
+                if p["platform"] == "xiaohongshu":
+                    self.xiaohongshu.check(p["account_id"])
+                    self.xiaohongshu.validate_assets(type("TaskRef", (), {"task_id": task_id})(), json.loads(p["snapshot"]))
+                if p["platform"] in self.social:
+                    self.social[p["platform"]].check(p["account_id"])
+                    self.social[p["platform"]].validate_assets(type("TaskRef", (), {"task_id": task_id})(), json.loads(p["snapshot"]))
+                if p["platform"] == "youtube":
+                    self.youtube_upload.check(p["account_id"])
+                    self.youtube_upload.validate_assets(type("TaskRef", (), {"task_id": task_id})(), json.loads(p["snapshot"]))
                 if p["platform"] == "acfun":
                     self.acfun.check(p["account_id"])
                     self.acfun.validate_assets(type("TaskRef", (), {"task_id": task_id})(), json.loads(p["snapshot"]))
@@ -659,7 +845,50 @@ class DesktopService:
             self.ensure_idle()
             return self.douyin.configure(url, pairing_key)
 
-    def update_publication(self, publication_id, text=None, revision=None, title=None, description=None, channel_id=None, tags=None):
+    def configure_youtube(self, path):
+        with self.mutation:
+            self.ensure_idle()
+            return self.youtube_upload.configure(path)
+
+    def social_service(self, platform):
+        if platform not in self.social: raise AppError("同步平台无效。")
+        return self.social[platform]
+
+    def social_status(self, platform, verify=False): return self.social_service(platform).status(verify)
+
+    def bind_social(self, platform, access_token, page_id="", api_version="v25.0"):
+        with self.mutation:
+            return self.social_service(platform).bind(access_token, page_id, api_version)
+
+    def clear_social(self, platform):
+        with self.mutation: return self.social_service(platform).clear()
+
+    def archive_social(self, platform):
+        with self.mutation: return self.social_service(platform).clear(archive=True)
+
+    def resume_social(self, platform): return self.social_service(platform).resume()
+
+    def social_creator(self, platform="tiktok", account_id=None): return self.social_service(platform).creator(account_id)
+
+    def check_social_publication(self, publication_id):
+        with self.mutation:
+            p = publications.get(self.store, publication_id)
+            self.ensure_inactive(p["task_id"])
+            return self.social_service(p["platform"]).check_publication(publication_id)
+
+    def preview_social_video(self, publication_id):
+        p = publications.get(self.store, publication_id)
+        self.social_service(p["platform"])
+        task = self.store.require(p["task_id"])
+        from screator.task_paths import validate_task_paths
+        validate_task_paths(task)
+        if not task.video_path or not Path(task.video_path).is_file(): raise AppError("投稿视频已不存在。")
+        if sys.platform == "win32": os.startfile(task.video_path)
+        else: subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", task.video_path])
+        return {"opened": True}
+
+    def update_publication(self, publication_id, text=None, revision=None, title=None, description=None, channel_id=None, tags=None,
+                           category_id=None, privacy_status=None, made_for_kids=None, social_metadata=None):
         with self.mutation, self.store.transaction():
             p = publications.get(self.store, publication_id)
             self.ensure_inactive(p["task_id"])
@@ -668,6 +897,13 @@ class DesktopService:
             if p["platform"] == "douyin":
                 if not isinstance(text, str) or not 1 <= len(text.strip()) <= 1000: raise AppError("抖音文案须为 1～1000 字。")
                 publications.change(self.store, publication_id, text=text.strip())
+            elif p["platform"] == "xiaohongshu":
+                from screator.xiaohongshu import validate_metadata
+                task = self.store.require(p["task_id"])
+                snapshot = json.loads(p["snapshot"])
+                snapshot.update(title=title.strip() if isinstance(title, str) else title, description=task.desc_zh)
+                validate_metadata(snapshot)
+                publications.change(self.store, publication_id, text=snapshot["title"], snapshot=json.dumps(snapshot, ensure_ascii=False))
             elif p["platform"] == "acfun":
                 if not isinstance(title, str) or not 1 <= len(title.strip()) <= 50: raise AppError("AcFun 标题须为 1～50 字。")
                 # Allow an incomplete draft so a corrected title can be saved before
@@ -682,6 +918,25 @@ class DesktopService:
                 snapshot.update(title=title.strip(), title_source="manual", description=task.desc_zh,
                                 channel_id=channel_id, tags=shared_tags)
                 publications.change(self.store, publication_id, snapshot=json.dumps(snapshot, ensure_ascii=False))
+            elif p["platform"] == "youtube":
+                from screator.youtube_upload import validate_metadata, tags_from_bilibili
+                task = self.store.require(p["task_id"])
+                saved = self.store.get_job(p["task_id"]) or {}
+                snapshot = json.loads(p["snapshot"])
+                snapshot.update(title=title.strip() if isinstance(title, str) else title, title_source="manual",
+                    description=task.desc_zh, category_id=category_id, privacy_status=privacy_status, made_for_kids=made_for_kids,
+                    tags=tags_from_bilibili(saved.get("settings", {}).get("bili_tags", self.config.values["bili_tags"])))
+                validate_metadata(snapshot)
+                publications.change(self.store, publication_id, text=snapshot["title"], snapshot=json.dumps(snapshot, ensure_ascii=False))
+            elif p["platform"] in self.social:
+                service = self.social[p["platform"]]
+                if not isinstance(social_metadata, dict) or set(social_metadata) - {"title", "privacy_level", "allow_comment", "allow_duet", "allow_stitch", "content_disclosure", "brand_organic", "brand_content", "is_aigc", "consent", "original_content", "cover_timestamp_ms"}:
+                    raise AppError("平台投稿信息无效。")
+                snapshot = json.loads(p["snapshot"])
+                snapshot.update(social_metadata)
+                snapshot.update(title_source="manual", description=self.store.require(p["task_id"]).desc_zh)
+                service.validate_metadata(snapshot)
+                publications.change(self.store, publication_id, text=snapshot["title"], snapshot=json.dumps(snapshot, ensure_ascii=False))
             else: raise AppError("此平台不支持编辑投稿目标。")
             return publications.get(self.store, publication_id)
 
@@ -723,8 +978,19 @@ class DesktopService:
                 raise AppError("只能继续已失败、取消或中断的目标；结果待核对时禁止重投。")
             if p["platform"] == "acfun" and self.store._conn.execute("SELECT 1 FROM acfun_attempts WHERE publication_id=? AND create_intent_at!='' AND phase NOT IN ('resolved_not_submitted','rejected')", (publication_id,)).fetchone():
                 raise AppError("AcFun 已记录创建作品意图，须先核对；禁止重投。")
+            if p["platform"] == "youtube" and self.store._conn.execute("SELECT 1 FROM youtube_attempts WHERE publication_id=? AND phase IN ('finalizing','unknown','submitted')", (publication_id,)).fetchone():
+                raise AppError("YouTube 已记录最终上传意图，须先核对；禁止重投。")
+            if p["platform"] in self.social:
+                from screator.social_upload import PROTECTED_PHASES
+                attempt = self.social[p["platform"]].attempt(publication_id)
+                if attempt and attempt["phase"] in PROTECTED_PHASES: raise AppError("此平台已记录发布意图，须先核对，禁止重投。")
             task = self.task(p["task_id"])
-            if not task.video_path or not Path(task.video_path).is_file(): raise AppError("本地素材缺失，请先恢复素材；不会自动重发已成功目标。")
+            if p["platform"] == "xiaohongshu" and self.store._conn.execute("SELECT 1 FROM xiaohongshu_attempts WHERE publication_id=? AND phase IN ('creating','unknown','submitted')", (publication_id,)).fetchone():
+                raise AppError("小红书已记录发布意图，须先核对；禁止重发。")
+            if task.source_kind == "image_post":
+                from screator.image_posts import prepared_paths
+                prepared_paths(task)
+            elif not task.video_path or not Path(task.video_path).is_file(): raise AppError("本地素材缺失，请先恢复素材；不会自动重发已成功目标。")
             publications.change(self.store, publication_id, status="ready", error="")
             publications.project(self.store, task.task_id)
             return {"ready": True}
@@ -762,10 +1028,23 @@ class DesktopService:
             self.ensure_inactive(p["task_id"])
             if p["status"] != "submission_unknown": raise AppError("此目标无需核对。")
             if not_submitted is not True and (not isinstance(remote_id, str) or not remote_id.strip() or len(remote_id) > 512): raise AppError("请填写已核对的作品 ID。")
-            if p["platform"] == "bilibili" and not not_submitted and not re.fullmatch(r"BV[0-9A-Za-z]{10}", remote_id): raise AppError("BV 号格式无效。")
+            if p["platform"] == "bilibili" and not not_submitted:
+                is_image = self.task(p["task_id"]).source_kind == "image_post"
+                if not re.fullmatch(r"[1-9][0-9]{0,29}" if is_image else r"BV[0-9A-Za-z]{10}", remote_id):
+                    raise AppError("动态 ID 须为有效数字。" if is_image else "BV 号格式无效。")
             if p["platform"] == "acfun" and not not_submitted and not re.fullmatch(r"(?i:AC)[1-9][0-9]*", remote_id): raise AppError("AC 号格式无效。")
+            if p["platform"] == "youtube":
+                from screator.youtube_upload import VIDEO_ID
+                if not not_submitted and not VIDEO_ID.fullmatch(remote_id): raise AppError("YouTube 视频 ID 须为 11 位字母、数字、下划线或连字符。")
+                self.youtube_upload.resolve(publication_id, remote_id if not not_submitted else "", not_submitted)
+            if p["platform"] in self.social:
+                self.social[p["platform"]].resolve(publication_id, remote_id if not not_submitted else "", not_submitted)
             if p["platform"] == "douyin":
                 self.douyin.request("POST", "/v1/publications/" + publication_id + "/resolve", {"not_submitted": not_submitted, "remote_id": remote_id})
+            if p["platform"] == "xiaohongshu":
+                from screator.xiaohongshu import NOTE_ID
+                if not not_submitted and not NOTE_ID.fullmatch(remote_id): raise AppError("小红书笔记 ID 须为 24 位小写十六进制字符。")
+                self.xiaohongshu.resolve(publication_id, "" if not_submitted else remote_id, not_submitted)
             if p["platform"] == "acfun":
                 self.store._conn.execute("UPDATE acfun_attempts SET phase=?,douga_id=? WHERE publication_id=? AND create_intent_at!=''",
                     ("resolved_not_submitted" if not_submitted else "manually_submitted", "" if not_submitted else remote_id.removeprefix("AC"), publication_id))
@@ -782,6 +1061,8 @@ class DesktopService:
     def repair(self, task_id, operation_id):
         def action():
             task = self.task(task_id)
+            if task.source_kind == "image_post":
+                raise AppError("图文动态不支持视频修复。")
             if task.status != "submitted" or not task.bv_id:
                 raise AppError("修复用于已取得 BV 号的稿件；只准备本地替换文件。")
             saved = self.store.get_job(task_id) or {}
@@ -798,25 +1079,50 @@ class DesktopService:
             if not isinstance(title, str) or not 1 <= len(title.strip()) <= 80:
                 raise AppError("标题须为 1～80 字。")
             ac = publications.for_platform(self.store, task.task_id, "acfun")
-            desc_limit = 1000 if ac and ac["status"] == "ready" else 2000
+            xhs = publications.for_platform(self.store, task.task_id, "xiaohongshu")
+            desc_limit = 1000 if ac and ac["status"] == "ready" or xhs and xhs["status"] == "ready" else 2000
             if not isinstance(description, str) or len(description) > desc_limit:
                 raise AppError(f"简介不能超过 {desc_limit} 字。")
             task.metadata_revision += 1
             task.title_zh = title.strip().replace("\n", " ")
             body = re.split(r"\n\n————————\n(?:原标题|原作者)：", description, maxsplit=1)[0]
-            task.desc_zh = description if task.source_kind == "local" else translate.build_description(body, task.uploader, desc_limit)
+            if task.source_kind == "image_post":
+                from screator.image_posts import validate_text
+                validate_text(description)
+                if xhs and xhs["status"] == "ready":
+                    from screator.xiaohongshu import validate_metadata
+                    validate_metadata({**json.loads(xhs["snapshot"]), "description": description})
+            task.desc_zh = description if task.source_kind in ("local", "image_post") else translate.build_description(body, task.uploader, desc_limit)
             record = self.store.translation(task_id) or {}
             record.update(state="edited", user_edited=True, description=body)
-            if task.source_kind == "local":
+            if task.source_kind in ("local", "image_post"):
                 self.store.upsert(task)
             else:
                 self.store.save_translation(task, record)
             p = publications.for_platform(self.store, task.task_id, "bilibili")
             if p: publications.change(self.store, p["publication_id"], text=task.title_zh)
+            if xhs and xhs["status"] == "ready":
+                snapshot = json.loads(xhs["snapshot"])
+                snapshot["description"] = task.desc_zh
+                publications.change(self.store, xhs["publication_id"], snapshot=json.dumps(snapshot, ensure_ascii=False))
             if ac and ac["status"] == "ready":
                 ac_snapshot = json.loads(ac["snapshot"])
                 ac_snapshot["description"] = task.desc_zh
                 publications.change(self.store, ac["publication_id"], snapshot=json.dumps(ac_snapshot, ensure_ascii=False))
+            yt = publications.for_platform(self.store, task.task_id, "youtube")
+            if yt and yt["status"] == "ready":
+                snapshot = json.loads(yt["snapshot"])
+                snapshot["description"] = task.desc_zh
+                if snapshot.get("title_source") == "generated": snapshot["title"] = task.title_zh
+                publications.change(self.store, yt["publication_id"], snapshot=json.dumps(snapshot, ensure_ascii=False))
+            for platform in self.social:
+                pub = publications.for_platform(self.store, task.task_id, platform)
+                if pub and pub["status"] == "ready":
+                    snapshot = json.loads(pub["snapshot"])
+                    snapshot["description"] = task.desc_zh
+                    if snapshot.get("title_source") == "generated": snapshot["title"] = task.title_zh
+                    if platform == "tiktok": snapshot["consent"] = False
+                    publications.change(self.store, pub["publication_id"], text=snapshot["title"], snapshot=json.dumps(snapshot, ensure_ascii=False))
             for name, content in (("title.txt", task.title_zh), ("desc.txt", task.desc_zh)):
                 (Path(task.work_dir) / name).write_text(content, encoding="utf-8")
             return asdict(task)
@@ -832,7 +1138,10 @@ class DesktopService:
                 task.status = "interrupted"
                 task.error = "用户已核对未提交，可手动继续准备素材。"
             else:
-                if not re.fullmatch(r"BV[0-9A-Za-z]{10}", bv_id):
+                if task.source_kind == "image_post":
+                    if not isinstance(bv_id, str) or not re.fullmatch(r"[1-9][0-9]{0,29}", bv_id):
+                        raise AppError("请填写核对后的数字动态 ID。")
+                elif not re.fullmatch(r"BV[0-9A-Za-z]{10}", bv_id):
                     raise AppError("请填写核对后的完整 BV 号。")
                 task.status, task.bv_id, task.error = "submitted", bv_id, "用户登记 BV 号；本地素材保留。"
             self.store.upsert(task)
@@ -1003,12 +1312,13 @@ class DesktopService:
                 raise AppError("请选择另一个有效项目的数据目录。")
             with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as old:
                 version = old.execute("PRAGMA user_version").fetchone()[0]
-                if version > 6:
+                from screator.db import SCHEMA_VERSION
+                if version > SCHEMA_VERSION:
                     raise AppError("不支持的来源数据库版本。")
                 old.row_factory = sqlite3.Row
                 rows = [dict(r) for r in old.execute("SELECT * FROM tasks")]
                 tables = {r[0] for r in old.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                if "task_publications" in tables and old.execute("SELECT 1 FROM task_publications WHERE platform IN ('douyin','acfun')").fetchone():
+                if "task_publications" in tables and old.execute("SELECT 1 FROM task_publications WHERE platform!='bilibili'").fetchone():
                     raise AppError("包含抖音或 AcFun 投稿的数据须整体备份/恢复，不能以旧版导入方式重建投稿身份；源数据未修改。")
                 records = {r[0]: json.loads(r[1]) for r in old.execute("SELECT * FROM task_translation")} if "task_translation" in tables else {}
                 attempts = [dict(r) for r in old.execute("SELECT * FROM translation_attempts ORDER BY id")] if "translation_attempts" in tables else []
@@ -1100,8 +1410,10 @@ class DesktopService:
         if self._closed:
             return
         self.login_cancel()
+        self.youtube_upload.close()
         self.translation_jobs.close()
         self.scheduler.close()
+        self.xiaohongshu.close()
         self.store.close()
         self.owner_lock.__exit__(None, None, None)
         self._closed = True

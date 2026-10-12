@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { operationId, request } from "./bridge";
-import { labels, type Task, type Publication, type Progress } from "./types";
+import { labels, canConfirmPublication, type Task, type Publication, type Progress } from "./types";
 import { AcfunChannelSelect, AcfunVerification } from "./Acfun";
+import { YoutubePublicationFields } from "./Youtube";
+import { XiaohongshuPublicationFields } from "./Xiaohongshu";
+import { SocialPublicationFields, socialPlatforms } from "./Social";
 import { StatusBadge } from "./StatusBadge";
 import { ReportError } from "./Toast";
 
@@ -32,7 +35,7 @@ export function DouyinAccountPanel() {
     ? error ? "检测失败" : "检测中"
     : status.can_sync ? "已连接" : status.account ? "需重新授权" : status.configured ? "未授权" : "未配置";
   return (
-    <section className="settings-card section-body">
+    <section className="settings-card section-body account-connection-panel">
       <div className="status-heading">
         <h3>抖音同步投稿 · 单账号</h3>
         <StatusBadge tone={!status && !error ? "neutral" : status?.can_sync ? "success" : "error"}>
@@ -181,7 +184,7 @@ function PublicationCard({
   useEffect(() => {
     const changed = pub.platform === "douyin" ? text !== pub.text : pub.platform === "acfun" &&
       (title !== (acfun.title || "") || channelId !== String(acfun.channel_id || ""));
-    onDirtyChange(pub.publication_id, changed);
+    if (pub.platform !== "youtube" && pub.platform !== "xiaohongshu" && !socialPlatforms.some((platform) => platform === pub.platform)) onDirtyChange(pub.publication_id, changed);
   }, [text, title, channelId, pub.text, pub.snapshot, pub.platform, onDirtyChange]);
   const call = (method: string, extra = {}) =>
     run(() =>
@@ -190,7 +193,7 @@ function PublicationCard({
   return (
     <div className="section-body">
       <strong>
-        {{ douyin: "抖音", acfun: "AcFun", bilibili: "Bilibili" }[pub.platform]} ·{" "}
+        {{ douyin: "抖音", acfun: "AcFun", bilibili: "Bilibili", youtube: "YouTube", twitter: "X（Twitter）", facebook: "Facebook Page", tiktok: "TikTok", xiaohongshu: "小红书" }[pub.platform]} ·{" "}
         {labels[pub.status] || pub.status}
       </strong>
       <p className="help">
@@ -235,6 +238,9 @@ function PublicationCard({
         {pub.status === "ready" && <button disabled={busy || !title.trim() || !Number.isInteger(Number(channelId)) || Number(channelId) < 0}
           onClick={() => void call("publications.update_metadata", { revision: pub.revision, title, channel_id: Number(channelId) })}>保存 AcFun 投稿信息</button>}
       </div>}
+      {pub.platform === "youtube" && <YoutubePublicationFields pub={pub} busy={busy} run={run} onDirtyChange={onDirtyChange} />}
+      {pub.platform === "xiaohongshu" && <XiaohongshuPublicationFields pub={pub} busy={busy} run={run} onDirtyChange={onDirtyChange} />}
+      {socialPlatforms.some((platform) => platform === pub.platform) && <SocialPublicationFields pub={pub} busy={busy} run={run} onDirtyChange={onDirtyChange} />}
       <div className="modal-actions">
         {["failed", "cancelled", "interrupted", "blocked_validation"].includes(
           pub.status,
@@ -360,7 +366,7 @@ export function PublicationDetails({
       {task.status === "partial_success" &&
         task.publications?.some((p) => p.status === "ready") && (
           <button
-            disabled={busy || dirty}
+            disabled={busy || dirty || task.publications.some((pub) => pub.status === "ready" && !canConfirmPublication(pub))}
             onClick={() => {
               if (
                 window.confirm(

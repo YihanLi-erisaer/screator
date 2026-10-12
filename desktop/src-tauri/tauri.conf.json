@@ -5,6 +5,7 @@
   "identifier": "com.stardazz.screator",
   "build": {
     "beforeDevCommand": "npm run dev",
+    "additionalWatchFolders": ["../../screator"],
     "beforeBuildCommand": "node scripts/build-frontend.mjs",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../dist"

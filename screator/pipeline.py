@@ -497,7 +497,13 @@ def _prepare_assets(settings, store, task, meta, work_dir: Path, video_path: Pat
     cover_path = work_dir / "cover.jpg"
     task.status = "processing_cover"
     store.upsert(task)
-    if not _ok(cover_path):
+    if not _ok(cover_path) and task.source_kind == "local" and task.local_cover_path:
+        source_cover = Path(task.local_cover_path)
+        if not source_cover.is_file():
+            raise AppError("本地封面图片已移动或删除，请恢复文件后重试。")
+        # A selected cover must succeed; do not silently replace it with a video frame.
+        media.process_cover(source_cover, cover_path, settings.cover_width, settings.cover_height)
+    elif not _ok(cover_path):
         raw_cover = work_dir / "thumb_raw"
         try:
             if task.source_kind == "local":

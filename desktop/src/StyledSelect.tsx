@@ -207,7 +207,12 @@ export function StyledSelect({
               aria-selected={option.value === value}
               aria-disabled={option.disabled || undefined}
               onMouseEnter={() => { if (!option.disabled) setActiveIndex(index); }}
-              onClick={() => choose(option)}
+              onClick={(event) => {
+                // A surrounding label must not forward this click to the trigger.
+                event.preventDefault();
+                event.stopPropagation();
+                choose(option);
+              }}
             >
               <span>{option.label}</span>
               {option.value === value && <Check size={15} aria-hidden="true" />}

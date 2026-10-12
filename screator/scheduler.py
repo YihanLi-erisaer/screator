@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import queue
 import shutil
 import threading
@@ -65,7 +66,7 @@ class AccountLane:
         with self.condition:
             if credentials:
                 for item in self.items:
-                    if self.platform in ("douyin", "acfun") and item.wait_reason == "rate_limited": continue
+                    if self.platform != "bilibili" and item.wait_reason == "rate_limited": continue
                     item.deadline, item.wait_reason = 0, ""
             self.condition.notify_all()
 
@@ -115,6 +116,42 @@ class AccountLane:
                             reason, deadline = "auth_required", None
                         except RateLimited:
                             reason, deadline = "rate_limited", None
+                    elif self.platform == "youtube":
+                        from screator.youtube_upload import AuthRequired, RateLimited
+                        try:
+                            self.scheduler.youtube_upload.publish(item)
+                            reason, deadline = "finished", None
+                        except (AuthRequired, RateLimited) as exc:
+                            if isinstance(exc, AuthRequired):
+                                with self.scheduler.store.transaction() as db:
+                                    db.execute("UPDATE youtube_accounts SET auth_state='expired' WHERE lifecycle='active'")
+                            pub = publications.for_platform(self.scheduler.store, item.task_id, "youtube")
+                            if pub["status"] == "submission_unknown": raise
+                            reason, deadline = ("auth_required" if isinstance(exc, AuthRequired) else "rate_limited"), None
+                    elif self.platform == "xiaohongshu":
+                        from screator.xiaohongshu import AuthRequired, RateLimited
+                        try:
+                            self.scheduler.xiaohongshu.publish(item)
+                            reason, deadline = "finished", None
+                        except (AuthRequired, RateLimited) as exc:
+                            p = publications.for_platform(self.scheduler.store, item.task_id, self.platform)
+                            if p["status"] == "submission_unknown": raise
+                            if isinstance(exc, AuthRequired):
+                                with self.scheduler.store.transaction() as db:
+                                    db.execute("UPDATE xiaohongshu_accounts SET auth_state='expired' WHERE lifecycle='active'")
+                            reason, deadline = ("auth_required" if isinstance(exc, AuthRequired) else "rate_limited"), None
+                    elif self.platform in self.scheduler.social:
+                        from screator.social_upload import AuthRequired, RateLimited
+                        try:
+                            self.scheduler.social[self.platform].publish(item)
+                            reason, deadline = "finished", None
+                        except (AuthRequired, RateLimited) as exc:
+                            p = publications.for_platform(self.scheduler.store, item.task_id, self.platform)
+                            if p["status"] == "submission_unknown": raise
+                            if isinstance(exc, AuthRequired):
+                                with self.scheduler.store.transaction() as db:
+                                    db.execute("UPDATE social_accounts SET auth_state='expired' WHERE platform=? AND lifecycle='active'", (self.platform,))
+                            reason, deadline = ("auth_required" if isinstance(exc, AuthRequired) else "rate_limited"), None
                     else:
                         reason, deadline = self.scheduler.uploader.try_submit(item)
                     finished = reason == "finished"
@@ -138,10 +175,13 @@ class AccountLane:
 
 
 class Scheduler:
-    def __init__(self, store, config, emit, accounts, douyin=None, acfun=None):
+    def __init__(self, store, config, emit, accounts, douyin=None, acfun=None, youtube_upload=None, social=None, xiaohongshu=None):
         self.store, self.config, self.emit, self.accounts = store, config, emit, accounts
         self.douyin = douyin
         self.acfun = acfun
+        self.youtube_upload = youtube_upload
+        self.social = social or {}
+        self.xiaohongshu = xiaohongshu
         self.guard = threading.RLock()
         self.active, self.upload_lanes = {}, {}
         self.closing = False
@@ -155,6 +195,9 @@ class Scheduler:
         self.sync_accounts()
         self.douyin_lane = AccountLane(self, "douyin", "douyin")
         self.acfun_lane = AccountLane(self, "acfun", "acfun")
+        self.youtube_lane = AccountLane(self, "youtube", "youtube")
+        self.xiaohongshu_lane = AccountLane(self, "xiaohongshu", "xiaohongshu")
+        self.social_lanes = {platform: AccountLane(self, platform, platform) for platform in self.social}
         self.threads = [threading.Thread(target=self._work, args=(stage,), name=f"desktop-{stage}", daemon=True)
                         for stage in ["download", "validate"] + ["prepare"] * 5]
         for thread in self.threads:
@@ -172,6 +215,33 @@ class Scheduler:
                 continue
             if publications.multi_target(self.store, task.task_id):
                 for p in publications.items(self.store, task.task_id):
+                    if p["platform"] == "xiaohongshu":
+                        attempt = self.store._conn.execute("SELECT phase,remote_id FROM xiaohongshu_attempts WHERE publication_id=?", (p["publication_id"],)).fetchone()
+                        if attempt and attempt["phase"] == "submitted" and attempt["remote_id"]:
+                            publications.change(self.store, p["publication_id"], status="submitted", remote_id=attempt["remote_id"], retain_assets=1, error="")
+                            continue
+                        if attempt and attempt["phase"] in ("creating", "unknown"):
+                            publications.change(self.store, p["publication_id"], status="submission_unknown", retain_assets=1, error="上次小红书发布结果待核对，不会自动重发。")
+                            continue
+                    if p["platform"] in self.social:
+                        from screator.social_upload import PROTECTED_PHASES
+                        attempt = self.social[p["platform"]].attempt(p["publication_id"])
+                        if attempt and attempt["phase"] == "submitted" and attempt["remote_id"]:
+                            publications.change(self.store, p["publication_id"], status="submitted", remote_id=attempt["remote_id"], retain_assets=1, error="上次已取得作品标识，请检查平台处理状态。")
+                            continue
+                        if attempt and attempt["phase"] in PROTECTED_PHASES:
+                            publications.change(self.store, p["publication_id"], status="submission_unknown", retain_assets=1, error="上次平台发布结果待核对，禁止自动重投。")
+                            continue
+                    if p["platform"] == "youtube":
+                        attempt = self.store._conn.execute("SELECT phase,remote_id FROM youtube_attempts WHERE publication_id=?", (p["publication_id"],)).fetchone()
+                        if attempt and attempt["phase"] == "submitted" and attempt["remote_id"]:
+                            publications.change(self.store, p["publication_id"], status="submitted", remote_id=attempt["remote_id"], retain_assets=1,
+                                                error="上次已取得视频 ID，请检查 YouTube Studio 的处理状态及封面。")
+                            continue
+                        if attempt and attempt["phase"] in ("finalizing", "unknown"):
+                            publications.change(self.store, p["publication_id"], status="submission_unknown", retain_assets=1,
+                                                error="上次 YouTube 最终上传结果待核对，不会自动重投。")
+                            continue
                     acfun_uncertain = p["platform"] == "acfun" and p["status"] == "uploading_media" and bool(
                         self.store._conn.execute("SELECT 1 FROM acfun_attempts WHERE publication_id=? AND phase IN ('creating_video','cover','creating')", (p["publication_id"],)).fetchone())
                     if p["status"] in ("creating", "submission_unknown") or p["platform"] == "bilibili" and p["status"] == "uploading_media" or acfun_uncertain:
@@ -190,7 +260,7 @@ class Scheduler:
                 if bili and bili["status"] in publications.INFLIGHT:
                     publications.change(self.store, bili["publication_id"], status="submission_unknown",
                                         error="上次投稿结果待核对，不会自动重投。")
-                self.store.update(task.task_id, status="submission_unknown", error="请核对该账号创作中心；不会自动重复投稿。")
+                self.store.update(task.task_id, status="submission_unknown", error="请核对该账号动态；不会自动重复发布。" if task.source_kind == "image_post" else "请核对该账号创作中心；不会自动重复投稿。")
             elif task.cancel_requested and task.status not in ("submitted", "failed", "cancelled"):
                 if bili and bili["status"] not in publications.TERMINAL | {"submission_unknown"}:
                     publications.change(self.store, bili["publication_id"], status="cancelled", error="上次取消已保留素材。")
@@ -216,6 +286,9 @@ class Scheduler:
                         lane.condition.notify_all()
             for key, lane in self.upload_lanes.items():
                 lane.wake(credentials=key == changed_account)
+
+    def all_lanes(self):
+        return [*self.upload_lanes.values(), self.douyin_lane, self.acfun_lane, self.youtube_lane, self.xiaohongshu_lane, *self.social_lanes.values()]
 
     def context(self, item):
         p = publications.for_platform(self.store, item.task_id, item.platform) if item.platform else None
@@ -293,7 +366,7 @@ class Scheduler:
                         Path(task.work_dir).mkdir(parents=True, exist_ok=True)
                         job = pipeline._PipelineJob(task.url, task=task, work_dir=Path(task.work_dir))
                         job.attempts = saved.get("media_attempts", 0)
-                        if saved["stage"] != "download":
+                        if saved["stage"] != "download" and task.source_kind != "image_post":
                             job.meta = YoutubeMeta.load(Path(task.work_dir) / "meta.json")
                             job.source = Path(task.video_path)
                         item = ScheduledJob(task.task_id, saved["run_id"], job, settings, saved,
@@ -352,7 +425,7 @@ class Scheduler:
                             cancelled = True
                     publications.project(self.store, task_id)
                 if not cancelled: raise AppError("所有剩余目标均已在途或待核对，请等待并核对结果。")
-                for lane in [*self.upload_lanes.values(), self.douyin_lane, self.acfun_lane]: lane.wake()
+                for lane in self.all_lanes(): lane.wake()
                 return
         with self.guard:
             with self.store.transaction():
@@ -392,6 +465,9 @@ class Scheduler:
                 lane.wake()
             self.douyin_lane.wake()
             self.acfun_lane.wake()
+            self.youtube_lane.wake()
+            self.xiaohongshu_lane.wake()
+            for lane in self.social_lanes.values(): lane.wake()
         self.signal.set()
         if immediate and item is None:
             self.emit("queue.changed", self.snapshot())
@@ -420,6 +496,12 @@ class Scheduler:
                             self.materials.commit(item.job.task.library_id, item.task_id, files)
                             self.store.update(item.task_id, status="downloaded", title_orig=files[0].name, error="")
                             finished = True
+                            continue
+                        if item.job.task.source_kind == "image_post":
+                            from screator.image_posts import prepare
+                            self.store.update(item.task_id, status="validating")
+                            prepare(self.store, item.job.task, item.job.work_dir)
+                            self.route(item, "upload")
                             continue
                         if item.job.task.source_kind == "local":
                             task = item.job.task
@@ -452,7 +534,10 @@ class Scheduler:
                         task = self.store.require(item.task_id)
                         item.job.task = task
                         with pipeline._job_context(item.job):
-                            if item.mode == "retranslate":
+                            if task.source_kind == "image_post":
+                                from screator.image_posts import prepared_paths
+                                prepared_paths(task)
+                            elif item.mode == "retranslate":
                                 from screator.translation.tasks import prepare
                                 task.status = "translating"
                                 self.store.upsert(task)
@@ -463,6 +548,11 @@ class Scheduler:
                         item.assets_complete = True
                         publications.prepare(self.store, item.task_id)
                         dy = publications.for_platform(self.store, item.task_id, "douyin")
+                        xhs = publications.for_platform(self.store, item.task_id, "xiaohongshu")
+                        if xhs and xhs["status"] == "ready":
+                            try: self.xiaohongshu.validate_assets(item, json.loads(xhs["snapshot"]))
+                            except AppError as exc:
+                                publications.change(self.store, xhs["publication_id"], status="blocked_validation", error=str(exc))
                         if dy and dy["status"] == "ready":
                             try: self.douyin.validate_assets(item, dy["text"])
                             except AppError as exc:
@@ -473,7 +563,11 @@ class Scheduler:
                         else:
                             self.route(item, "upload")
                     else:
-                        pipeline._validate_job(item.settings, self.store, item.job)
+                        if item.job.task.source_kind == "image_post":
+                            from screator.image_posts import prepared_paths
+                            prepared_paths(item.job.task)
+                        else:
+                            pipeline._validate_job(item.settings, self.store, item.job)
                         events.check_cancelled()
                         if item.mode == "repair":
                             self.store.update(item.task_id, status=item.payload["original_status"])
@@ -570,7 +664,7 @@ class Scheduler:
                                 children={}, payload=dict(item.payload), stage="upload", wait_reason="", deadline=None)
                 item.children[p["platform"]] = child
             for child in list(item.children.values()):
-                ({"douyin": self.douyin_lane, "acfun": self.acfun_lane}.get(child.platform)
+                ({"douyin": self.douyin_lane, "acfun": self.acfun_lane, "youtube": self.youtube_lane, "xiaohongshu": self.xiaohongshu_lane, **self.social_lanes}.get(child.platform)
                  or self.upload_lanes[item.job.task.account_id]).put(child)
 
     def snapshot(self):
@@ -598,9 +692,14 @@ class Scheduler:
                     "remaining_seconds": max(0, waiting.deadline-time.monotonic()) if waiting and waiting.deadline else None})
             dy = list(self.douyin_lane.items)
             ac = list(self.acfun_lane.items)
+            yt = list(self.youtube_lane.items)
+            xhs = list(self.xiaohongshu_lane.items)
             return {"queue_revision": self.queue_revision, "active": active, "download": shared("download"), "validate": shared("validate"), "prepare": shared("prepare"), "uploads": uploads,
+                    "xiaohongshu": {"running_task_id": next((i.task_id for i in xhs if i.running), None), "queued_count": sum(not i.running for i in xhs), "wait_reason": next((i.wait_reason for i in xhs if i.wait_reason), "")},
                     "douyin": {"running_task_id": next((i.task_id for i in dy if i.running), None), "queued_count": sum(not i.running for i in dy), "wait_reason": next((i.wait_reason for i in dy if i.wait_reason), "")},
-                    "acfun": {"running_task_id": next((i.task_id for i in ac if i.running), None), "queued_count": sum(not i.running for i in ac), "wait_reason": next((i.wait_reason for i in ac if i.wait_reason), "")}}
+                    "acfun": {"running_task_id": next((i.task_id for i in ac if i.running), None), "queued_count": sum(not i.running for i in ac), "wait_reason": next((i.wait_reason for i in ac if i.wait_reason), "")},
+                    "social": {platform: {"running_task_id": next((i.task_id for i in lane.items if i.running), None), "queued_count": sum(not i.running for i in lane.items), "wait_reason": next((i.wait_reason for i in lane.items if i.wait_reason), "")} for platform, lane in self.social_lanes.items()},
+                    "youtube": {"running_task_id": next((i.task_id for i in yt if i.running), None), "queued_count": sum(not i.running for i in yt), "wait_reason": next((i.wait_reason for i in yt if i.wait_reason), "")}}
 
     def prepare_shutdown(self):
         with self.guard:
@@ -609,7 +708,7 @@ class Scheduler:
                 for child in root.children.values():
                     p = publications.for_platform(self.store, child.task_id, child.platform)
                     if p["status"] not in publications.INFLIGHT: child.cancel.set()
-            for lane in [*self.upload_lanes.values(), self.douyin_lane, self.acfun_lane]: lane.wake()
+            for lane in self.all_lanes(): lane.wake()
         for task, _, inflight in self.store.session_jobs(self.session_id):
             with self.guard:
                 root = self.active.get(task.task_id)
@@ -644,7 +743,7 @@ class Scheduler:
             for _ in range(5 if stage == "prepare" else 1): queue_.put(None)
         for thread in self.threads:
             thread.join()
-        for lane in [*self.upload_lanes.values(), self.douyin_lane, self.acfun_lane]:
+        for lane in self.all_lanes():
             with lane.condition:
                 lane.stopped = True
                 lane.condition.notify_all()

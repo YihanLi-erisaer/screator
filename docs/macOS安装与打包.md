@@ -20,7 +20,11 @@ npm run desktop
 
 ## 生成 arm64 应用与 DMG
 
-将原生 arm64 的 `ffmpeg`、`ffprobe`、`biliup` 放在项目根目录 `bin/`。发布脚本会检查这三个文件包含 arm64 代码，且不依赖包外的 Homebrew 动态库；还会检查 FFmpeg 列出 `videotoolbox` 硬件加速。FFmpeg 应使用可独立分发、启用 VideoToolbox 的构建。Node.js 从当前 arm64 Node 复制。确保已按上文安装 Python 依赖和前端依赖，然后执行：
+项目根目录 `bin/` 被 Git 忽略，重新克隆或清理工作目录后需要单独准备发布工具。将原生 arm64 的 `ffmpeg`、`ffprobe`、`biliup` 放入该目录。发布脚本会检查这三个文件包含 arm64 代码，且不依赖包外的 Homebrew 动态库；还会检查 FFmpeg 列出 `videotoolbox` 硬件加速。FFmpeg 应使用可独立分发、启用 VideoToolbox 的构建。
+
+随包 Node.js 按 `SCREATOR_BUILD_NODE` 指定路径、项目 `bin/node`、执行打包脚本的 Node.js 的顺序选择。若使用 Homebrew Node.js，请从 [Node.js 官方发行目录](https://nodejs.org/dist/) 下载 Node.js 22+ 的 `darwin-arm64.tar.gz`，把其中的 `bin/node` 复制到项目 `bin/node`；Homebrew 的 Node.js 可能依赖本机动态库，不能直接放进安装包。
+
+若本机已安装以前构建的应用，也可以从其 `Contents/Resources/bin/` 复制 `ffmpeg`、`ffprobe`、`biliup`、`node` 到项目 `bin/`，脚本仍会验证架构、动态库依赖和 VideoToolbox。确保四个文件有可执行权限。确认已按上文安装 Python 依赖和前端依赖，然后执行：
 
 ```sh
 cd desktop

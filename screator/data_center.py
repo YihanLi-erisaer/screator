@@ -1,6 +1,8 @@
 """On-demand, bounded analytics for locally recorded platform submissions."""
 from __future__ import annotations
 
+from screator import publications
+
 import re
 import threading
 import time
@@ -13,7 +15,7 @@ from screator import history_transfer
 from screator.exceptions import AppError
 
 TTL_SECONDS = 300
-PLATFORMS = {"bilibili", "acfun", "douyin"}
+PLATFORMS = publications.PLATFORMS
 BV_ID = re.compile(r"^BV[0-9A-Za-z]{10}$")
 EMPTY_METRICS = {"review_status": None, "views": None, "likes": None, "comments": None, "favorites": None}
 
@@ -131,10 +133,18 @@ class DataCenter:
                 SELECT p.publication_id, p.platform, p.account_id, p.remote_id, p.status,
                        t.task_id, t.title_zh, t.title_orig, t.updated_at,
                        t.account_uid_snapshot AS account_uid,
-                       CASE p.platform WHEN 'acfun' THEN COALESCE(a.nickname, '')
+                       CASE p.platform WHEN 'xiaohongshu' THEN COALESCE(x.nickname, '')
+                           WHEN 'twitter' THEN COALESCE(s.nickname, '')
+                           WHEN 'facebook' THEN COALESCE(s.nickname, '')
+                           WHEN 'tiktok' THEN COALESCE(s.nickname, '')
+                           WHEN 'youtube' THEN COALESCE(y.nickname, '')
+                           WHEN 'acfun' THEN COALESCE(a.nickname, '')
                            WHEN 'douyin' THEN COALESCE(d.nickname, '')
                            ELSE t.account_name_snapshot END AS account_name
                 FROM task_publications p JOIN tasks t ON t.task_id=p.task_id
+                LEFT JOIN social_accounts s ON p.platform=s.platform AND s.account_id=p.account_id
+                LEFT JOIN youtube_accounts y ON p.platform='youtube' AND y.account_id=p.account_id
+                LEFT JOIN xiaohongshu_accounts x ON p.platform='xiaohongshu' AND x.account_id=p.account_id
                 LEFT JOIN acfun_accounts a ON p.platform='acfun' AND a.account_id=p.account_id
                 LEFT JOIN douyin_accounts d ON p.platform='douyin' AND d.account_id=p.account_id
                 WHERE p.status IN ('submitted','submission_unknown')

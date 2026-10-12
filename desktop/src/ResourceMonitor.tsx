@@ -30,7 +30,7 @@ export function ResourceMonitor({ paused = false }: { paused?: boolean }) {
       } catch {
         if (active) {
           setSnapshot(null);
-          setError("资源监控暂不可用，请检查桌面依赖或更新安装包。将自动重试。");
+          setError("资源监控暂不可用，将自动重试。");
         }
       } finally {
         inFlight = false;
@@ -56,7 +56,7 @@ export function ResourceMonitor({ paused = false }: { paused?: boolean }) {
         <div className="service-icon"><Activity size={23} /></div>
         <div>
           <h2>应用资源监控</h2>
-          <p>汇总 screator 主程序、界面、后台和工具进程的资源占用。</p>
+          <p>查看应用的处理器和内存占用。</p>
         </div>
         <div className="section-actions">
           <StatusBadge tone={error ? "error" : "neutral"}>
@@ -87,20 +87,6 @@ export function ResourceMonitor({ paused = false }: { paused?: boolean }) {
           {snapshot.cpu_pending_processes > 0 && <p className="help">部分进程的 CPU 正在采样或暂不可读，当前合计仅包含已取得的数据。</p>}
           {(snapshot.memory_unavailable_processes > 0 || snapshot.inaccessible_processes > 0) &&
             <p className="help resource-error">部分进程无读取权限，当前内存合计可能不完整。</p>}
-          <details className="resource-details">
-            <summary>查看进程明细</summary>
-            <div className="resource-table-scroll">
-              <table className="resource-table">
-                <thead><tr><th>进程</th><th>PID</th><th>CPU</th><th>内存</th></tr></thead>
-                <tbody>{snapshot.processes.map((process) => <tr key={process.pid}>
-                  <td data-no-localize title={process.name}>{process.name}</td>
-                  <td data-no-localize>{process.pid}</td>
-                  <td>{percent(process.cpu_percent)}</td>
-                  <td>{memory(process.memory_bytes)}</td>
-                </tr>)}</tbody>
-              </table>
-            </div>
-          </details>
           <p className="help resource-scope">
             {uiText("仅统计本应用启动的进程，外部翻译服务不计入。CPU 按整机 0–100% 计算；内存为各进程驻留内存之和，共享内存可能重复计数。GPU、显存、磁盘和网络占用暂不统计。")}
           </p>

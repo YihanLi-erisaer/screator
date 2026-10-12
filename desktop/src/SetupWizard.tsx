@@ -28,12 +28,11 @@ export default function SetupWizard({
   const [folder, setFolder] = useState(config.work_dir);
   const [checkedKey, setCheckedKey] = useState(false);
   const labels = ["素材目录", "运行环境", "翻译服务", "投稿账号"];
-  const readyTools =
-    diagnostics?.tools
-      .filter((t: any) => ["ffmpeg", "ffprobe", "biliup"].includes(t.name))
-      .every((t: any) => t.available) &&
-    diagnostics?.tools.some(
-      (t: any) => ["node", "deno"].includes(t.name) && t.available,
+  const readyTools = diagnostics &&
+    ["ffmpeg", "ffprobe", "biliup"].every((name) =>
+      diagnostics.tools.some((tool: any) => tool.name === name && tool.available),
+    ) && diagnostics.tools.some(
+      (tool: any) => ["node", "deno"].includes(tool.name) && tool.available,
     );
   return (
     <div className="wizard-body">
@@ -49,7 +48,7 @@ export default function SetupWizard({
       {step === 0 && (
         <>
           <p className="help">
-            选择保存视频和封面的文件夹。任务数据库和账号配置会独立保存在本机用户目录。
+            选择保存视频和封面的文件夹。任务记录和账号设置会单独保存在本机。
           </p>
           <label className="field-label" htmlFor="wizard-folder">
             素材工作目录
@@ -78,18 +77,12 @@ export default function SetupWizard({
       )}
       {step === 1 && (
         <>
-          <p className="help">
-            下载和处理视频需要下列工具。Node.js 与 Deno
-            至少提供一个；缺失时请按开发说明安装。
+          <p className="help">检查下载、视频处理和投稿功能是否可用。</p>
+          <p className="help" role="status">
+            {!diagnostics ? "正在检查功能…" : readyTools
+              ? "下载、视频处理和投稿功能已就绪。"
+              : "部分功能暂不可用，请重新检测或更新安装包。"}
           </p>
-          <div className="wizard-tools">
-            {diagnostics?.tools.map((tool: any) => (
-              <div key={tool.name}>
-                <strong>{tool.name}</strong>
-                <span>{tool.available ? tool.version : "未就绪"}</span>
-              </div>
-            ))}
-          </div>
           <p className="help">
             {diagnostics
               ? `可用空间 ${bytes(diagnostics.free_bytes)}`

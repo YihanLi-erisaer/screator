@@ -21,10 +21,6 @@ function output(executable, args) {
 }
 if (output(python, ["-c", "import platform; print(platform.machine())"]) !== "arm64")
   throw new Error("The packaging Python interpreter must be native arm64.");
-const icon = path.join(root, "desktop/src-tauri/icons/icon.png");
-run("/usr/bin/sips", ["-s", "format", "icns", icon, "--out", path.join(root, "desktop/src-tauri/icons/icon.icns")]);
-const tools = path.join(root, "packaging/staging/macos-bin");
-mkdirSync(tools, { recursive: true });
 function checkNativeExecutable(name, source) {
   const description = output("/usr/bin/file", ["-L", source]);
   if (!description.includes("arm64")) throw new Error(`${name} must contain native arm64 code: ${description}`);
@@ -32,19 +28,33 @@ function checkNativeExecutable(name, source) {
     .map((line) => line.trim().split(/\s+/)[0]).filter(Boolean);
   const external = linked.filter((dependency) => !dependency.startsWith("/usr/lib/")
     && !dependency.startsWith("/System/Library/"));
-  if (external.length) throw new Error(`${name} has libraries outside macOS that the app will not bundle: ${external.join(", ")}`);
+  if (external.length) throw new Error(`${name} has libraries outside macOS that the app will not bundle: ${external.join(", ")}\nUse a standalone arm64 build. For Node.js, put the official macOS arm64 archive's bin/node in the project bin/node, or set SCREATOR_BUILD_NODE. See docs/macOS安装与打包.md.`);
 }
+const missing = ["ffmpeg", "ffprobe", "biliup"].filter((name) => !existsSync(path.join(root, "bin", name)));
+if (missing.length) throw new Error(`Missing macOS packaging tools: ${missing.map((name) => path.join(root, "bin", name)).join(", ")}\nThe bin/ directory is ignored by Git. Restore standalone arm64 tools before packaging; Homebrew binaries may depend on libraries outside the app. See docs/macOS安装与打包.md.`);
+const projectNode = path.join(root, "bin/node");
+const bundledNode = process.env.SCREATOR_BUILD_NODE
+  ? path.resolve(process.env.SCREATOR_BUILD_NODE)
+  : existsSync(projectNode) ? projectNode : process.execPath;
+checkNativeExecutable("node", bundledNode);
+output(bundledNode, ["--version"]);
 for (const name of ["ffmpeg", "ffprobe", "biliup"]) {
   const source = path.join(root, "bin", name);
-  if (!existsSync(source)) throw new Error(`Missing arm64 tool: ${source}`);
   checkNativeExecutable(name, source);
   if (name === "ffmpeg" && !output(source, ["-hide_banner", "-hwaccels"]).split(/\r?\n/).includes("videotoolbox"))
     throw new Error("Bundled FFmpeg must support VideoToolbox hardware decoding.");
+}
+const icon = path.join(root, "desktop/src-tauri/icons/icon.png");
+run("/usr/bin/sips", ["-s", "format", "icns", icon, "--out", path.join(root, "desktop/src-tauri/icons/icon.icns")]);
+const tools = path.join(root, "packaging/staging/macos-bin");
+mkdirSync(tools, { recursive: true });
+for (const name of ["ffmpeg", "ffprobe", "biliup"]) {
+  const source = path.join(root, "bin", name);
   copyFileSync(source, path.join(tools, name));
   chmodSync(path.join(tools, name), 0o755);
 }
-checkNativeExecutable("node", process.execPath);
-copyFileSync(process.execPath, path.join(tools, "node"));
+console.log(`Bundled Node.js: ${bundledNode}`);
+copyFileSync(bundledNode, path.join(tools, "node"));
 chmodSync(path.join(tools, "node"), 0o755);
 run(python, ["scripts/build_worker.py"]);
 const frozen = path.join(root, "packaging/staging/screator-worker/screator-worker");

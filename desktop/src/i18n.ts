@@ -10,6 +10,8 @@ const en = english as Record<string, string>;
 const hk = traditional as Record<string, string>;
 const toTraditional = (text: string) => hk[text] ?? text;
 const dynamicFragments = [
+  "同步上传小红书", "共用图文正文：", "/ 1000 字。图片按任务中的顺序发布。", "，并同步到小红书",
+  "前移图片", "后移图片", "移除图片",
   "的创作中心，并确认没有遗留上传进程。恢复该账号上传队列？",
   "已停止未投稿任务并保留素材。仍有",
   "的登录凭据？任务和账号仍保留。",

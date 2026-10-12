@@ -53,7 +53,15 @@ export async function request<T = any>(
     throw new Error(
       "请使用 npm run desktop 启动桌面应用。此页面尚未连接本地后台。",
     );
-  const result = await invoke<T>("backend_request", { method, params });
+  let result: T;
+  try {
+    result = await invoke<T>("backend_request", { method, params });
+  } catch (error) {
+    if (method === "materials.import" && String(error).includes("不支持的方法：materials.import")) {
+      throw new Error("素材导入后台尚未更新，请退出并重新启动应用后再试。");
+    }
+    throw error;
+  }
   if (method === "system.health") {
     await invoke("frontend_ready", { health: result });
   }
@@ -91,6 +99,10 @@ export async function chooseDirectory() {
   if (!isTauri()) throw new Error("目录选择需要在桌面应用中使用。");
   return open({ directory: true, multiple: false }) as Promise<string | null>;
 }
+export async function chooseFiles(extensions: string[]) {
+  if (!isTauri()) throw new Error("文件选择需要在桌面应用中使用。");
+  return open({ multiple: true, filters: [{ name: "支持的文件", extensions }] }) as Promise<string[] | null>;
+}
 export async function saveLog() {
   return save({
     defaultPath: "screator-diagnostics.txt",
@@ -106,7 +118,7 @@ export async function saveHistory() {
 }
 export async function external(url: string) {
   if (
-    !/^https:\/\/(www\.bilibili\.com|member\.bilibili\.com|member\.acfun\.cn|stardazz-com\.vercel\.app)\//.test(
+    !/^https:\/\/(www\.bilibili\.com|t\.bilibili\.com|space\.bilibili\.com|member\.bilibili\.com|member\.acfun\.cn|creator\.xiaohongshu\.com|www\.xiaohongshu\.com|stardazz-com\.vercel\.app)\//.test(
       url,
     )
   )

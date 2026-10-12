@@ -170,7 +170,7 @@ export function AcfunAccountPanel() {
   const connectionLabel = !status
     ? error ? "检测失败" : "检测中"
     : status.can_sync ? "已连接" : status.account ? "需重新扫码" : "未登录";
-  return <section className="settings-card section-body">
+  return <section className="settings-card section-body account-connection-panel">
     <div className="status-heading">
       <h3>AcFun 同步投稿 · 单账号</h3>
       <StatusBadge tone={!status && !error ? "neutral" : status?.can_sync ? "success" : "error"}>
