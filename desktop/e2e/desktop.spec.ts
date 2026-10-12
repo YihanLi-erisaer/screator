@@ -596,11 +596,10 @@ test("task status dropdown supports keyboard selection and dismissal", async ({ 
 test("select popups remain visible beyond clipped cards and inside dialogs", async ({ page }) => {
   await page.goto("/?preview&accounts=5&acfun=1&manyChannels");
   await page.getByRole("button", { name: "设置", exact: true }).click();
-  const select = page.getByRole("combobox", { name: "AcFun 默认分区（自动投稿必填）" });
-  await expect(select).toBeEnabled();
-  await select.evaluate((element) => element.scrollIntoView({ block: "start" }));
-  await select.click();
-  const menu = page.getByRole("listbox", { name: "AcFun 默认分区（自动投稿必填）" });
+  const overflowSelect = page.getByRole("combobox", { name: "上传线路" });
+  await overflowSelect.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  await overflowSelect.click();
+  const menu = page.getByRole("listbox", { name: "上传线路" });
   await expect(menu).toBeVisible();
   const visibleBeyondCard = await menu.evaluate((element) => {
     const card = element.closest(".settings-card")!.getBoundingClientRect();
@@ -610,13 +609,21 @@ test("select popups remain visible beyond clipped cards and inside dialogs", asy
     return list.bottom > card.bottom + 8 && element.contains(document.elementFromPoint(x, y));
   });
   expect(visibleBeyondCard).toBe(true);
+  await menu.getByRole("option", { name: "bda2" }).click();
+
+  const select = page.getByRole("combobox", { name: "AcFun 默认分区（自动投稿必填）" });
+  await expect(select).toBeEnabled();
+  await select.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await select.click();
+  const channels = page.getByRole("listbox", { name: "AcFun 默认分区（自动投稿必填）" });
+  await expect(channels).toBeVisible();
   await select.evaluate((element) => element.closest("main")!.scrollBy(0, -30));
-  await expect.poll(() => menu.evaluate((element) => {
+  await expect.poll(() => channels.evaluate((element) => {
     const button = element.parentElement!.querySelector(".styled-select-trigger")!.getBoundingClientRect();
     const list = element.getBoundingClientRect();
     return Math.abs(list.top - button.bottom - 5) < 2 || Math.abs(list.bottom - button.top + 5) < 2;
   })).toBe(true);
-  await menu.getByRole("option", { name: "测试分区 12（311）" }).click();
+  await channels.getByRole("option", { name: "测试分区 12（311）" }).click();
   await expect(select).toContainText("测试分区 12");
 
   await page.setViewportSize({ width: 1024, height: 680 });
