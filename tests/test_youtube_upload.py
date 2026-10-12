@@ -4,6 +4,7 @@ import sqlite3
 import time
 import unittest
 import uuid
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -278,7 +279,7 @@ class YoutubeTests(unittest.TestCase):
             store.update(self.task_id, status="submitted", bv_id="BV1234567890")
         path = self.paths.root / "history.json"
         self.service.export_history(str(path))
-        contents = path.read_text()
+        contents = path.read_text(encoding="utf-8")
         self.assertNotIn("private-access", contents)
         self.assertNotIn("private-session", contents)
         # A new profile imports this as read-only history, including all targets.
@@ -327,8 +328,8 @@ class YoutubeTests(unittest.TestCase):
         self.create_ready()
         store = self.service.store
         path = self.paths.root / "migration.sqlite"
-        with sqlite3.connect(path) as db: store._conn.backup(db)
-        with sqlite3.connect(path) as db:
+        with closing(sqlite3.connect(path)) as db, db: store._conn.backup(db)
+        with closing(sqlite3.connect(path)) as db, db:
             db.execute("PRAGMA foreign_keys=OFF")
             db.execute("DELETE FROM task_publications WHERE platform='youtube'")
             db.execute("DROP TABLE youtube_attempts")

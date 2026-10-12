@@ -222,7 +222,7 @@ class XiaohongshuTests(unittest.TestCase):
         self.assertNotIn("web_session", public)
         target = Path(self.tmp.name) / "history.json"
         history_transfer.export_file(self.service.store, target)
-        self.assertEqual(history_transfer._validated_record(json.loads(target.read_text())["records"][0])["publications"][1]["platform"], "xiaohongshu")
+        self.assertEqual(history_transfer._validated_record(json.loads(target.read_text(encoding="utf-8"))["records"][0])["publications"][1]["platform"], "xiaohongshu")
         rows = self.service.data_center.list(platform="xiaohongshu")["items"]
         self.assertEqual(rows[0]["account_name"], "小红书测试账号")
         self.service.delete_history(task_id, self.service.task(task_id).revision, confirmed=True)
