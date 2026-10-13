@@ -87,7 +87,7 @@ import { accountLabel, canConfirmPublication, type BiliAccount } from "./types";
 import { StyledSelect } from "./StyledSelect";
 import { StatusBadge } from "./StatusBadge";
 import { SubmissionTrend, type SubmissionTrendData } from "./SubmissionTrend";
-import { ToastViewport, ReportError, useToast } from "./Toast";
+import { ReportError, useToast } from "./Toast";
 import {
   setUiLanguage,
   uiText,
@@ -174,7 +174,6 @@ function Modal({
         </button>
       </div>
       {children}
-      <ToastViewport />
     </dialog>
   );
 }

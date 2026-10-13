@@ -4,10 +4,12 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { CheckCircle2, CircleAlert, X } from "lucide-react";
 
 type Toast = {
@@ -36,8 +38,40 @@ export function useToast() {
 export function ToastViewport() {
   useUiLanguage();
   const { toasts, dismissToast } = useToast();
+  const ref = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState<number>();
+  useLayoutEffect(() => {
+    const viewport = ref.current;
+    if (!viewport?.isConnected) return;
+    const open = viewport.matches(":popover-open");
+    if (toasts.length && !open) viewport.showPopover();
+    else if (!toasts.length && open) viewport.hidePopover();
+  }, [toasts.length]);
+  useLayoutEffect(() => {
+    const dialog = ref.current?.closest("dialog");
+    if (!dialog) return;
+    const position = () => {
+      const close = dialog
+        .querySelector(".modal-head .icon-button")
+        ?.getBoundingClientRect();
+      const margin = window.innerWidth <= 600 ? 12 : 20;
+      setTop(close ? Math.max(margin, close.bottom + 12) : undefined);
+    };
+    position();
+    const observer = new ResizeObserver(position);
+    observer.observe(dialog);
+    const header = dialog.querySelector(".modal-head");
+    if (header) observer.observe(header);
+    document.addEventListener("scroll", position, true);
+    window.addEventListener("resize", position);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("scroll", position, true);
+      window.removeEventListener("resize", position);
+    };
+  }, []);
   return (
-    <div className="toast-viewport">
+    <div ref={ref} className="toast-viewport" popover="manual" style={{ top }}>
       {toasts.map((toast) => (
         <div
           className={`toast ${toast.kind}-toast${toast.exiting ? " exiting" : ""}`}
@@ -72,6 +106,7 @@ export function ToastViewport() {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [container, setContainer] = useState<HTMLElement | null>(null);
   const visible = useRef<Toast[]>([]);
   const nextId = useRef(0);
   const timers = useRef(new Map<number, number>());
@@ -134,6 +169,40 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (message: string) => showToast("success", message),
     [showToast],
   );
+  useEffect(() => {
+    let stack: HTMLDialogElement[] = [];
+    const syncContainer = (records: MutationRecord[] = []) => {
+      // Keep toast controls in the active dialog's focus scope, while the
+      // popover top layer lets them escape its scrolling/clipping boundary.
+      const dialogs = Array.from(
+        document.querySelectorAll<HTMLDialogElement>("dialog[open]"),
+      ).filter((dialog) => dialog.matches(":modal"));
+      stack = stack.filter((dialog) => dialogs.includes(dialog));
+      for (const record of records) {
+        if (
+          record.type !== "attributes" ||
+          !(record.target instanceof HTMLDialogElement)
+        )
+          continue;
+        const dialog = record.target;
+        if (!dialogs.includes(dialog)) continue;
+        stack = [...stack.filter((item) => item !== dialog), dialog];
+      }
+      for (const dialog of dialogs) {
+        if (!stack.includes(dialog)) stack.push(dialog);
+      }
+      setContainer(stack.at(-1) ?? document.body);
+    };
+    syncContainer();
+    const observer = new MutationObserver(syncContainer);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["open"],
+    });
+    return () => observer.disconnect();
+  }, []);
   useEffect(
     () => () => {
       timers.current.forEach((timer) => window.clearTimeout(timer));
@@ -148,7 +217,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       value={{ showError, showSuccess, dismissToast, toasts }}
     >
       {children}
-      <ToastViewport />
+      {container && createPortal(<ToastViewport />, container)}
     </ToastContext.Provider>
   );
 }

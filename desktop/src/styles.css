@@ -993,8 +993,15 @@ kbd {
 }
 .toast-viewport {
   position: fixed;
+  inset: auto;
   top: 20px;
   right: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow: visible;
   z-index: 10000;
   display: flex;
   flex-direction: column;
@@ -1002,12 +1009,14 @@ kbd {
   width: min(520px, calc(100vw - 32px));
   pointer-events: none;
 }
+.toast-viewport[popover]:not(:popover-open) {
+  display: none;
+}
 .toast {
   display: flex;
   align-items: flex-start;
   gap: 10px;
   max-height: min(40vh, 280px);
-  overflow-y: auto;
   padding: 13px 14px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1045,7 +1054,10 @@ kbd {
 .toast > span {
   flex: 1;
   min-width: 0;
+  max-height: min(calc(40vh - 28px), 252px);
+  overflow-y: auto;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .toast > button {
   flex: none;
