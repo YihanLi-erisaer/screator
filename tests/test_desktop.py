@@ -26,7 +26,7 @@ from screator.paths import AppPaths
 
 # Windows CI flushes many small SQLite transactions more slowly than a local SSD.
 # These tests assert ordering/state, not a five-second throughput guarantee.
-ASYNC_TIMEOUT = 30
+ASYNC_TIMEOUT = 60
 
 
 class MemoryVault:
@@ -63,8 +63,12 @@ class DesktopTests(unittest.TestCase):
             if time.monotonic() >= deadline:
                 tasks = [(t.task_id, t.status, t.wait_reason, t.error)
                          for t in self.service.store.list_all()]
+                queue = self.service.scheduler.snapshot()
+                # A worker can finish while the diagnostic snapshot is collected.
+                if predicate():
+                    return
                 self.fail(f"Timed out waiting for {description}; tasks={tasks}; "
-                          f"queue={self.service.scheduler.snapshot()}")
+                          f"queue={queue}")
             time.sleep(.05)
 
     def wait_idle(self):

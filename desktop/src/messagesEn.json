@@ -943,6 +943,7 @@
   "YouTube 可见性无效。": "Invalid YouTube visibility.",
   "YouTube 响应格式无效。": "Invalid YouTube response format.",
   "YouTube 响应过大，需核对结果。": "The YouTube response is too large. Verify the result.",
+  "YouTube 封面只有 {p0}×{p1}，低于 {p2}×{p3}。": "The YouTube cover is only {p0}×{p1}, below the required {p2}×{p3}.",
   "YouTube 封面素材缺失。": "YouTube cover media is missing.",
   "YouTube 已记录最终上传意图，请先核对结果，禁止重发。": "The final YouTube upload attempt is recorded. Verify its result before sending again.",
   "YouTube 已记录最终上传意图，须先核对；禁止重投。": "The final YouTube upload attempt is recorded. Verify its result before submitting again.",
