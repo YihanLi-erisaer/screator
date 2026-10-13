@@ -1,3 +1,4 @@
+import { uiText, uiNode, confirmUi } from "./i18n";
 import { useEffect, useState } from "react";
 import { request, operationId, chooseFile } from "./bridge";
 import type { Config } from "./types";
@@ -178,28 +179,46 @@ export default function TranslationPanel({
     <section className="settings-card translation-panel">
       <div className="section-title">
         <div>
-          <h2>翻译服务</h2>
-          <p>默认本地推理，也可优先使用 DeepL。</p>
+          <h2>{uiText("翻译服务")}</h2>
+          <p>{uiText("默认本地推理，也可优先使用 DeepL。")}</p>
         </div>
-        <StatusBadge tone={config.readiness_pending ? "neutral" : config.translation_ready ? "success" : "error"}>
-          {config.readiness_pending ? "待检测" : config.translation_ready ? "已就绪" : "未就绪"}
+        <StatusBadge
+          tone={
+            config.readiness_pending
+              ? "neutral"
+              : config.translation_ready
+                ? "success"
+                : "error"
+          }
+        >
+          {uiNode(
+            config.readiness_pending
+              ? "待检测"
+              : config.translation_ready
+                ? "已就绪"
+                : "未就绪",
+          )}
         </StatusBadge>
       </div>
       <div className="section-body">
         {config.translation_upgrade_notice && (
           <p className="help">
-            升级后，新任务默认本地优先；未安装本地模型时会按开关尝试
-            DeepL。旧任务保留原策略，保存设置后关闭此提示。
+            {uiText(
+              "升级后，新任务默认本地优先；未安装本地模型时会按开关尝试 DeepL。旧任务保留原策略，保存设置后关闭此提示。",
+            )}
           </p>
         )}
         <div className="field">
-          首选翻译服务
+          {uiText("首选翻译服务")}
           <StyledSelect
             label="首选翻译服务"
             value={config.translation_primary}
             disabled={blocked}
             onChange={(value) => void save({ translation_primary: value })}
-            options={[{ value: "local_llm", label: "本地大模型（默认）" }, { value: "deepl", label: "DeepL" }]}
+            options={[
+              { value: "local_llm", label: "本地大模型（默认）" },
+              { value: "deepl", label: "DeepL" },
+            ]}
           />
         </div>
         <label className="translation-toggle">
@@ -211,24 +230,35 @@ export default function TranslationPanel({
               void save({ translation_fallback_enabled: e.target.checked })
             }
           />
-          首选失败时使用另一服务
+          {uiText("首选失败时使用另一服务")}
         </label>
         <p className="help">
-          {config.translation_primary === "local_llm" ? "本地大模型" : "DeepL"}
-          {config.translation_fallback_enabled
-            ? ` → ${config.translation_primary === "local_llm" ? "DeepL" : "本地大模型"}`
-            : " · 不自动切换"}
-          。 使用 DeepL 时，标题和简介会发送至
-          DeepL。仅本地使用时请关闭自动切换。
+          {uiNode(
+            config.translation_primary === "local_llm" ? "本地大模型" : "DeepL",
+          )}
+          {uiNode(
+            config.translation_fallback_enabled
+              ? ` → ${config.translation_primary === "local_llm" ? "DeepL" : "本地大模型"}`
+              : " · 不自动切换",
+          )}
+          {uiText(
+            "。 使用 DeepL 时，标题和简介会发送至 DeepL。仅本地使用时请关闭自动切换。",
+          )}
         </p>
         <div className="status-heading">
-          <h3>本地大模型 · Qwen3.5 4B</h3>
-          <StatusBadge tone={!local ? "neutral" : local.state === "ready" ? "success" : "error"}>
-            {!local ? "检测中" : local.state === "ready" ? "已就绪" : "未就绪"}
+          <h3>{uiText("本地大模型 · Qwen3.5 4B")}</h3>
+          <StatusBadge
+            tone={
+              !local ? "neutral" : local.state === "ready" ? "success" : "error"
+            }
+          >
+            {uiNode(
+              !local ? "检测中" : local.state === "ready" ? "已就绪" : "未就绪",
+            )}
           </StatusBadge>
         </div>
         <div className="field">
-          本地运行方式
+          {uiText("本地运行方式")}
           <StyledSelect
             label="本地运行方式"
             value={config.local_llm_mode}
@@ -236,19 +266,27 @@ export default function TranslationPanel({
             onChange={(value) =>
               void save({
                 local_llm_mode: value,
-                local_llm_backend: value === "external" && config.local_llm_backend === "vulkan"
-                  ? "auto" : config.local_llm_backend,
+                local_llm_backend:
+                  value === "external" && config.local_llm_backend === "vulkan"
+                    ? "auto"
+                    : config.local_llm_backend,
                 local_llm_base_url:
                   value === "managed"
                     ? "http://127.0.0.1:11435"
                     : "http://127.0.0.1:11434",
               })
             }
-            options={[{ value: "managed", label: "应用管理（Windows x64 / Apple Silicon）" }, { value: "external", label: "连接已有本机 Ollama" }]}
+            options={[
+              {
+                value: "managed",
+                label: "应用管理（Windows x64 / Apple Silicon）",
+              },
+              { value: "external", label: "连接已有本机 Ollama" },
+            ]}
           />
         </div>
         <div className="field">
-          本地推理设备
+          {uiText("本地推理设备")}
           <StyledSelect
             label="本地推理设备"
             value={config.local_llm_backend}
@@ -256,7 +294,8 @@ export default function TranslationPanel({
             onChange={(value) => void save({ local_llm_backend: value })}
             options={[
               { value: "auto", label: "自动选择 GPU / CPU" },
-              ...(config.local_llm_mode === "managed" && (config.local_llm_backends || []).includes("vulkan")
+              ...(config.local_llm_mode === "managed" &&
+              (config.local_llm_backends || []).includes("vulkan")
                 ? [{ value: "vulkan", label: "Vulkan（Intel / AMD / NVIDIA）" }]
                 : []),
               { value: "cpu", label: "仅 CPU" },
@@ -266,7 +305,7 @@ export default function TranslationPanel({
         {config.local_llm_mode === "external" && (
           <div className="inline-controls">
             <input
-              aria-label="本地服务地址"
+              aria-label={uiText("本地服务地址")}
               value={address}
               disabled={blocked}
               onChange={(e) => setAddress(e.target.value)}
@@ -276,25 +315,29 @@ export default function TranslationPanel({
               disabled={blocked}
               onClick={() => void save({ local_llm_base_url: address })}
             >
-              保存地址
+              {uiText("保存地址")}
             </button>
           </div>
         )}
-        <p role="status">{local?.message || "正在检测组件…"}</p>
+        <p role="status">{uiNode(local?.message || "正在检测组件…")}</p>
         <p className="help">
-          首次下载约 3.6～4.9 GB；安装时需预留约 6～10 GB 空间。Windows 自动启用 Vulkan 和核显检测，支持兼容的 Intel / AMD GPU；Apple Silicon 使用 Metal。试译后显示实际 GPU / CPU 分配。安装后可断网翻译。
+          {uiText(
+            "首次下载约 3.6～4.9 GB；安装时需预留约 6～10 GB 空间。Windows 自动启用 Vulkan 和核显检测，支持兼容的 Intel / AMD GPU；Apple Silicon 使用 Metal。试译后显示实际 GPU / CPU 分配。安装后可断网翻译。",
+          )}
         </p>
         {config.local_llm_mode === "external" && (
           <p className="help">
-            外部 Ollama 请在服务进程中设置 OLLAMA_VULKAN=1 和 OLLAMA_IGPU_ENABLE=1，并安装兼容驱动。应用中的自动模式沿用外部服务的设备配置。
+            {uiText(
+              "外部 Ollama 请在服务进程中设置 OLLAMA_VULKAN=1 和 OLLAMA_IGPU_ENABLE=1，并安装兼容驱动。应用中的自动模式沿用外部服务的设备配置。",
+            )}
           </p>
         )}
-        <h3>翻译超时</h3>
+        <h3>{uiText("翻译超时")}</h3>
         <div className="form-grid">
           <label className="field">
-            大模型推理超时（秒）
+            {uiText("大模型推理超时（秒）")}
             <input
-              aria-label="大模型推理超时（秒）"
+              aria-label={uiText("大模型推理超时（秒）")}
               type="number"
               min={15}
               max={600}
@@ -305,9 +348,9 @@ export default function TranslationPanel({
             />
           </label>
           <label className="field">
-            翻译流程总超时（秒）
+            {uiText("翻译流程总超时（秒）")}
             <input
-              aria-label="翻译流程总超时（秒）"
+              aria-label={uiText("翻译流程总超时（秒）")}
               type="number"
               min={30}
               max={1200}
@@ -320,14 +363,16 @@ export default function TranslationPanel({
         </div>
         <div className="button-row">
           <p className="help">
-            推理超时从本地模型请求开始计算，等待翻译服务和启动运行时不计入；流程总超时涵盖启动、重试和备用服务切换，且必须更长。新设置只影响新任务。
+            {uiText(
+              "推理超时从本地模型请求开始计算，等待翻译服务和启动运行时不计入；流程总超时涵盖启动、重试和备用服务切换，且必须更长。新设置只影响新任务。",
+            )}
           </p>
           <button
             className="secondary"
             disabled={blocked}
             onClick={saveTimeouts}
           >
-            保存超时设置
+            {uiText("保存超时设置")}
           </button>
         </div>
         <div className="button-row">
@@ -338,7 +383,7 @@ export default function TranslationPanel({
                 disabled={blocked}
                 onClick={() => void start("translation.install")}
               >
-                安装 / 重试下载
+                {uiText("安装 / 重试下载")}
               </button>
               <button
                 className="text-button"
@@ -353,21 +398,21 @@ export default function TranslationPanel({
                   })
                 }
               >
-                导入离线组件包
+                {uiText("导入离线组件包")}
               </button>
               <button
                 className="secondary danger"
                 disabled={blocked || local?.state !== "ready"}
                 onClick={() => {
                   if (
-                    window.confirm(
+                    confirmUi(
                       "卸载应用管理的本地大语言模型？运行时和已有译文会保留，之后需要重新安装模型才能继续本地翻译。",
                     )
                   )
                     void start("translation.uninstall");
                 }}
               >
-                卸载大语言模型
+                {uiText("卸载大语言模型")}
               </button>
             </>
           )}
@@ -378,35 +423,35 @@ export default function TranslationPanel({
               void start("translation.test", { provider: "local_llm" })
             }
           >
-            本地试译
+            {uiText("本地试译")}
           </button>
           <button
             className="text-button"
             disabled={blocked}
             onClick={() => void action(readStatus)}
           >
-            重新检测
+            {uiText("重新检测")}
           </button>
         </div>
         <div className="deepl-heading status-heading">
-          <h3>DeepL · 可选</h3>
+          <h3>{uiText("DeepL · 可选")}</h3>
           <StatusBadge tone={config.has_deepl_key ? "success" : "error"}>
-            {config.has_deepl_key ? "已导入" : "未导入"}
+            {uiNode(config.has_deepl_key ? "已导入" : "未导入")}
           </StatusBadge>
         </div>
         <label className="field">
-          DeepL API 密钥
+          {uiText("DeepL API 密钥")}
           <input
             type="password"
             autoComplete="off"
             disabled={blocked}
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            placeholder={
+            placeholder={uiText(
               config.has_deepl_key
                 ? "已安全保存，输入新密钥可替换"
-                : "使用本地模型无需填写"
-            }
+                : "使用本地模型无需填写",
+            )}
           />
         </label>
         <div className="button-row">
@@ -421,7 +466,7 @@ export default function TranslationPanel({
               }, "密钥已保存到系统凭据存储。")
             }
           >
-            保存密钥
+            {uiText("保存密钥")}
           </button>
           <button
             className="secondary"
@@ -430,7 +475,7 @@ export default function TranslationPanel({
               void start("translation.test", { provider: "deepl" })
             }
           >
-            DeepL 试译
+            {uiText("DeepL 试译")}
           </button>
           <button
             className="text-button"
@@ -443,18 +488,32 @@ export default function TranslationPanel({
               }, "DeepL 密钥已清除。")
             }
           >
-            清除密钥
+            {uiText("清除密钥")}
           </button>
         </div>
         <p className="help">
-          密钥只保存在系统凭据存储；DeepL 试译会消耗少量额度。
+          {uiText("密钥只保存在系统凭据存储；DeepL 试译会消耗少量额度。")}
         </p>
-        <ReportError message={config.vault_error ? `${config.vault_error} 本地翻译仍可使用。` : null} />
+        <ReportError
+          message={
+            config.vault_error
+              ? uiText("{p0} 本地翻译仍可使用。", {
+                  p0: uiText(config.vault_error),
+                })
+              : null
+          }
+        />
         {job && (
           <div className="translation-job" role="status">
-            <ReportError message={job.state === "failed" ? job.message || job.result?.message || "翻译操作失败。" : null} />
+            <ReportError
+              message={
+                job.state === "failed"
+                  ? job.message || job.result?.message || "翻译操作失败。"
+                  : null
+              }
+            />
             <strong>
-              {
+              {uiNode(
                 (
                   {
                     running: "操作中",
@@ -464,27 +523,38 @@ export default function TranslationPanel({
                     cancelled: "已取消",
                     interrupted: "已中断",
                   } as Record<string, string>
-                )[job.state]
-              }
+                )[job.state],
+              )}
             </strong>
             {running(job) && (
               <p>
-                {phase[job.progress?.stage || ""] || "正在准备组件…"}
-                {job.progress?.percent != null
-                  ? ` · ${job.progress.percent.toFixed(1)}%`
-                  : ""}
+                {uiNode(phase[job.progress?.stage || ""] || "正在准备组件…")}
+                {uiNode(
+                  job.progress?.percent != null
+                    ? ` · ${job.progress.percent.toFixed(1)}%`
+                    : "",
+                )}
               </p>
             )}
-            {job.state !== "failed" && job.message && <p>{job.message}</p>}
-            {job.state !== "failed" && job.kind !== "uninstall" && job.result?.message && <p>{job.result.message}</p>}
+            {job.state !== "failed" && job.message && (
+              <p>{uiNode(job.message)}</p>
+            )}
+            {job.state !== "failed" &&
+              job.kind !== "uninstall" &&
+              job.result?.message && <p>{uiNode(job.result.message)}</p>}
             {job.result?.title && (
               <p>
-                {job.result.title}
+                <span data-no-localize>{job.result.title}</span>
                 <br />
-                {job.result.description}
+                <span data-no-localize>{job.result.description}</span>
                 <br />
-                耗时 {((job.result.elapsed_ms || 0) / 1000).toFixed(1)} 秒
-                {job.result.inference_device && ` · ${job.result.inference_device}`}
+                {uiText("耗时 ")}
+                {uiNode(((job.result.elapsed_ms || 0) / 1000).toFixed(1))}
+                {uiText(" 秒")}
+                {uiNode(
+                  job.result.inference_device &&
+                    ` · ${job.result.inference_device}`,
+                )}
               </p>
             )}
             {running(job) && job.kind !== "uninstall" && (
@@ -504,7 +574,7 @@ export default function TranslationPanel({
                   })
                 }
               >
-                取消操作
+                {uiText("取消操作")}
               </button>
             )}
           </div>

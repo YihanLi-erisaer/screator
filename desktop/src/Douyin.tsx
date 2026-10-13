@@ -1,6 +1,13 @@
+import { uiText, uiNode, confirmUi } from "./i18n";
 import { useCallback, useEffect, useState } from "react";
 import { operationId, request } from "./bridge";
-import { labels, canConfirmPublication, type Task, type Publication, type Progress } from "./types";
+import {
+  labels,
+  canConfirmPublication,
+  type Task,
+  type Publication,
+  type Progress,
+} from "./types";
 import { AcfunChannelSelect, AcfunVerification } from "./Acfun";
 import { YoutubePublicationFields } from "./Youtube";
 import { XiaohongshuPublicationFields } from "./Xiaohongshu";
@@ -32,29 +39,47 @@ export function DouyinAccountPanel() {
     }
   };
   const connectionLabel = !status
-    ? error ? "检测失败" : "检测中"
-    : status.can_sync ? "已连接" : status.account ? "需重新授权" : status.configured ? "未授权" : "未配置";
+    ? error
+      ? "检测失败"
+      : "检测中"
+    : status.can_sync
+      ? "已连接"
+      : status.account
+        ? "需重新授权"
+        : status.configured
+          ? "未授权"
+          : "未配置";
   return (
     <section className="settings-card section-body account-connection-panel">
       <div className="status-heading">
-        <h3>抖音同步投稿 · 单账号</h3>
-        <StatusBadge tone={!status && !error ? "neutral" : status?.can_sync ? "success" : "error"}>
-          {connectionLabel}
+        <h3>{uiText("抖音同步投稿 · 单账号")}</h3>
+        <StatusBadge
+          tone={
+            !status && !error
+              ? "neutral"
+              : status?.can_sync
+                ? "success"
+                : "error"
+          }
+        >
+          {uiNode(connectionLabel)}
         </StatusBadge>
       </div>
       <p className="help">
-        复用同一份视频、封面和翻译结果，抖音独立排队。需部署官方授权服务并取得发布权限。
+        {uiText(
+          "复用同一份视频、封面和翻译结果，抖音独立排队。需部署官方授权服务并取得发布权限。",
+        )}
       </p>
       <ReportError message={error} />
       <p>
         {status?.account
-          ? `${status.account.nickname} · ${status.account.auth_state === "valid" ? "已登录" : "需重新授权"}`
-          : "尚未绑定抖音账号"}
+          ? `${status.account.nickname} · ${uiText(status.account.auth_state === "valid" ? "已登录" : "需重新授权")}`
+          : uiText("尚未绑定抖音账号")}
       </p>
       {!status?.account && (
         <>
           <label className="field">
-            HTTPS 授权服务地址
+            {uiText("HTTPS 授权服务地址")}
             <input
               value={url}
               type="url"
@@ -63,7 +88,7 @@ export function DouyinAccountPanel() {
             />
           </label>
           <label className="field">
-            服务配对密钥
+            {uiText("服务配对密钥")}
             <input
               value={key}
               type="password"
@@ -84,7 +109,7 @@ export function DouyinAccountPanel() {
               })
             }
           >
-            保存服务连接
+            {uiText("保存服务连接")}
           </button>
         </>
       )}
@@ -93,7 +118,7 @@ export function DouyinAccountPanel() {
           disabled={busy || !status?.configured}
           onClick={() => void run(() => request("douyin.auth.start"))}
         >
-          在浏览器授权抖音
+          {uiText("在浏览器授权抖音")}
         </button>
         <button
           disabled={busy || !status?.configured}
@@ -106,13 +131,13 @@ export function DouyinAccountPanel() {
             })
           }
         >
-          检查授权状态
+          {uiText("检查授权状态")}
         </button>
         <button
           disabled={busy || !status?.configured}
           onClick={() => void run(() => request("douyin.auth.cancel"))}
         >
-          取消本次授权
+          {uiText("取消本次授权")}
         </button>
         {status?.account && (
           <>
@@ -120,39 +145,39 @@ export function DouyinAccountPanel() {
               disabled={busy}
               onClick={() => {
                 if (
-                  window.confirm(
-                    "请确认已排除抖音限流原因。恢复等待中的抖音队列？",
-                  )
+                  confirmUi("请确认已排除抖音限流原因。恢复等待中的抖音队列？")
                 )
                   void run(() => request("douyin.accounts.resume_uploads"));
               }}
             >
-              恢复抖音上传队列
+              {uiText("恢复抖音上传队列")}
             </button>
             <button
               disabled={busy}
               onClick={() => void run(() => request("douyin.auth.clear"))}
             >
-              退出登录
+              {uiText("退出登录")}
             </button>
             <button
               disabled={busy}
               onClick={() => {
                 if (
-                  window.confirm(
+                  confirmUi(
                     "归档抖音账号后才能绑定其他账号。未完成投稿必须先处理，历史记录保留。继续？",
                   )
                 )
                   void run(() => request("douyin.accounts.archive"));
               }}
             >
-              归档并更换账号
+              {uiText("归档并更换账号")}
             </button>
           </>
         )}
       </div>
       <p className="help">
-        授权完成后点击“检查授权状态”。退出登录不会释放账号名额，也不会改变已有任务的目标账号。
+        {uiText(
+          "授权完成后点击“检查授权状态”。退出登录不会释放账号名额，也不会改变已有任务的目标账号。",
+        )}
       </p>
     </section>
   );
@@ -172,7 +197,13 @@ function PublicationCard({
   progress?: Progress;
 }) {
   const [text, setText] = useState(pub.text);
-  const acfun = (() => { try { return JSON.parse(pub.snapshot || "{}"); } catch { return {}; } })();
+  const acfun = (() => {
+    try {
+      return JSON.parse(pub.snapshot || "{}");
+    } catch {
+      return {};
+    }
+  })();
   const [title, setTitle] = useState(acfun.title || "");
   const [channelId, setChannelId] = useState(String(acfun.channel_id || ""));
   const [remote, setRemote] = useState("");
@@ -182,10 +213,27 @@ function PublicationCard({
     setChannelId(String(acfun.channel_id || ""));
   }, [pub.snapshot, pub.publication_id]);
   useEffect(() => {
-    const changed = pub.platform === "douyin" ? text !== pub.text : pub.platform === "acfun" &&
-      (title !== (acfun.title || "") || channelId !== String(acfun.channel_id || ""));
-    if (pub.platform !== "youtube" && pub.platform !== "xiaohongshu" && !socialPlatforms.some((platform) => platform === pub.platform)) onDirtyChange(pub.publication_id, changed);
-  }, [text, title, channelId, pub.text, pub.snapshot, pub.platform, onDirtyChange]);
+    const changed =
+      pub.platform === "douyin"
+        ? text !== pub.text
+        : pub.platform === "acfun" &&
+          (title !== (acfun.title || "") ||
+            channelId !== String(acfun.channel_id || ""));
+    if (
+      pub.platform !== "youtube" &&
+      pub.platform !== "xiaohongshu" &&
+      !socialPlatforms.some((platform) => platform === pub.platform)
+    )
+      onDirtyChange(pub.publication_id, changed);
+  }, [
+    text,
+    title,
+    channelId,
+    pub.text,
+    pub.snapshot,
+    pub.platform,
+    onDirtyChange,
+  ]);
   const call = (method: string, extra = {}) =>
     run(() =>
       request(method, { publication_id: pub.publication_id, ...extra }),
@@ -193,20 +241,47 @@ function PublicationCard({
   return (
     <div className="section-body">
       <strong>
-        {{ douyin: "抖音", acfun: "AcFun", bilibili: "Bilibili", youtube: "YouTube", twitter: "X（Twitter）", facebook: "Facebook Page", tiktok: "TikTok", xiaohongshu: "小红书" }[pub.platform]} ·{" "}
-        {labels[pub.status] || pub.status}
+        {uiNode(
+          {
+            douyin: "抖音",
+            acfun: "AcFun",
+            bilibili: "Bilibili",
+            youtube: "YouTube",
+            twitter: "X（Twitter）",
+            facebook: "Facebook Page",
+            tiktok: "TikTok",
+            xiaohongshu: "小红书",
+          }[pub.platform],
+        )}{" "}
+        · {uiNode(labels[pub.status] || pub.status)}
       </strong>
       <p className="help">
-        目标账号：{pub.account_label || pub.account_id}{" "}
-        {pub.remote_id && ` · 作品 ID：${pub.remote_id}`}
+        {uiText("目标账号：")}
+        {pub.account_label || pub.account_id}{" "}
+        {uiNode(
+          pub.remote_id && uiText(" · 作品 ID：{p0}", { p0: pub.remote_id }),
+        )}
       </p>
       <ReportError message={pub.error} />
-      {pub.platform === "acfun" && pub.status === "failed" && /(?:40\d{4}|410\d{3}|安全验证)/.test(pub.error) &&
-        <AcfunVerification publicationId={pub.publication_id} busy={busy} run={run} />}
-      {pub.status === "uploading_media" && progress?.percent != null && <p className="help">{pub.platform === "acfun" ? "AcFun" : "平台"}上传：{progress.percent.toFixed(1)}%</p>}
+      {pub.platform === "acfun" &&
+        pub.status === "failed" &&
+        /(?:40\d{4}|410\d{3}|安全验证)/.test(pub.error) && (
+          <AcfunVerification
+            publicationId={pub.publication_id}
+            busy={busy}
+            run={run}
+          />
+        )}
+      {pub.status === "uploading_media" && progress?.percent != null && (
+        <p className="help">
+          {uiNode(pub.platform === "acfun" ? "AcFun" : "平台")}
+          {uiText("上传：")}
+          {uiNode(progress.percent.toFixed(1))}%
+        </p>
+      )}
       {pub.platform === "douyin" && (
         <label className="field">
-          抖音文案（独立于 B 站简介）
+          {uiText("抖音文案（独立于 B 站简介）")}
           <textarea
             value={text}
             maxLength={1000}
@@ -223,24 +298,99 @@ function PublicationCard({
                 })
               }
             >
-              保存抖音文案
+              {uiText("保存抖音文案")}
             </button>
           )}
         </label>
       )}
-      {pub.platform === "acfun" && <div>
-        <p className="help">AcFun 标题单独翻译，最多 50 字；简介和标签与本任务的 Bilibili 投稿一致。投稿类型为转载，来源链接使用原 YouTube URL。</p>
-        <label className="field">AcFun 标题<input value={title} maxLength={50} disabled={busy || pub.status !== "ready"} onChange={(e) => setTitle(e.target.value)} /></label>
-        {title !== (acfun.title || "") && <p className="help">当前输入 {title.length} 字，已保存标题 {String(acfun.title || "").length} 字。请先保存 AcFun 投稿信息，输入框中的修改才会用于投稿。</p>}
-        <p className="help">共用简介：{String(acfun.description || "").length} 字 · 共用标签：{(acfun.tags || []).join("、")}</p>
-        <AcfunChannelSelect value={Number(channelId)} disabled={busy || pub.status !== "ready"} onChange={(value) => setChannelId(value ? String(value) : "")} />
-        {!channelId && <p className="help">可以先保存标题草稿；确认投稿前仍需填写分区 ID。</p>}
-        {pub.status === "ready" && <button disabled={busy || !title.trim() || !Number.isInteger(Number(channelId)) || Number(channelId) < 0}
-          onClick={() => void call("publications.update_metadata", { revision: pub.revision, title, channel_id: Number(channelId) })}>保存 AcFun 投稿信息</button>}
-      </div>}
-      {pub.platform === "youtube" && <YoutubePublicationFields pub={pub} busy={busy} run={run} onDirtyChange={onDirtyChange} />}
-      {pub.platform === "xiaohongshu" && <XiaohongshuPublicationFields pub={pub} busy={busy} run={run} onDirtyChange={onDirtyChange} />}
-      {socialPlatforms.some((platform) => platform === pub.platform) && <SocialPublicationFields pub={pub} busy={busy} run={run} onDirtyChange={onDirtyChange} />}
+      {pub.platform === "acfun" && (
+        <div>
+          <p className="help">
+            {uiText(
+              "AcFun 标题单独翻译，最多 50 字；简介和标签与本任务的 Bilibili 投稿一致。投稿类型为转载，来源链接使用原 YouTube URL。",
+            )}
+          </p>
+          <label className="field">
+            {uiText("AcFun 标题")}
+            <input
+              value={title}
+              maxLength={50}
+              disabled={busy || pub.status !== "ready"}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </label>
+          {title !== (acfun.title || "") && (
+            <p className="help">
+              {uiText("当前输入 ")}
+              {uiNode(title.length)}
+              {uiText(" 字，已保存标题 ")}
+              {String(acfun.title || "").length}
+              {uiText(
+                " 字。请先保存 AcFun 投稿信息，输入框中的修改才会用于投稿。",
+              )}
+            </p>
+          )}
+          <p className="help">
+            {uiText("共用简介：")}
+            {String(acfun.description || "").length}
+            {uiText(" 字 · 共用标签：")}
+            {(acfun.tags || []).join("、")}
+          </p>
+          <AcfunChannelSelect
+            value={Number(channelId)}
+            disabled={busy || pub.status !== "ready"}
+            onChange={(value) => setChannelId(value ? String(value) : "")}
+          />
+          {!channelId && (
+            <p className="help">
+              {uiText("可以先保存标题草稿；确认投稿前仍需填写分区 ID。")}
+            </p>
+          )}
+          {pub.status === "ready" && (
+            <button
+              disabled={
+                busy ||
+                !title.trim() ||
+                !Number.isInteger(Number(channelId)) ||
+                Number(channelId) < 0
+              }
+              onClick={() =>
+                void call("publications.update_metadata", {
+                  revision: pub.revision,
+                  title,
+                  channel_id: Number(channelId),
+                })
+              }
+            >
+              {uiText("保存 AcFun 投稿信息")}
+            </button>
+          )}
+        </div>
+      )}
+      {pub.platform === "youtube" && (
+        <YoutubePublicationFields
+          pub={pub}
+          busy={busy}
+          run={run}
+          onDirtyChange={onDirtyChange}
+        />
+      )}
+      {pub.platform === "xiaohongshu" && (
+        <XiaohongshuPublicationFields
+          pub={pub}
+          busy={busy}
+          run={run}
+          onDirtyChange={onDirtyChange}
+        />
+      )}
+      {socialPlatforms.some((platform) => platform === pub.platform) && (
+        <SocialPublicationFields
+          pub={pub}
+          busy={busy}
+          run={run}
+          onDirtyChange={onDirtyChange}
+        />
+      )}
       <div className="modal-actions">
         {["failed", "cancelled", "interrupted", "blocked_validation"].includes(
           pub.status,
@@ -251,7 +401,7 @@ function PublicationCard({
               void call("publications.retry", { operation_id: operationId() })
             }
           >
-            继续此目标并预览
+            {uiText("继续此目标并预览")}
           </button>
         )}
         {["queued", "waiting", "ready"].includes(pub.status) && (
@@ -259,7 +409,7 @@ function PublicationCard({
             disabled={busy}
             onClick={() => void call("publications.cancel")}
           >
-            取消此目标
+            {uiText("取消此目标")}
           </button>
         )}
         {[
@@ -273,49 +423,47 @@ function PublicationCard({
             disabled={busy}
             onClick={() => {
               if (
-                window.confirm(
+                confirmUi(
                   "明确放弃此投稿目标？其他目标完成后可能清理共享素材。",
                 )
               )
                 void call("publications.abandon");
             }}
           >
-            放弃此目标
+            {uiText("放弃此目标")}
           </button>
         )}
       </div>
       {pub.status === "submission_unknown" && (
         <>
           <p className="help">
-            先核对对应账号的创作中心。上传完成不代表作品已创建；不明结果不会自动重发。
+            {uiText(
+              "先核对对应账号的创作中心。上传完成不代表作品已创建；不明结果不会自动重发。",
+            )}
           </p>
           <input
-            aria-label="核对后的作品 ID"
+            aria-label={uiText("核对后的作品 ID")}
             value={remote}
             onChange={(e) => setRemote(e.target.value)}
-            placeholder="核对后的作品 ID"
+            placeholder={uiText("核对后的作品 ID")}
           />
           <button
             disabled={busy || !remote.trim()}
             onClick={() => {
-              if (window.confirm("确认此作品属于本次投稿？"))
+              if (confirmUi("确认此作品属于本次投稿？"))
                 void call("publications.resolve", { remote_id: remote });
             }}
           >
-            登记已提交
+            {uiText("登记已提交")}
           </button>
           <button
             disabled={busy}
             onClick={() => {
-              if (
-                window.confirm(
-                  "确认平台上没有此作品？错误确认可能造成重复投稿。",
-                )
-              )
+              if (confirmUi("确认平台上没有此作品？错误确认可能造成重复投稿。"))
                 void call("publications.resolve", { not_submitted: true });
             }}
           >
-            确认未提交
+            {uiText("确认未提交")}
           </button>
         </>
       )}
@@ -341,10 +489,23 @@ export function PublicationDetails({
   progressMap: Record<string, Progress>;
 }) {
   const [dirtyIds, setDirtyIds] = useState<string[]>([]);
-  useEffect(() => onDirtyChange(dirtyIds.length > 0), [dirtyIds, onDirtyChange]);
-  const markDirty = useCallback((id: string, value: boolean) => setDirtyIds((current) => value
-    ? (current.includes(id) ? current : [...current, id])
-    : (current.includes(id) ? current.filter((x) => x !== id) : current)), []);
+  useEffect(
+    () => onDirtyChange(dirtyIds.length > 0),
+    [dirtyIds, onDirtyChange],
+  );
+  const markDirty = useCallback(
+    (id: string, value: boolean) =>
+      setDirtyIds((current) =>
+        value
+          ? current.includes(id)
+            ? current
+            : [...current, id]
+          : current.includes(id)
+            ? current.filter((x) => x !== id)
+            : current,
+      ),
+    [],
+  );
   const run = (work: () => Promise<unknown>) =>
     action(async () => {
       await work();
@@ -352,7 +513,7 @@ export function PublicationDetails({
     });
   return (
     <section>
-      <h3>各平台投稿结果</h3>
+      <h3>{uiText("各平台投稿结果")}</h3>
       {task.publications?.map((pub) => (
         <PublicationCard
           key={pub.publication_id}
@@ -366,10 +527,16 @@ export function PublicationDetails({
       {task.status === "partial_success" &&
         task.publications?.some((p) => p.status === "ready") && (
           <button
-            disabled={busy || dirty || task.publications.some((pub) => pub.status === "ready" && !canConfirmPublication(pub))}
+            disabled={
+              busy ||
+              dirty ||
+              task.publications.some(
+                (pub) => pub.status === "ready" && !canConfirmPublication(pub),
+              )
+            }
             onClick={() => {
               if (
-                window.confirm(
+                confirmUi(
                   "仅提交尚未成功且已准备好的目标？已成功平台不会重复投稿。",
                 )
               )
@@ -390,7 +557,7 @@ export function PublicationDetails({
                 );
             }}
           >
-            确认投稿未完成目标
+            {uiText("确认投稿未完成目标")}
           </button>
         )}
     </section>

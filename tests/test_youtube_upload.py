@@ -79,6 +79,16 @@ class YoutubeTests(unittest.TestCase):
     prepare = desktop_tests.DesktopTests.prepare
     upload = desktop_tests.DesktopTests.upload
 
+    def test_categories_use_requested_language_and_separate_caches(self):
+        self.bind()
+        for language in ("zh-CN", "en", "zh-HK", "en", "zh-CN"):
+            self.service.youtube_upload.categories(ui_language=language)
+        calls = [url for _, url, _ in self.google.calls if "/videoCategories?" in url]
+        self.assertEqual([parse_qs(urlsplit(url).query)["hl"][0] for url in calls],
+                         ["zh_CN", "en", "zh_HK"])
+        with self.assertRaises(AppError):
+            self.service.youtube_upload.categories(ui_language="unsupported")
+
     def bind(self):
         self.google = FakeGoogle()
         service = self.service.youtube_upload

@@ -1,3 +1,4 @@
+import { uiText } from "./i18n";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -10,14 +11,18 @@ export const preview =
   !isTauri() &&
   new URLSearchParams(location.search).has("preview");
 let shuttingDown = false;
-export function beginShutdown() { shuttingDown = true; }
+export function beginShutdown() {
+  shuttingDown = true;
+}
 export async function setWindowTheme(theme: "system" | "dark" | "light") {
   if (isTauri())
     await getCurrentWindow().setTheme(theme === "system" ? null : theme);
 }
 export async function setWindowIcon(theme: "dark" | "light") {
   if (!isTauri()) return;
-  const response = await fetch(theme === "dark" ? "/brand-dark.png" : "/brand.png");
+  const response = await fetch(
+    theme === "dark" ? "/brand-dark.png" : "/brand.png",
+  );
   if (!response.ok) throw new Error(`Icon request failed: ${response.status}`);
   const bitmap = await createImageBitmap(await response.blob());
   try {
@@ -46,7 +51,10 @@ export async function request<T = any>(
 ): Promise<T> {
   if (shuttingDown && !method.startsWith("system."))
     throw new Error("应用正在退出。");
-  if (shuttingDown && !["system.prepare_shutdown", "system.shutdown_status"].includes(method))
+  if (
+    shuttingDown &&
+    !["system.prepare_shutdown", "system.shutdown_status"].includes(method)
+  )
     throw new Error("应用正在退出。");
   if (preview) return (await import("./preview")).request(method, params) as T;
   if (!isTauri())
@@ -57,7 +65,10 @@ export async function request<T = any>(
   try {
     result = await invoke<T>("backend_request", { method, params });
   } catch (error) {
-    if (method === "materials.import" && String(error).includes("不支持的方法：materials.import")) {
+    if (
+      method === "materials.import" &&
+      String(error).includes("不支持的方法：materials.import")
+    ) {
       throw new Error("素材导入后台尚未更新，请退出并重新启动应用后再试。");
     }
     throw error;
@@ -92,7 +103,7 @@ export async function chooseFile(extensions = ["txt"]) {
   if (!isTauri()) throw new Error("文件选择需要在桌面应用中使用。");
   return open({
     multiple: false,
-    filters: [{ name: "支持的文件", extensions }],
+    filters: [{ name: uiText("支持的文件"), extensions }],
   }) as Promise<string | null>;
 }
 export async function chooseDirectory() {
@@ -101,19 +112,22 @@ export async function chooseDirectory() {
 }
 export async function chooseFiles(extensions: string[]) {
   if (!isTauri()) throw new Error("文件选择需要在桌面应用中使用。");
-  return open({ multiple: true, filters: [{ name: "支持的文件", extensions }] }) as Promise<string[] | null>;
+  return open({
+    multiple: true,
+    filters: [{ name: uiText("支持的文件"), extensions }],
+  }) as Promise<string[] | null>;
 }
 export async function saveLog() {
   return save({
     defaultPath: "screator-diagnostics.txt",
-    filters: [{ name: "诊断日志", extensions: ["txt"] }],
+    filters: [{ name: uiText("诊断日志"), extensions: ["txt"] }],
   });
 }
 export async function saveHistory() {
   if (!isTauri()) throw new Error("投稿记录导出需要在桌面应用中使用。");
   return save({
-    defaultPath: `screator-投稿记录-${new Date().toISOString().slice(0, 10)}.json`,
-    filters: [{ name: "投稿记录 JSON", extensions: ["json"] }],
+    defaultPath: `screator-${uiText("投稿记录")}-${new Date().toISOString().slice(0, 10)}.json`,
+    filters: [{ name: uiText("投稿记录 JSON"), extensions: ["json"] }],
   });
 }
 export async function external(url: string) {

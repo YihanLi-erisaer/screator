@@ -147,7 +147,13 @@ npm run test:launcher
 
 测试默认使用本机 Microsoft Edge。`npm run test:e2e` 会自动启动前端开发服务（或复用已有服务）。开发预览 `/?preview&populated` 明确标记示例数据，不调用外部账号，生产构建不会包含预览模块。
 
-界面繁体文案由构建脚本预先生成，运行时不加载 OpenCC 词库。修改界面文案后，在 `desktop/` 运行 `node scripts/extract-ui-source.mjs`，补齐 `src/messagesEn.json`，再运行 `node scripts/build-ui-locales.mjs` 更新 `src/messagesHk.json`；两种生产构建入口都会检查语言资源是否同步。
+界面支持简体中文、繁体中文（香港）和英文，在设置中保存后切换。文案通过 `uiText` / `uiNode` 在 React 渲染时翻译，原生确认框使用 `confirmUi`；禁止用 DOM 替换来修改 React 管理的文本。日期、时间和数字使用当前界面语言。YouTube 分类通过[官方接口的 `hl` 参数](https://developers.google.com/youtube/v3/docs/videoCategories/list)按语言请求并分别缓存；AcFun 分区逐级翻译已收录的分类名，未收录的平台分类保留官方原名。
+
+带账号、数量或路径的文案使用完整参数词条，例如 `uiText("已导出 {p0} 条投稿记录。", { p0: count })`，参数原样插入。界面会翻译已收录的 Python / Rust 应用提示；未收录的第三方原始错误保留原文。标题、正文、账号名、素材名、路径和诊断日志直接渲染，不传入翻译函数；自定义下拉框中的用户内容设置 `localize: false`。语言名称保留自称，方便用户选回熟悉的语言。
+
+繁体文案由 OpenCC 在构建时预先生成，可在 `scripts/build-ui-locales.mjs` 中配置人工覆写，运行时不加载 OpenCC 词库。修改文案后，在项目根目录运行 `python desktop/scripts/extract-backend-messages.py`（后台文案变更时），再在 `desktop/` 运行 `node scripts/extract-ui-source.mjs`，补齐 `src/messagesEn.json`，并运行 `node scripts/build-ui-locales.mjs`。生产构建检查缺失词条、参数一致性、未接入翻译的 JSX 文本和原生确认调用；后台目录同步由 `tests/test_ui_localization.py` 检查。
+
+多语言回归测试：`npm run test:e2e -- e2e/localization.spec.ts`。覆盖页面和懒加载面板、英文残留文案、简中／繁中／英文往返切换、确认框、后台错误、审核状态，以及语言切换时保留编辑内容。
 
 启动测量：在仓库根目录运行 `python scripts/benchmark_startup.py`，或用 `--samples 5 --tasks 0 1000 10000` 指定样本数和历史数量。脚本使用临时数据及空凭据存储，测量源码 worker 就绪、已完成历史任务下的后台初始化、健康查询、列表查询和队列快照；不操作真实账号，不包含原生窗口绘制、系统冷启动或真实服务检测。`scripts/smoke_worker.py --protocol-only` 可在未安装 FFmpeg 时单独检查源码或冻结后台通信。
 

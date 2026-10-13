@@ -1,3 +1,4 @@
+import { uiNode, uiText } from "./i18n";
 import { useState } from "react";
 import TranslationPanel from "./TranslationPanel";
 import { ArrowRight, CheckCircle2, FolderOpen, RefreshCw } from "lucide-react";
@@ -28,10 +29,14 @@ export default function SetupWizard({
   const [folder, setFolder] = useState(config.work_dir);
   const [checkedKey, setCheckedKey] = useState(false);
   const labels = ["素材目录", "运行环境", "翻译服务", "投稿账号"];
-  const readyTools = diagnostics &&
+  const readyTools =
+    diagnostics &&
     ["ffmpeg", "ffprobe", "biliup"].every((name) =>
-      diagnostics.tools.some((tool: any) => tool.name === name && tool.available),
-    ) && diagnostics.tools.some(
+      diagnostics.tools.some(
+        (tool: any) => tool.name === name && tool.available,
+      ),
+    ) &&
+    diagnostics.tools.some(
       (tool: any) => ["node", "deno"].includes(tool.name) && tool.available,
     );
   return (
@@ -40,18 +45,20 @@ export default function SetupWizard({
         {labels.map((label, i) => (
           <li key={label} className={i === step ? "current" : ""}>
             <span>{i < step ? <CheckCircle2 size={15} /> : i + 1}</span>
-            {label}
+            {uiNode(label)}
           </li>
         ))}
       </ol>
-      <h3>{labels[step]}</h3>
+      <h3>{uiNode(labels[step])}</h3>
       {step === 0 && (
         <>
           <p className="help">
-            选择保存视频和封面的文件夹。任务记录和账号设置会单独保存在本机。
+            {uiText(
+              "选择保存视频和封面的文件夹。任务记录和账号设置会单独保存在本机。",
+            )}
           </p>
           <label className="field-label" htmlFor="wizard-folder">
-            素材工作目录
+            {uiText("素材工作目录")}
           </label>
           <div className="button-row">
             <input
@@ -70,23 +77,31 @@ export default function SetupWizard({
               }
             >
               <FolderOpen size={16} />
-              选择
+              {uiText("选择")}
             </button>
           </div>
         </>
       )}
       {step === 1 && (
         <>
-          <p className="help">检查下载、视频处理和投稿功能是否可用。</p>
+          <p className="help">
+            {uiText("检查下载、视频处理和投稿功能是否可用。")}
+          </p>
           <p className="help" role="status">
-            {!diagnostics ? "正在检查功能…" : readyTools
-              ? "下载、视频处理和投稿功能已就绪。"
-              : "部分功能暂不可用，请重新检测或更新安装包。"}
+            {uiNode(
+              !diagnostics
+                ? "正在检查功能…"
+                : readyTools
+                  ? "下载、视频处理和投稿功能已就绪。"
+                  : "部分功能暂不可用，请重新检测或更新安装包。",
+            )}
           </p>
           <p className="help">
-            {diagnostics
-              ? `可用空间 ${bytes(diagnostics.free_bytes)}`
-              : "正在检测环境…"}
+            {uiNode(
+              diagnostics
+                ? uiText("可用空间 {p0}", { p0: bytes(diagnostics.free_bytes) })
+                : "正在检测环境…",
+            )}
           </p>
           <button
             className="secondary"
@@ -98,7 +113,7 @@ export default function SetupWizard({
             }
           >
             <RefreshCw size={15} />
-            重新检测
+            {uiText("重新检测")}
           </button>
         </>
       )}
@@ -113,31 +128,41 @@ export default function SetupWizard({
       )}
       {step === 3 && (
         <>
-          <ReportError message={auth.login?.status === "failed" ? auth.login?.message || "登录失败，请重试。"
-            : auth.login?.status === "expired" ? "二维码已过期，请刷新。" : null} />
+          <ReportError
+            message={
+              auth.login?.status === "failed"
+                ? auth.login?.message || "登录失败，请重试。"
+                : auth.login?.status === "expired"
+                  ? "二维码已过期，请刷新。"
+                  : null
+            }
+          />
           <p className="help">
-            使用哔哩哔哩 App
-            扫码。也可以稍后在“账号与连接”登录，先使用素材预览功能。
+            {uiText(
+              "使用哔哩哔哩 App 扫码。也可以稍后在“账号与连接”登录，先使用素材预览功能。",
+            )}
           </p>
           {auth.login?.qrcode && (
             <img
               className="wizard-qr"
               src={auth.login.qrcode}
-              alt="B 站登录二维码"
+              alt={uiText("B 站登录二维码")}
             />
           )}
           <p className="help">
-            {auth.configured
-              ? "账号已连接"
-              : (
-                  {
-                    loading: "正在获取二维码…",
-                    waiting: "请扫码并在手机上确认",
-                    scanned: "请在手机上确认",
-                    expired: "二维码待刷新",
-                    failed: "请重新登录",
-                  } as Record<string, string>
-                )[auth.login?.status] || "尚未连接账号"}
+            {uiNode(
+              auth.configured
+                ? "账号已连接"
+                : (
+                    {
+                      loading: "正在获取二维码…",
+                      waiting: "请扫码并在手机上确认",
+                      scanned: "请在手机上确认",
+                      expired: "二维码待刷新",
+                      failed: "请重新登录",
+                    } as Record<string, string>
+                  )[auth.login?.status] || "尚未连接账号",
+            )}
           </p>
           <button
             className="secondary"
@@ -149,7 +174,7 @@ export default function SetupWizard({
               })
             }
           >
-            {auth.login?.qrcode ? "刷新二维码" : "扫码登录"}
+            {uiNode(auth.login?.qrcode ? "刷新二维码" : "扫码登录")}
           </button>
         </>
       )}
@@ -165,7 +190,7 @@ export default function SetupWizard({
               })
             }
           >
-            上一步
+            {uiText("上一步")}
           </button>
         )}
         <button
@@ -190,7 +215,7 @@ export default function SetupWizard({
             })
           }
         >
-          {step === 3 ? "完成配置" : "下一步"}
+          {uiNode(step === 3 ? "完成配置" : "下一步")}
           <ArrowRight size={15} />
         </button>
       </div>

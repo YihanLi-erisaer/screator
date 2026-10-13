@@ -1,11 +1,19 @@
 import { Check, ChevronDown } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { uiText } from "./i18n";
 
 export type SelectOption = {
   value: string;
   label: string;
   disabled?: boolean;
+  localize?: boolean;
 };
 
 type MenuPlacement = {
@@ -67,19 +75,28 @@ export function StyledSelect({
       const bounds = button.getBoundingClientRect();
       const dialog = root.current?.closest("dialog")?.getBoundingClientRect();
       const topLimit = Math.max(8, (dialog?.top ?? 0) + 8);
-      const bottomLimit = Math.min(window.innerHeight - 8, (dialog?.bottom ?? window.innerHeight) - 8);
+      const bottomLimit = Math.min(
+        window.innerHeight - 8,
+        (dialog?.bottom ?? window.innerHeight) - 8,
+      );
       if (bounds.bottom < topLimit || bounds.top > bottomLimit) {
         setOpen(false);
         return;
       }
       const below = Math.max(0, bottomLimit - bounds.bottom - 5);
       const aboveSpace = Math.max(0, bounds.top - topLimit - 5);
-      const above = below < Math.min(240, list.scrollHeight) && aboveSpace > below;
-      const compact = !!root.current?.parentElement?.matches(".button-row, .setting-row");
+      const above =
+        below < Math.min(240, list.scrollHeight) && aboveSpace > below;
+      const compact = !!root.current?.parentElement?.matches(
+        ".button-row, .setting-row",
+      );
       const width = compact
         ? Math.max(bounds.width, list.getBoundingClientRect().width)
         : Math.min(bounds.width, window.innerWidth - 16);
-      const left = Math.max(8, Math.min(bounds.left, window.innerWidth - width - 8));
+      const left = Math.max(
+        8,
+        Math.min(bounds.left, window.innerWidth - width - 8),
+      );
       setPlacement({
         top: above ? undefined : bounds.bottom + 5,
         bottom: above ? window.innerHeight - bounds.top + 5 : undefined,
@@ -106,14 +123,22 @@ export function StyledSelect({
     const option = optionRefs.current[activeIndex];
     if (!open || !list || !option) return;
     if (option.offsetTop < list.scrollTop) list.scrollTop = option.offsetTop;
-    else if (option.offsetTop + option.offsetHeight > list.scrollTop + list.clientHeight) {
-      list.scrollTop = option.offsetTop + option.offsetHeight - list.clientHeight;
+    else if (
+      option.offsetTop + option.offsetHeight >
+      list.scrollTop + list.clientHeight
+    ) {
+      list.scrollTop =
+        option.offsetTop + option.offsetHeight - list.clientHeight;
     }
   }, [activeIndex, open]);
 
   useEffect(() => () => window.clearTimeout(searchTimer.current), []);
 
-  const show = (initialIndex = selectedIndex >= 0 ? selectedIndex : options.findIndex((option) => !option.disabled)) => {
+  const show = (
+    initialIndex = selectedIndex >= 0
+      ? selectedIndex
+      : options.findIndex((option) => !option.disabled),
+  ) => {
     setPlacement(null);
     setActiveIndex(initialIndex);
     setOpen(true);
@@ -141,11 +166,13 @@ export function StyledSelect({
         type="button"
         className="styled-select-trigger"
         role="combobox"
-        aria-label={label}
+        aria-label={uiText(label)}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
-        aria-activedescendant={open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
+        aria-activedescendant={
+          open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined
+        }
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={(event) => {
@@ -154,26 +181,46 @@ export function StyledSelect({
             move(event.key === "ArrowDown" ? 1 : -1);
           } else if (event.key === "Home" || event.key === "End") {
             event.preventDefault();
-            const indices = options.map((option, index) => !option.disabled ? index : -1).filter((index) => index >= 0);
+            const indices = options
+              .map((option, index) => (!option.disabled ? index : -1))
+              .filter((index) => index >= 0);
             if (indices.length) {
-              const target = event.key === "Home" ? indices[0] : indices[indices.length - 1];
+              const target =
+                event.key === "Home" ? indices[0] : indices[indices.length - 1];
               if (open) setActiveIndex(target);
               else show(target);
             }
           } else if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            if (open && options[activeIndex] && !options[activeIndex].disabled) choose(options[activeIndex]);
+            if (open && options[activeIndex] && !options[activeIndex].disabled)
+              choose(options[activeIndex]);
             else if (!open) show();
           } else if (event.key === "Escape" && open) {
             event.preventDefault();
             setOpen(false);
           } else if (event.key === "Tab") {
             setOpen(false);
-          } else if (event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) {
+          } else if (
+            event.key.length === 1 &&
+            !event.altKey &&
+            !event.ctrlKey &&
+            !event.metaKey
+          ) {
             search.current += event.key.toLocaleLowerCase();
             window.clearTimeout(searchTimer.current);
-            searchTimer.current = window.setTimeout(() => { search.current = ""; }, 600);
-            const match = options.findIndex((option) => !option.disabled && uiText(option.label).toLocaleLowerCase().startsWith(search.current));
+            searchTimer.current = window.setTimeout(() => {
+              search.current = "";
+            }, 600);
+            const match = options.findIndex(
+              (option) =>
+                !option.disabled &&
+                (option.localize === false
+                  ? option.label
+                  : uiText(option.label)
+                )
+                  .toLocaleLowerCase()
+                  .startsWith(search.current),
+            );
             if (match >= 0) {
               event.preventDefault();
               if (open) setActiveIndex(match);
@@ -182,31 +229,46 @@ export function StyledSelect({
           }
         }}
       >
-        <span className="styled-select-value">{selected?.label || options[0]?.label || ""}</span>
+        <span className="styled-select-value">
+          {(selected ?? options[0])?.localize === false
+            ? (selected ?? options[0])?.label
+            : uiText(selected?.label || options[0]?.label || "")}
+        </span>
         <ChevronDown size={16} aria-hidden="true" />
       </button>
       {open && (
-        <div ref={menu} id={listId} className="styled-select-menu"
-          role="listbox" aria-label={label}
-          style={{
-            top: placement?.top,
-            bottom: placement?.bottom,
-            left: placement?.left,
-            width: placement?.width,
-            minWidth: placement?.minWidth,
-            maxHeight: placement?.maxHeight,
-            visibility: placement ? "visible" : "hidden",
-          } satisfies CSSProperties}>
+        <div
+          ref={menu}
+          id={listId}
+          className="styled-select-menu"
+          role="listbox"
+          aria-label={uiText(label)}
+          style={
+            {
+              top: placement?.top,
+              bottom: placement?.bottom,
+              left: placement?.left,
+              width: placement?.width,
+              minWidth: placement?.minWidth,
+              maxHeight: placement?.maxHeight,
+              visibility: placement ? "visible" : "hidden",
+            } satisfies CSSProperties
+          }
+        >
           {options.map((option, index) => (
             <div
               key={option.value}
               id={`${listId}-${index}`}
-              ref={(element) => { optionRefs.current[index] = element; }}
+              ref={(element) => {
+                optionRefs.current[index] = element;
+              }}
               className={`styled-select-option ${index === activeIndex ? "active" : ""}`}
               role="option"
               aria-selected={option.value === value}
               aria-disabled={option.disabled || undefined}
-              onMouseEnter={() => { if (!option.disabled) setActiveIndex(index); }}
+              onMouseEnter={() => {
+                if (!option.disabled) setActiveIndex(index);
+              }}
               onClick={(event) => {
                 // A surrounding label must not forward this click to the trigger.
                 event.preventDefault();
@@ -214,7 +276,11 @@ export function StyledSelect({
                 choose(option);
               }}
             >
-              <span>{option.label}</span>
+              <span>
+                {option.localize === false
+                  ? option.label
+                  : uiText(option.label)}
+              </span>
               {option.value === value && <Check size={15} aria-hidden="true" />}
             </div>
           ))}

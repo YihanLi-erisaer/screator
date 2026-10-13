@@ -11,7 +11,8 @@ const config = {
   youtube_audio_language: "auto",
   upload_gap_seconds: 20,
   theme: "dark",
-  ui_language: "zh-CN",
+  ui_language: ["zh-CN", "zh-HK", "en"].includes(new URLSearchParams(location.search).get("uiLanguage") || "")
+    ? new URLSearchParams(location.search).get("uiLanguage")! : "zh-CN",
   hwaccel: "auto",
   validation_cache: true,
   has_deepl_key: false,

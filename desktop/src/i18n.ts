@@ -1,113 +1,136 @@
-import source from "./ui-source.json";
+import { useSyncExternalStore, type ReactNode } from "react";
 import english from "./messagesEn.json";
 import traditional from "./messagesHk.json";
 import type { Config } from "./types";
 
 type Language = Config["ui_language"];
-type AttributeName = "aria-label" | "placeholder" | "title";
-const sourcePhrases = new Set<string>(source);
+type Parameters = Record<string, string | number | boolean | null | undefined>;
 const en = english as Record<string, string>;
 const hk = traditional as Record<string, string>;
-const toTraditional = (text: string) => hk[text] ?? text;
-const dynamicFragments = [
-  "同步上传小红书", "共用图文正文：", "/ 1000 字。图片按任务中的顺序发布。", "，并同步到小红书",
-  "前移图片", "后移图片", "移除图片",
-  "的创作中心，并确认没有遗留上传进程。恢复该账号上传队列？",
-  "已停止未投稿任务并保留素材。仍有",
-  "的登录凭据？任务和账号仍保留。",
-  "个任务待收尾；投稿结束后自动退出。",
-  "？只有全部任务已提交时才能释放名额。",
-  "未匹配到可投稿分区（ID",
-  "条记录，跳过", "条已有记录。", "条投稿记录。", "条稿件", "个任务正在队列中",
-  "个在途投稿、", "未连接到后台：", "确认投稿到", "当前可用空间",
-  "· 已切换服务（", "· 作品 ID：", "请先核对", "· 剩余", "可用空间",
-  "清除", "已导出", "导入", "已登录", "需重新扫码", "需重新授权",
-];
-const textSource = new WeakMap<Text, { original: string; rendered: string }>();
-const attributeSource = new WeakMap<Element, Map<AttributeName, { original: string; rendered: string }>>();
 let language: Language = "zh-CN";
-
+const listeners = new Set<() => void>();
 const normal = (value: string) => value.replace(/\s+/g, " ").trim();
+const escapePattern = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const parameterPattern = /\{(\w+)\}/g;
 
-function translate(value: string): string {
+// Match complete application messages, never arbitrary fragments of user content.
+// Parameters (account names, paths, service details) are interpolated verbatim.
+const templates = Object.keys(en)
+  .filter((key) => /\{\w+\}/.test(key))
+  .map((key) => {
+    const names: string[] = [];
+    let cursor = 0;
+    let pattern = "^";
+    for (const match of key.matchAll(parameterPattern)) {
+      pattern +=
+        escapePattern(key.slice(cursor, match.index)).replace(/\s+/g, "\\s+") +
+        "([\\s\\S]*?)";
+      names.push(match[1]);
+      cursor = match.index! + match[0].length;
+    }
+    pattern += escapePattern(key.slice(cursor)).replace(/\s+/g, "\\s+") + "$";
+    return {
+      key,
+      names,
+      pattern: new RegExp(pattern),
+      specificity: key.replace(parameterPattern, "").length,
+    };
+  })
+  .sort((a, b) => b.specificity - a.specificity);
+
+function interpolate(text: string, params: Parameters) {
+  return text.replace(parameterPattern, (placeholder, name: string) =>
+    Object.prototype.hasOwnProperty.call(params, name)
+      ? String(params[name] ?? "")
+      : placeholder,
+  );
+}
+
+export function uiText(value: string, params?: Parameters): string {
+  if (!value) return value;
   const key = normal(value);
-  if (!key) return value;
-  let translated = key;
-  if (sourcePhrases.has(key)) {
-    translated = language === "en" ? (en[key] ?? key) : language === "zh-HK" ? toTraditional(key) : key;
-  } else if (language !== "zh-CN" && dynamicFragments.some((fragment) => key.includes(fragment))) {
-    for (const fragment of dynamicFragments) {
-      if (key.includes(fragment)) {
-        const replacement = language === "en" ? en[fragment] : toTraditional(fragment);
-        if (replacement) translated = translated.replaceAll(fragment, replacement);
-      }
+  const dictionary =
+    language === "en" ? en : language === "zh-HK" ? hk : undefined;
+  let translated = dictionary?.[key];
+  if (params)
+    return translated
+      ? (value.match(/^\s*/)?.[0] ?? "") +
+          interpolate(translated, params) +
+          (value.match(/\s*$/)?.[0] ?? "")
+      : interpolate(value, params);
+  if (!translated && dictionary) {
+    for (const template of templates) {
+      const match = value.trim().match(template.pattern);
+      if (!match) continue;
+      const values = Object.fromEntries(
+        template.names.map((name, index) => [name, match[index + 1]]),
+      );
+      translated = interpolate(
+        dictionary[template.key] ?? template.key,
+        values,
+      );
+      break;
     }
   }
-  if (!translated || translated === key) return value;
-  const start = value.match(/^\s*/)?.[0] ?? "";
-  const end = value.match(/\s*$/)?.[0] ?? "";
-  return start + translated + end;
+  if (!translated && dictionary && value.startsWith("Error: "))
+    return "Error: " + uiText(value.slice(7));
+  if (!translated) return value;
+  return (
+    (value.match(/^\s*/)?.[0] ?? "") +
+    translated +
+    (value.match(/\s*$/)?.[0] ?? "")
+  );
 }
 
-export const uiText = translate;
-
-function translateText(node: Text) {
-  const current = node.data;
-  const saved = textSource.get(node);
-  const original = saved && current === saved.rendered ? saved.original : current;
-  const rendered = translate(original);
-  textSource.set(node, { original, rendered });
-  if (current !== rendered) node.data = rendered;
+/** Localize string results at the React render boundary, preserving other nodes. */
+export function uiNode(value: ReactNode): ReactNode {
+  if (typeof value === "string") return uiText(value);
+  if (Array.isArray(value)) return value.map(uiNode);
+  return value;
 }
 
-function translateAttributes(element: Element) {
-  const saved = attributeSource.get(element) ?? new Map();
-  for (const name of ["aria-label", "placeholder", "title"] as const) {
-    const current = element.getAttribute(name);
-    if (current == null) continue;
-    const previous = saved.get(name);
-    const original = previous && current === previous.rendered ? previous.original : current;
-    const rendered = translate(original);
-    saved.set(name, { original, rendered });
-    if (current !== rendered) element.setAttribute(name, rendered);
-  }
-  attributeSource.set(element, saved);
+export function confirmUi(message: string) {
+  return window.confirm(uiText(message));
 }
 
-function translateTree(root: Node) {
-  if (root.nodeType === Node.TEXT_NODE) {
-    translateText(root as Text);
-    return;
-  }
-  if (root.nodeType !== Node.ELEMENT_NODE) return;
-  const element = root as Element;
-  if (element.closest("[data-no-localize], [contenteditable=true], script, style")) return;
-  translateAttributes(element);
-  for (const child of element.childNodes) translateTree(child);
-}
+export const getUiLanguage = () => language;
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+export const useUiLanguage = () =>
+  useSyncExternalStore(subscribe, getUiLanguage, getUiLanguage);
 
 export function setUiLanguage(value: Language) {
-  language = value;
   document.documentElement.lang = value;
-  try { localStorage.setItem("screator.uiLanguage", value); } catch { /* Backend setting remains authoritative. */ }
-  translateTree(document.body);
+  try {
+    localStorage.setItem("screator.uiLanguage", value);
+  } catch {
+    /* Backend settings remain authoritative. */
+  }
+  if (language === value) return;
+  language = value;
+  listeners.forEach((listener) => listener());
 }
 
 export function startUiLocalization() {
   try {
     const cached = localStorage.getItem("screator.uiLanguage");
-    if (cached === "zh-CN" || cached === "zh-HK" || cached === "en") language = cached;
-  } catch { /* Use the default until settings load. */ }
+    if (cached === "zh-CN" || cached === "zh-HK" || cached === "en")
+      language = cached;
+  } catch {
+    /* Use the default until settings load. */
+  }
   document.documentElement.lang = language;
-  const observer = new MutationObserver((changes) => {
-    for (const change of changes) {
-      if (change.type === "characterData") translateText(change.target as Text);
-      else if (change.type === "attributes") translateAttributes(change.target as Element);
-      else for (const node of change.addedNodes) translateTree(node);
-    }
-  });
-  observer.observe(document.body, { subtree: true, childList: true, characterData: true,
-    attributes: true, attributeFilter: ["aria-label", "placeholder", "title"] });
-  translateTree(document.body);
-  return () => observer.disconnect();
 }
+
+export const formatDateTime = (
+  value: Date | string | number,
+  options?: Intl.DateTimeFormatOptions,
+) => new Date(value).toLocaleString(language, options);
+export const formatTime = (value: Date | string | number) =>
+  new Date(value).toLocaleTimeString(language);
+export const formatNumber = (value: number) => value.toLocaleString(language);

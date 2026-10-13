@@ -1,24 +1,74 @@
+import { uiText, uiNode, formatNumber } from "./i18n";
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, UserRound, Video } from "lucide-react";
 import { request } from "./bridge";
 import { StyledSelect } from "./StyledSelect";
 import { labels, type BiliAccount } from "./types";
 
-type Platform = "bilibili" | "acfun" | "douyin" | "youtube" | "twitter" | "facebook" | "tiktok" | "xiaohongshu";
-type Summary = { account_id: string; uid: string; name: string; followers: number | null; views: number | null; publications: number | null };
-type Submission = {
-  publication_id: string; task_id: string; platform: Platform; account_id: string;
-  account_name: string; remote_id: string; status: string; title_zh: string; title_orig: string;
-  review_status?: string | null; views?: number | null; likes?: number | null;
-  comments?: number | null; favorites?: number | null;
+type Platform =
+  | "bilibili"
+  | "acfun"
+  | "douyin"
+  | "youtube"
+  | "twitter"
+  | "facebook"
+  | "tiktok"
+  | "xiaohongshu";
+type Summary = {
+  account_id: string;
+  uid: string;
+  name: string;
+  followers: number | null;
+  views: number | null;
+  publications: number | null;
 };
-type Result = { items: Submission[]; total: number; accounts: Summary[]; updated_at: number; refresh_seconds?: number };
+type Submission = {
+  publication_id: string;
+  task_id: string;
+  platform: Platform;
+  account_id: string;
+  account_name: string;
+  remote_id: string;
+  status: string;
+  title_zh: string;
+  title_orig: string;
+  review_status?: string | null;
+  views?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  favorites?: number | null;
+};
+type Result = {
+  items: Submission[];
+  total: number;
+  accounts: Summary[];
+  updated_at: number;
+  refresh_seconds?: number;
+};
 const PAGE_SIZE = 20;
 const REFRESH_MS = 300_000;
-const format = (value: number | null | undefined) => value == null ? "--" : value.toLocaleString();
-const platformName: Record<Platform, string> = { bilibili: "Bilibili", acfun: "AcFun", douyin: "抖音", youtube: "YouTube", twitter: "X（Twitter）", facebook: "Facebook Page", tiktok: "TikTok", xiaohongshu: "小红书" };
+const format = (value: number | null | undefined) =>
+  value == null ? "--" : formatNumber(value);
+const platformName: Record<Platform, string> = {
+  bilibili: "Bilibili",
+  acfun: "AcFun",
+  douyin: "抖音",
+  youtube: "YouTube",
+  twitter: "X（Twitter）",
+  facebook: "Facebook Page",
+  tiktok: "TikTok",
+  xiaohongshu: "小红书",
+};
 
-export function DataCenter({ accounts, onOpenTask, paused = false }: { accounts: BiliAccount[]; onOpenTask: (taskId: string) => void; paused?: boolean }) {
+export function DataCenter({
+  accounts,
+  onOpenTask,
+  paused = false,
+}: {
+  accounts: BiliAccount[];
+  onOpenTask: (taskId: string) => void;
+  paused?: boolean;
+}) {
   const [platform, setPlatform] = useState("");
   const [accountId, setAccountId] = useState("");
   const [offset, setOffset] = useState(0);
@@ -32,72 +82,252 @@ export function DataCenter({ accounts, onOpenTask, paused = false }: { accounts:
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const schedule = (seconds = REFRESH_MS / 1000) => {
-      timer = setTimeout(() => setRevision((value) => value + 1), seconds * 1000);
+      timer = setTimeout(
+        () => setRevision((value) => value + 1),
+        seconds * 1000,
+      );
     };
     setLoading(true);
     setError("");
-    request<Result>("data_center.list", { offset, limit: PAGE_SIZE, platform, account_id: accountId })
-      .then((value) => { if (alive) { setResult(value); setLoading(false); schedule(value.refresh_seconds); } })
-      .catch(() => { if (alive) { setError("数据暂时无法获取，请稍后重试。"); setLoading(false); schedule(); } });
-    return () => { alive = false; if (timer) clearTimeout(timer); };
+    request<Result>("data_center.list", {
+      offset,
+      limit: PAGE_SIZE,
+      platform,
+      account_id: accountId,
+    })
+      .then((value) => {
+        if (alive) {
+          setResult(value);
+          setLoading(false);
+          schedule(value.refresh_seconds);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setError("数据暂时无法获取，请稍后重试。");
+          setLoading(false);
+          schedule();
+        }
+      });
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
   }, [platform, accountId, offset, revision, paused]);
 
   const summary = result?.accounts ?? [];
   const rows = result?.items ?? [];
   const total = result?.total ?? 0;
-  return <>
-    <section aria-label="Bilibili 账号数据">
-      <div className="stats-heading">Bilibili 账号概览</div>
-      <div className="data-account-grid">
-        {loading && !result ? Array.from({ length: Math.max(accounts.length, 1) }, (_, index) =>
-          <div className="data-account-card" key={index} role="status" aria-label="正在加载账号数据">
-            <span className="skeleton-block skeleton-stat-label" />
-            <span className="skeleton-block skeleton-stat-value" />
-          </div>) : summary.length ? summary.map((account) =>
-          <div className="data-account-card" key={account.account_id}>
-            <div className="data-account-title"><UserRound size={18} /><strong data-no-localize>{account.name}</strong><small>UID {account.uid}</small></div>
-            <div className="data-account-metrics">
-              <div><span>粉丝量</span><strong>{format(account.followers)}</strong></div>
-              <div><span>总播放量</span><strong>{format(account.views)}</strong></div>
-              <div><span>投稿量</span><strong>{format(account.publications)}</strong></div>
+  return (
+    <>
+      <section aria-label={uiText("Bilibili 账号数据")}>
+        <div className="stats-heading">{uiText("Bilibili 账号概览")}</div>
+        <div className="data-account-grid">
+          {loading && !result ? (
+            Array.from({ length: Math.max(accounts.length, 1) }, (_, index) => (
+              <div
+                className="data-account-card"
+                key={index}
+                role="status"
+                aria-label={uiText("正在加载账号数据")}
+              >
+                <span className="skeleton-block skeleton-stat-label" />
+                <span className="skeleton-block skeleton-stat-value" />
+              </div>
+            ))
+          ) : summary.length ? (
+            summary.map((account) => (
+              <div className="data-account-card" key={account.account_id}>
+                <div className="data-account-title">
+                  <UserRound size={18} />
+                  <strong data-no-localize>{account.name}</strong>
+                  <small>UID {account.uid}</small>
+                </div>
+                <div className="data-account-metrics">
+                  <div>
+                    <span>{uiText("粉丝量")}</span>
+                    <strong>{uiNode(format(account.followers))}</strong>
+                  </div>
+                  <div>
+                    <span>{uiText("总播放量")}</span>
+                    <strong>{uiNode(format(account.views))}</strong>
+                  </div>
+                  <div>
+                    <span>{uiText("投稿量")}</span>
+                    <strong>{uiNode(format(account.publications))}</strong>
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="data-account-card data-empty-account">
+              {uiText("连接 Bilibili 账号后显示账号数据。")}
             </div>
-          </div>) : <div className="data-account-card data-empty-account">连接 Bilibili 账号后显示账号数据。</div>}
-      </div>
-    </section>
-    <section className="task-panel data-panel" aria-label="稿件数据">
-      <div className="panel-toolbar data-toolbar">
-        <div className="tabs" aria-label="平台筛选">
-          {[["", "全部平台"], ["bilibili", "Bilibili"], ["acfun", "AcFun"], ["douyin", "抖音"], ["youtube", "YouTube"], ["twitter", "X（Twitter）"], ["facebook", "Facebook Page"], ["tiktok", "TikTok"], ["xiaohongshu", "小红书"]].map(([value, label]) =>
-            <button key={value} className={platform === value ? "current" : ""} onClick={() => { setPlatform(value); setAccountId(""); setOffset(0); }}>{label}</button>)}
+          )}
         </div>
-        {platform === "bilibili" && <div className="data-account-filter"><span>按账号筛选</span>
-          <StyledSelect label="按账号筛选" value={accountId} onChange={(value) => { setAccountId(value); setOffset(0); }}
-            options={[{ value: "", label: "全部账号" }, ...accounts.filter((a) => a.lifecycle === "active").map((a) =>
-              ({ value: a.account_id, label: a.remark || a.nickname || `UID ${a.uid}` }))]} />
-        </div>}
-      </div>
-      <div className="data-table-head"><span>稿件</span><span>审核状态</span><span>播放</span><span>点赞</span><span>评论</span><span>收藏</span></div>
-      {loading ? <div className="data-rows" role="status" aria-label="正在加载稿件数据">
-        {Array.from({ length: rows.length || 5 }, (_, index) => <div className="data-row" key={index} aria-hidden="true">
-          <span className="skeleton-block skeleton-title-line" />
-          {Array.from({ length: 5 }, (_, metric) => <span className="skeleton-block skeleton-status" key={metric} />)}
-        </div>)}
-      </div> : error ? <div className="empty-state"><p>{error}</p><button className="secondary" onClick={() => setRevision((value) => value + 1)}>重试</button></div>
-        : rows.length ? <div className="data-rows">{rows.map((row) =>
-          <button className="data-row" key={row.publication_id} onClick={() => onOpenTask(row.task_id)}>
-            <span className="data-title"><span className="video-tile"><Video size={19} /></span><span>
-              <strong data-no-localize>{row.title_zh || row.title_orig || row.remote_id || "未命名稿件"}</strong>
-              <small>{platformName[row.platform]} · <span data-no-localize>{row.account_name || "历史账号"}</span> · {row.remote_id || "稿件号待核对"} · {labels[row.status] || row.status}</small>
-            </span></span>
-            <span>{row.review_status || "--"}</span><span>{format(row.views)}</span><span>{format(row.likes)}</span>
-            <span>{format(row.comments)}</span><span>{format(row.favorites)}</span>
-          </button>)}</div> : <div className="empty-state"><h2>还没有稿件数据</h2><p>完成投稿后，这里会按需读取已记录稿件的数据。</p></div>}
-      <div className="panel-footer"><span>账号概览及稿件数据每五分钟更新一次；AcFun 和抖音审核与互动数据暂不可读取，以 -- 显示。</span>
-        <div><span>{loading ? "…" : `${total} 条稿件`}</span>
-          <button className="icon-button" aria-label="上一页" disabled={loading || offset === 0} onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}><ChevronLeft size={15} /></button>
-          <button className="icon-button" aria-label="下一页" disabled={loading || offset + PAGE_SIZE >= total} onClick={() => setOffset((value) => value + PAGE_SIZE)}><ChevronRight size={15} /></button>
+      </section>
+      <section
+        className="task-panel data-panel"
+        aria-label={uiText("稿件数据")}
+      >
+        <div className="panel-toolbar data-toolbar">
+          <div className="tabs" aria-label={uiText("平台筛选")}>
+            {[
+              ["", "全部平台"],
+              ["bilibili", "Bilibili"],
+              ["acfun", "AcFun"],
+              ["douyin", "抖音"],
+              ["youtube", "YouTube"],
+              ["twitter", "X（Twitter）"],
+              ["facebook", "Facebook Page"],
+              ["tiktok", "TikTok"],
+              ["xiaohongshu", "小红书"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                className={platform === value ? "current" : ""}
+                onClick={() => {
+                  setPlatform(value);
+                  setAccountId("");
+                  setOffset(0);
+                }}
+              >
+                {uiNode(label)}
+              </button>
+            ))}
+          </div>
+          {platform === "bilibili" && (
+            <div className="data-account-filter">
+              <span>{uiText("按账号筛选")}</span>
+              <StyledSelect
+                label="按账号筛选"
+                value={accountId}
+                onChange={(value) => {
+                  setAccountId(value);
+                  setOffset(0);
+                }}
+                options={[
+                  { value: "", label: "全部账号" },
+                  ...accounts
+                    .filter((a) => a.lifecycle === "active")
+                    .map((a) => ({
+                      value: a.account_id,
+                      localize: false,
+                      label: a.remark || a.nickname || `UID ${a.uid}`,
+                    })),
+                ]}
+              />
+            </div>
+          )}
         </div>
-      </div>
-    </section>
-  </>;
+        <div className="data-table-head">
+          <span>{uiText("稿件")}</span>
+          <span>{uiText("审核状态")}</span>
+          <span>{uiText("播放")}</span>
+          <span>{uiText("点赞")}</span>
+          <span>{uiText("评论")}</span>
+          <span>{uiText("收藏")}</span>
+        </div>
+        {loading ? (
+          <div
+            className="data-rows"
+            role="status"
+            aria-label={uiText("正在加载稿件数据")}
+          >
+            {Array.from({ length: rows.length || 5 }, (_, index) => (
+              <div className="data-row" key={index} aria-hidden="true">
+                <span className="skeleton-block skeleton-title-line" />
+                {Array.from({ length: 5 }, (_, metric) => (
+                  <span
+                    className="skeleton-block skeleton-status"
+                    key={metric}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : error ? (
+          <div className="empty-state">
+            <p>{uiNode(error)}</p>
+            <button
+              className="secondary"
+              onClick={() => setRevision((value) => value + 1)}
+            >
+              {uiText("重试")}
+            </button>
+          </div>
+        ) : rows.length ? (
+          <div className="data-rows">
+            {rows.map((row) => (
+              <button
+                className="data-row"
+                key={row.publication_id}
+                onClick={() => onOpenTask(row.task_id)}
+              >
+                <span className="data-title">
+                  <span className="video-tile">
+                    <Video size={19} />
+                  </span>
+                  <span>
+                    <strong>
+                      {row.title_zh ||
+                        row.title_orig ||
+                        row.remote_id ||
+                        uiText("未命名稿件")}
+                    </strong>
+                    <small>
+                      {uiNode(platformName[row.platform])} ·{" "}
+                      <span>{row.account_name || uiText("历史账号")}</span> ·{" "}
+                      {uiNode(row.remote_id || "稿件号待核对")} ·{" "}
+                      {uiNode(labels[row.status] || row.status)}
+                    </small>
+                  </span>
+                </span>
+                <span>{uiNode(row.review_status || "--")}</span>
+                <span>{uiNode(format(row.views))}</span>
+                <span>{uiNode(format(row.likes))}</span>
+                <span>{uiNode(format(row.comments))}</span>
+                <span>{uiNode(format(row.favorites))}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">
+            <h2>{uiText("还没有稿件数据")}</h2>
+            <p>{uiText("完成投稿后，这里会按需读取已记录稿件的数据。")}</p>
+          </div>
+        )}
+        <div className="panel-footer">
+          <span>
+            {uiText(
+              "账号概览及稿件数据每五分钟更新一次；AcFun 和抖音审核与互动数据暂不可读取，以 -- 显示。",
+            )}
+          </span>
+          <div>
+            <span>
+              {uiNode(loading ? "…" : uiText("{p0} 条稿件", { p0: total }))}
+            </span>
+            <button
+              className="icon-button"
+              aria-label={uiText("上一页")}
+              disabled={loading || offset === 0}
+              onClick={() =>
+                setOffset((value) => Math.max(0, value - PAGE_SIZE))
+              }
+            >
+              <ChevronLeft size={15} />
+            </button>
+            <button
+              className="icon-button"
+              aria-label={uiText("下一页")}
+              disabled={loading || offset + PAGE_SIZE >= total}
+              onClick={() => setOffset((value) => value + PAGE_SIZE)}
+            >
+              <ChevronRight size={15} />
+            </button>
+          </div>
+        </div>
+      </section>
+    </>
+  );
 }

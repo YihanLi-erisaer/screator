@@ -1,3 +1,4 @@
+import { uiText, uiNode, confirmUi } from "./i18n";
 import { useState } from "react";
 import { chooseFile, request } from "./bridge";
 import { accountLabel, type BiliAccount } from "./types";
@@ -18,17 +19,20 @@ export function AccountSelector({
 }) {
   return (
     <div className="field">
-      目标 Bilibili 账号
+      {uiText("目标 Bilibili 账号")}
       <StyledSelect
         label="目标 Bilibili 账号"
         value={value}
         onChange={onChange}
         options={[
           { value: "", label: "请选择一个账号" },
-          ...accounts.filter((a) => archived || a.lifecycle === "active").map((a) => ({
-            value: a.account_id,
-            label: `${accountLabel(a)}${a.lifecycle === "archived" ? "（已归档）" : ""}`,
-          })),
+          ...accounts
+            .filter((a) => archived || a.lifecycle === "active")
+            .map((a) => ({
+              value: a.account_id,
+              localize: false,
+              label: `${accountLabel(a)}${a.lifecycle === "archived" ? uiText("（已归档）") : ""}`,
+            })),
         ]}
       />
     </div>
@@ -43,7 +47,9 @@ export function AccountsPanel({
   refresh: () => Promise<void>;
 }) {
   const accounts: BiliAccount[] = auth.accounts || [];
-  const validAccounts = accounts.filter((account) => account.auth_state === "valid").length;
+  const validAccounts = accounts.filter(
+    (account) => account.auth_state === "valid",
+  ).length;
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
   const [login, setLogin] = useState<{
@@ -90,11 +96,26 @@ export function AccountsPanel({
     <section className="settings-card">
       <div className="section-title">
         <div>
-          <h2>哔哩哔哩账号 · {accounts.length}/5</h2>
-          <p>每个账号使用独立上传队列；凭据保存在本机。</p>
+          <h2>
+            {uiText("哔哩哔哩账号 · ")}
+            {accounts.length}/5
+          </h2>
+          <p>{uiText("每个账号使用独立上传队列；凭据保存在本机。")}</p>
         </div>
-        <StatusBadge tone={accounts.length > 0 && validAccounts === accounts.length ? "success" : "error"}>
-          {!accounts.length ? "未连接" : validAccounts === accounts.length ? "已连接" : "需处理"}
+        <StatusBadge
+          tone={
+            accounts.length > 0 && validAccounts === accounts.length
+              ? "success"
+              : "error"
+          }
+        >
+          {uiNode(
+            !accounts.length
+              ? "未连接"
+              : validAccounts === accounts.length
+                ? "已连接"
+                : "需处理",
+          )}
         </StatusBadge>
       </div>
       <div className="section-body">
@@ -102,9 +123,11 @@ export function AccountsPanel({
         {accounts.map((a) => (
           <div className="account-row" key={a.account_id}>
             <div className="account-row-heading">
-              <strong>{accountLabel(a)}</strong>
-              <StatusBadge tone={a.auth_state === "valid" ? "success" : "error"}>
-                {labels[a.auth_state] || a.auth_state}
+              <strong data-no-localize>{accountLabel(a)}</strong>
+              <StatusBadge
+                tone={a.auth_state === "valid" ? "success" : "error"}
+              >
+                {uiNode(labels[a.auth_state] || a.auth_state)}
               </StatusBadge>
             </div>
             <div className="button-row">
@@ -112,13 +135,13 @@ export function AccountsPanel({
                 disabled={pending[a.account_id]}
                 onClick={() => start(a.account_id)}
               >
-                重新登录
+                {uiText("重新登录")}
               </button>
               <button
                 disabled={pending[a.account_id]}
                 onClick={() => importFile(a.account_id)}
               >
-                导入凭据
+                {uiText("导入凭据")}
               </button>
               <button
                 disabled={pending[a.account_id]}
@@ -128,7 +151,7 @@ export function AccountsPanel({
                   )
                 }
               >
-                续期
+                {uiText("续期")}
               </button>
               <button
                 disabled={pending[a.account_id]}
@@ -138,7 +161,7 @@ export function AccountsPanel({
                   )
                 }
               >
-                验证
+                {uiText("验证")}
               </button>
               <button
                 onClick={() => {
@@ -146,15 +169,17 @@ export function AccountsPanel({
                   setRemark(a.remark);
                 }}
               >
-                备注
+                {uiText("备注")}
               </button>
               <button
                 disabled={pending[a.account_id]}
                 onClick={() =>
                   run(a.account_id, async () => {
                     if (
-                      confirm(
-                        `清除 ${accountLabel(a)} 的登录凭据？任务和账号仍保留。`,
+                      confirmUi(
+                        uiText("清除 {p0} 的登录凭据？任务和账号仍保留。", {
+                          p0: accountLabel(a),
+                        }),
                       )
                     )
                       await request("auth.clear", {
@@ -164,15 +189,18 @@ export function AccountsPanel({
                   })
                 }
               >
-                退出登录
+                {uiText("退出登录")}
               </button>
               <button
                 disabled={pending[a.account_id]}
                 onClick={() =>
                   run(a.account_id, async () => {
                     if (
-                      confirm(
-                        `归档 ${accountLabel(a)}？只有全部任务已提交时才能释放名额。`,
+                      confirmUi(
+                        uiText(
+                          "归档 {p0}？只有全部任务已提交时才能释放名额。",
+                          { p0: accountLabel(a) },
+                        ),
                       )
                     )
                       await request("accounts.archive", {
@@ -181,15 +209,18 @@ export function AccountsPanel({
                   })
                 }
               >
-                归档
+                {uiText("归档")}
               </button>
               <button
                 disabled={pending[a.account_id]}
                 onClick={() =>
                   run(a.account_id, async () => {
                     if (
-                      confirm(
-                        `请先核对 ${accountLabel(a)} 的创作中心，并确认没有遗留上传进程。恢复该账号上传队列？`,
+                      confirmUi(
+                        uiText(
+                          "请先核对 {p0} 的创作中心，并确认没有遗留上传进程。恢复该账号上传队列？",
+                          { p0: accountLabel(a) },
+                        ),
                       )
                     )
                       await request("accounts.resume_uploads", {
@@ -199,7 +230,7 @@ export function AccountsPanel({
                   })
                 }
               >
-                恢复上传
+                {uiText("恢复上传")}
               </button>
             </div>
             {rename === a.account_id && (
@@ -216,12 +247,12 @@ export function AccountsPanel({
                 }}
               >
                 <input
-                  aria-label="账号备注"
+                  aria-label={uiText("账号备注")}
                   maxLength={80}
                   value={remark}
                   onChange={(e) => setRemark(e.target.value)}
                 />
-                <button>保存备注</button>
+                <button>{uiText("保存备注")}</button>
               </form>
             )}
           </div>
@@ -232,39 +263,62 @@ export function AccountsPanel({
             disabled={accounts.length >= 5 || pending.new}
             onClick={() => start()}
           >
-            添加账号
+            {uiText("添加账号")}
           </button>
           <button
             className="secondary"
             disabled={accounts.length >= 5 || pending.new}
             onClick={() => importFile()}
           >
-            导入新账号
+            {uiText("导入新账号")}
           </button>
         </div>
         {!accounts.length && (
           <p className="help">
-            先添加账号，再新建任务。重新添加已归档 UID 会恢复原账号身份。
+            {uiText(
+              "先添加账号，再新建任务。重新添加已归档 UID 会恢复原账号身份。",
+            )}
           </p>
         )}
         {login && (
-          <div className="qr-panel" role="region" aria-label="账号登录">
-            <ReportError message={status.status === "failed" ? status.message || "登录失败，请重试。"
-              : status.status === "expired" ? "二维码已过期，请刷新。" : null} />
-            {status.qrcode && <img src={status.qrcode} alt="B 站登录二维码" />}
+          <div
+            className="qr-panel"
+            role="region"
+            aria-label={uiText("账号登录")}
+          >
+            <ReportError
+              message={
+                status.status === "failed"
+                  ? status.message || "登录失败，请重试。"
+                  : status.status === "expired"
+                    ? "二维码已过期，请刷新。"
+                    : null
+              }
+            />
+            {status.qrcode && (
+              <img src={status.qrcode} alt={uiText("B 站登录二维码")} />
+            )}
             <p>
-              {status.status === "failed" ? "请重新登录" : status.status === "expired" ? "二维码待刷新" : status.message ||
-                (
-                  {
-                    loading: "正在获取二维码",
-                    waiting: "请扫码并确认目标 UID",
-                    scanned: "请在手机确认",
-                    success: "登录成功",
-                  } as Record<string, string>
-                )[status.status]}
+              {uiNode(
+                status.status === "failed"
+                  ? "请重新登录"
+                  : status.status === "expired"
+                    ? "二维码待刷新"
+                    : status.message ||
+                      (
+                        {
+                          loading: "正在获取二维码",
+                          waiting: "请扫码并确认目标 UID",
+                          scanned: "请在手机确认",
+                          success: "登录成功",
+                        } as Record<string, string>
+                      )[status.status],
+              )}
             </p>
             <div className="button-row">
-              <button onClick={() => start(login.account_id)}>刷新二维码</button>
+              <button onClick={() => start(login.account_id)}>
+                {uiText("刷新二维码")}
+              </button>
               <button
                 onClick={() => {
                   void request("auth.login.cancel", {
@@ -273,7 +327,7 @@ export function AccountsPanel({
                   setLogin(null);
                 }}
               >
-                关闭二维码
+                {uiText("关闭二维码")}
               </button>
             </div>
           </div>
@@ -299,7 +353,7 @@ export function QueueOverview({
     queue: "排队中",
   };
   return (
-    <div className="queue-overview" aria-label="队列概览">
+    <div className="queue-overview" aria-label={uiText("队列概览")}>
       {[
         { label: "共享下载", ...queue?.download },
         { label: "共享校验", ...queue?.validate },
@@ -319,13 +373,18 @@ export function QueueOverview({
         })),
       ].map((q: any) => (
         <div className="queue-card" key={q.label}>
-          <strong>{q.label}</strong>
+          <strong>{q.account_id ? q.label : uiText(q.label)}</strong>
           <small>
-            {q.running_task_id ? "执行中" : waits[q.wait_reason] || "空闲"} ·
-            等待 {q.queued_count || 0}
-            {q.remaining_seconds
-              ? ` · ${Math.ceil(q.remaining_seconds)} 秒`
-              : ""}
+            {uiNode(
+              q.running_task_id ? "执行中" : waits[q.wait_reason] || "空闲",
+            )}
+            {uiText(" · 等待 ")}
+            {uiNode(q.queued_count || 0)}
+            {uiNode(
+              q.remaining_seconds
+                ? uiText(" · {p0} 秒", { p0: Math.ceil(q.remaining_seconds) })
+                : "",
+            )}
           </small>
         </div>
       ))}

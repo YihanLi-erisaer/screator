@@ -11,13 +11,34 @@ import {
 import { chooseDirectory, chooseFiles, request } from "./bridge";
 import { bytes } from "./types";
 import { StyledSelect } from "./StyledSelect";
-import { uiText } from "./i18n";
+import { uiText, uiNode, formatDateTime } from "./i18n";
 import { useToast } from "./Toast";
 
 const materialExtensions = [
-  "mp4", "mkv", "webm", "mov", "avi", "flv", "m4v", "ts",
-  "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "weba",
-  "jpg", "jpeg", "png", "webp", "gif", "avif", "bmp", "tiff",
+  "mp4",
+  "mkv",
+  "webm",
+  "mov",
+  "avi",
+  "flv",
+  "m4v",
+  "ts",
+  "mp3",
+  "m4a",
+  "aac",
+  "wav",
+  "flac",
+  "ogg",
+  "opus",
+  "weba",
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "gif",
+  "avif",
+  "bmp",
+  "tiff",
 ];
 const selectedLibraryKey = "screator.materials.selectedLibrary";
 
@@ -59,20 +80,24 @@ export function LibraryPicker({
   return (
     <div className="library-picker">
       <label className="field">
-        素材库
+        {uiText("素材库")}
         <StyledSelect
           label="素材库"
           value={value}
           onChange={onChange}
           options={[
             { value: "", label: "请选择素材库" },
-            ...libraries.map((l) => ({ value: l.id, label: l.name })),
+            ...libraries.map((l) => ({
+              value: l.id,
+              label: l.name,
+              localize: false,
+            })),
           ]}
         />
       </label>
       <button className="secondary" onClick={() => setCreating(!creating)}>
         <Plus size={15} />
-        新建素材库
+        {uiText("新建素材库")}
       </button>
       {creating && (
         <form
@@ -93,11 +118,11 @@ export function LibraryPicker({
           }}
         >
           <label className="field library-location">
-            素材库文件夹
+            {uiText("素材库文件夹")}
             <div className="inline-controls">
               <input
-                aria-label="素材库文件夹"
-                placeholder="请选择素材库文件夹"
+                aria-label={uiText("素材库文件夹")}
+                placeholder={uiText("请选择素材库文件夹")}
                 value={directory}
                 readOnly
               />
@@ -105,19 +130,23 @@ export function LibraryPicker({
                 type="button"
                 className="secondary"
                 disabled={saving}
-                onClick={() => action(async () => {
-                  const selected = await chooseDirectory();
-                  if (selected) setDirectory(selected);
-                })}
+                onClick={() =>
+                  action(async () => {
+                    const selected = await chooseDirectory();
+                    if (selected) setDirectory(selected);
+                  })
+                }
               >
                 <FolderOpen size={15} />
-                选择文件夹
+                {uiText("选择文件夹")}
               </button>
             </div>
           </label>
-          <p className="help">所选文件夹将作为素材库，素材库名称自动使用文件夹名称。</p>
+          <p className="help">
+            {uiText("所选文件夹将作为素材库，素材库名称自动使用文件夹名称。")}
+          </p>
           <button className="primary" disabled={saving || !directory.trim()}>
-            创建
+            {uiText("创建")}
           </button>
         </form>
       )}
@@ -139,7 +168,9 @@ export function Materials({
     try {
       if (id) localStorage.setItem(selectedLibraryKey, id);
       else localStorage.removeItem(selectedLibraryKey);
-    } catch { /* The selection remains available for the current page. */ }
+    } catch {
+      /* The selection remains available for the current page. */
+    }
   }, []);
   const [items, setItems] = useState<Material[]>([]);
   const [path, setPath] = useState("");
@@ -150,33 +181,39 @@ export function Materials({
   const [name, setName] = useState("");
   const [deleting, setDeleting] = useState<Material | null>(null);
   const [offset, setOffset] = useState(0);
-  const load = useCallback(async (isCurrent: () => boolean = () => true) => {
-    if (!library) {
-      setItems([]);
-      setPath("");
-      setLoaded("");
-      return;
-    }
-    const libraries = await request("materials.libraries");
-    if (!isCurrent()) return;
-    if (!libraries.items.some((item: Library) => item.id === library)) {
-      selectLibrary("");
-      return;
-    }
-    const result = await request("materials.list", { library_id: library });
-    if (!isCurrent()) return;
-    setItems(result.items);
-    setPath(result.path);
-    setLoaded(library);
-  }, [library, selectLibrary]);
+  const load = useCallback(
+    async (isCurrent: () => boolean = () => true) => {
+      if (!library) {
+        setItems([]);
+        setPath("");
+        setLoaded("");
+        return;
+      }
+      const libraries = await request("materials.libraries");
+      if (!isCurrent()) return;
+      if (!libraries.items.some((item: Library) => item.id === library)) {
+        selectLibrary("");
+        return;
+      }
+      const result = await request("materials.list", { library_id: library });
+      if (!isCurrent()) return;
+      setItems(result.items);
+      setPath(result.path);
+      setLoaded(library);
+    },
+    [library, selectLibrary],
+  );
   useEffect(() => {
     let current = true;
     // Read independently of the picker load so restoring a library cannot be
     // skipped by the application's single mutation/busy guard.
-    void load(() => current).catch(error => {
-      if (current) showError(String(error instanceof Error ? error.message : error));
+    void load(() => current).catch((error) => {
+      if (current)
+        showError(String(error instanceof Error ? error.message : error));
     });
-    return () => { current = false; };
+    return () => {
+      current = false;
+    };
   }, [load, showError]);
   useEffect(() => {
     setOffset(0);
@@ -191,9 +228,15 @@ export function Materials({
   return (
     <section className="materials-page">
       <div className="section-card section-body">
-        <LibraryPicker value={library} onChange={selectLibrary} action={action} />
+        <LibraryPicker
+          value={library}
+          onChange={selectLibrary}
+          action={action}
+        />
         <p className="help">
-          在任务中心新建任务，选择“下载素材”即可保存到素材库。同一链接可以重复下载。
+          {uiText(
+            "在任务中心新建任务，选择“下载素材”即可保存到素材库。同一链接可以重复下载。",
+          )}
         </p>
         {path && (
           <p className="help material-path" data-no-localize>
@@ -205,8 +248,8 @@ export function Materials({
         <>
           <div className="material-toolbar">
             <input
-              aria-label="搜索素材"
-              placeholder="搜索素材"
+              aria-label={uiText("搜索素材")}
+              placeholder={uiText("搜索素材")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -227,24 +270,29 @@ export function Materials({
               onClick={() => action(load)}
             >
               <RefreshCw size={15} />
-              刷新
+              {uiText("刷新")}
             </button>
             <button
               className="secondary"
               disabled={busy}
-              onClick={() => action(async () => {
-                const paths = await chooseFiles(materialExtensions);
-                if (!paths?.length) return;
-                await request("materials.import", { library_id: library, paths });
-                await load();
-                setSearch("");
-                setFilter("");
-                setOffset(0);
-                showSuccess("本地素材导入完成。");
-              })}
+              onClick={() =>
+                action(async () => {
+                  const paths = await chooseFiles(materialExtensions);
+                  if (!paths?.length) return;
+                  await request("materials.import", {
+                    library_id: library,
+                    paths,
+                  });
+                  await load();
+                  setSearch("");
+                  setFilter("");
+                  setOffset(0);
+                  showSuccess("本地素材导入完成。");
+                })
+              }
             >
               <Upload size={15} />
-              添加本地素材
+              {uiText("添加本地素材")}
             </button>
             <button
               className="secondary"
@@ -253,18 +301,22 @@ export function Materials({
               }
             >
               <FolderOpen size={15} />
-              打开文件夹
+              {uiText("打开文件夹")}
             </button>
           </div>
           {loaded !== library ? (
-            <p role="status">正在加载素材…</p>
+            <p role="status">{uiText("正在加载素材…")}</p>
           ) : (
             <>
               {!visible.length && (
                 <div className="empty-state">
                   <FolderOpen size={36} />
-                  <h3>暂无素材</h3>
-                  <p>添加本地素材，或在任务中心下载素材后点击刷新查看。</p>
+                  <h3>{uiText("暂无素材")}</h3>
+                  <p>
+                    {uiText(
+                      "添加本地素材，或在任务中心下载素材后点击刷新查看。",
+                    )}
+                  </p>
                 </div>
               )}
               <div className="material-grid">
@@ -283,13 +335,13 @@ export function Materials({
                           } as Record<string, string>
                         )[item.kind],
                       )}{" "}
-                      · {bytes(item.size)}
+                      · {uiNode(bytes(item.size))}
                     </div>
                     <strong data-no-localize title={item.name}>
                       {item.name}
                     </strong>
                     <small data-no-localize>
-                      {new Date(item.modified * 1000).toLocaleString()}
+                      {formatDateTime(item.modified * 1000)}
                     </small>
                     <div className="inline-controls">
                       <button
@@ -305,11 +357,11 @@ export function Materials({
                         }
                       >
                         <Play size={14} />
-                        预览
+                        {uiText("预览")}
                       </button>
                       <button
                         className="icon-button"
-                        aria-label="重命名素材"
+                        aria-label={uiText("重命名素材")}
                         disabled={busy}
                         onClick={() => {
                           setEditing(item);
@@ -320,7 +372,7 @@ export function Materials({
                       </button>
                       <button
                         className="icon-button danger"
-                        aria-label="删除素材"
+                        aria-label={uiText("删除素材")}
                         disabled={busy}
                         onClick={() => setDeleting(item)}
                       >
@@ -336,7 +388,7 @@ export function Materials({
                     disabled={offset === 0}
                     onClick={() => setOffset(Math.max(0, offset - 20))}
                   >
-                    上一页
+                    {uiText("上一页")}
                   </button>
                   <span>
                     {Math.floor(offset / 20) + 1} /{" "}
@@ -346,7 +398,7 @@ export function Materials({
                     disabled={offset + 20 >= visible.length}
                     onClick={() => setOffset(offset + 20)}
                   >
-                    下一页
+                    {uiText("下一页")}
                   </button>
                 </div>
               )}
@@ -359,7 +411,7 @@ export function Materials({
           className="material-dialog"
           role="dialog"
           aria-modal="true"
-          aria-label="重命名素材"
+          aria-label={uiText("重命名素材")}
         >
           <form
             className="section-card section-body"
@@ -376,20 +428,20 @@ export function Materials({
               }, "素材已重命名。");
             }}
           >
-            <h3>重命名素材</h3>
+            <h3>{uiText("重命名素材")}</h3>
             <input
               autoFocus
-              aria-label="文件名"
+              aria-label={uiText("文件名")}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
-            <p className="help">请保留原文件扩展名。</p>
+            <p className="help">{uiText("请保留原文件扩展名。")}</p>
             <div className="modal-actions">
               <button type="button" onClick={() => setEditing(null)}>
-                取消
+                {uiText("取消")}
               </button>
               <button className="primary" disabled={busy || !name.trim()}>
-                保存
+                {uiText("保存")}
               </button>
             </div>
           </form>
@@ -400,14 +452,18 @@ export function Materials({
           className="material-dialog"
           role="dialog"
           aria-modal="true"
-          aria-label="删除素材"
+          aria-label={uiText("删除素材")}
         >
           <div className="section-card section-body">
-            <h3>删除素材</h3>
+            <h3>{uiText("删除素材")}</h3>
             <p data-no-localize>{deleting.name}</p>
-            <p>只删除此素材文件，任务记录会保留。此操作无法撤销。</p>
+            <p>
+              {uiText("只删除此素材文件，任务记录会保留。此操作无法撤销。")}
+            </p>
             <div className="modal-actions">
-              <button onClick={() => setDeleting(null)}>取消</button>
+              <button onClick={() => setDeleting(null)}>
+                {uiText("取消")}
+              </button>
               <button
                 className="danger"
                 disabled={busy}
@@ -423,7 +479,7 @@ export function Materials({
                   }, "素材已删除，任务记录已保留。")
                 }
               >
-                确认删除
+                {uiText("确认删除")}
               </button>
             </div>
           </div>

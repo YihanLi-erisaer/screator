@@ -106,7 +106,7 @@ class YoutubeUploadService:
         self.client_factory = client_factory
         self.lock = threading.RLock()
         self.auth = None
-        self._categories_cache = None
+        self._categories_cache = {}
 
     def _vault(self, name, value=...):
         vault = self.config.vault
@@ -326,13 +326,18 @@ class YoutubeUploadService:
         self.emit("youtube.queue.resume", {})
         return {"resumed": True}
 
-    def categories(self):
-        if self._categories_cache and time.monotonic() - self._categories_cache[0] < 300:
-            return {"items": self._categories_cache[1]}
-        result = self.client_factory().request("GET", "https://www.googleapis.com/youtube/v3/videoCategories?part=snippet&regionCode=US&hl=zh_CN", token=self._token())[2]
+    def categories(self, ui_language="zh-CN"):
+        locales = {"zh-CN": "zh_CN", "zh-HK": "zh_HK", "en": "en"}
+        if not isinstance(ui_language, str) or ui_language not in locales:
+            raise AppError("请选择支持的界面语言。")
+        cached = self._categories_cache.get(ui_language)
+        if cached and time.monotonic() - cached[0] < 300:
+            return {"items": cached[1]}
+        url = "https://www.googleapis.com/youtube/v3/videoCategories?part=snippet&regionCode=US&hl=" + locales[ui_language]
+        result = self.client_factory().request("GET", url, token=self._token())[2]
         items = [{"category_id": v["id"], "name": v["snippet"]["title"]} for v in result.get("items", []) if v.get("snippet", {}).get("assignable")]
         if not items: raise AppError("YouTube 未返回可投稿的视频分类，请稍后重试。")
-        self._categories_cache = time.monotonic(), items
+        self._categories_cache[ui_language] = time.monotonic(), items
         return {"items": items}
 
     def validate_assets(self, item, snapshot):
