@@ -508,7 +508,7 @@ def _prepare_assets(settings, store, task, meta, work_dir: Path, video_path: Pat
         try:
             if task.source_kind == "local":
                 raise AppError("本地视频使用抽帧封面。")
-            youtube.download_thumbnail(meta.thumbnail_url, raw_cover)
+            youtube.download_best_thumbnail(meta, raw_cover)
             media.process_cover(
                 raw_cover,
                 cover_path,

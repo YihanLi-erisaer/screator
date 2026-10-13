@@ -7,9 +7,10 @@ import sys
 import threading
 import uuid
 from contextlib import contextmanager, nullcontext
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from screator import media
@@ -86,6 +87,11 @@ _SSL_MARKERS = (
     "unexpected_eof_while_reading",
     "eof occurred in violation of protocol",
 )
+_MIN_THUMBNAIL_WIDTH = 1280
+_MIN_THUMBNAIL_HEIGHT = 720
+_HIGH_RES_THUMBNAIL_NAMES = {"maxresdefault", "hq720"}
+_THUMBNAIL_ATTEMPTS = 5
+_THUMBNAIL_RETRY_DELAY = 2
 
 
 @dataclass
@@ -99,6 +105,8 @@ class YoutubeMeta:
     thumbnail_url: str
     language: str | None
     webpage_url: str
+    thumbnail_urls: list[str] = field(default_factory=list)
+    thumbnail_options: list[dict[str, Any]] = field(default_factory=list)
 
     def save(self, path: Path) -> None:
         path.write_text(
@@ -123,7 +131,10 @@ def fetch_meta(url: str, settings: Settings) -> YoutubeMeta:
     if not video_id:
         raise AppError("无法解析 YouTube 视频 ID。")
 
-    thumb = _best_thumbnail(info)
+    thumbnail_options = _thumbnail_options(
+        info, min_width=_MIN_THUMBNAIL_WIDTH, min_height=_MIN_THUMBNAIL_HEIGHT,
+    )
+    thumbnails = [item["url"] for item in thumbnail_options]
     webpage = info.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}"
     return YoutubeMeta(
         video_id=video_id,
@@ -132,9 +143,11 @@ def fetch_meta(url: str, settings: Settings) -> YoutubeMeta:
         description=(info.get("description") or "").strip(),
         uploader=(info.get("uploader") or info.get("channel") or "").strip(),
         duration=int(info["duration"]) if info.get("duration") is not None else None,
-        thumbnail_url=thumb,
+        thumbnail_url=thumbnails[0] if thumbnails else "",
         language=info.get("language"),
         webpage_url=webpage,
+        thumbnail_urls=thumbnails,
+        thumbnail_options=thumbnail_options,
     )
 
 
@@ -413,25 +426,86 @@ def _find_audio(work_dir: Path) -> Path | None:
     return found[0]
 
 
-def download_thumbnail(url: str, dest: Path) -> None:
-    events.check_cancelled()
+def download_thumbnail(
+    url: str, dest: Path, *, min_width: int = 0, min_height: int = 0,
+    attempts: int = _THUMBNAIL_ATTEMPTS,
+) -> None:
+    from PIL import Image
+
     dest.parent.mkdir(parents=True, exist_ok=True)
-    req = Request(url, headers={"User-Agent": "Mozilla/5.0 screator"})
-    temporary = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.part")
-    try:
-        with urlopen(req, timeout=5) as resp, temporary.open("wb") as output:
-            while chunk := resp.read(64 * 1024):
-                events.check_cancelled()
-                output.write(chunk)
+    for attempt in range(1, attempts + 1):
         events.check_cancelled()
-        if temporary.stat().st_size <= 0:
-            raise AppError("封面文件为空。")
-        temporary.replace(dest)
-    except Exception as exc:
-        events.check_cancelled()
-        raise AppError(f"封面下载失败：{exc}") from exc
-    finally:
-        temporary.unlink(missing_ok=True)
+        temporary = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.part")
+        try:
+            req = Request(url, headers={"User-Agent": "Mozilla/5.0 screator"})
+            with urlopen(req, timeout=5) as resp, temporary.open("wb") as output:
+                while chunk := resp.read(64 * 1024):
+                    events.check_cancelled()
+                    output.write(chunk)
+            events.check_cancelled()
+            with Image.open(temporary) as image:
+                image.load()
+                if image.width < min_width or image.height < min_height:
+                    raise InvalidMediaError(
+                        f"YouTube 封面只有 {image.width}×{image.height}，低于 {min_width}×{min_height}。"
+                    )
+            temporary.replace(dest)
+            return
+        except events.Cancelled:
+            raise
+        except InvalidMediaError:
+            raise
+        except Exception as exc:
+            if attempt == attempts:
+                raise AppError(f"封面下载失败：{exc}") from exc
+            logger.warning("封面下载第 %s 次失败，准备重试：%s", attempt, exc)
+            events.wait(_THUMBNAIL_RETRY_DELAY)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def download_best_thumbnail(meta: YoutubeMeta, dest: Path) -> None:
+    """Try each eligible resolution group at most five times in total."""
+    groups: dict[tuple[Any, ...], list[str]] = {}
+    options = meta.thumbnail_options or [
+        {"url": url, "width": 0, "height": 0}
+        for url in dict.fromkeys([meta.thumbnail_url, *meta.thumbnail_urls])
+        if url and _could_be_high_resolution_thumbnail(url)
+    ]
+    for option in options:
+        url = option["url"]
+        width, height = option.get("width") or 0, option.get("height") or 0
+        key = (width, height) if width and height else (Path(urlsplit(url).path).stem.removesuffix("_live"),)
+        urls = groups.setdefault(key, [])
+        if url not in urls:
+            urls.append(url)
+
+    last_error: AppError | None = None
+    for resolution, urls in groups.items():
+        too_small: set[str] = set()
+        for attempt in range(1, _THUMBNAIL_ATTEMPTS + 1):
+            available = [url for url in urls if url not in too_small]
+            if not available:
+                break
+            url = available[(attempt - 1) % len(available)]
+            try:
+                download_thumbnail(
+                    url, dest, min_width=_MIN_THUMBNAIL_WIDTH,
+                    min_height=_MIN_THUMBNAIL_HEIGHT, attempts=1,
+                )
+                return
+            except events.Cancelled:
+                raise
+            except InvalidMediaError as exc:
+                too_small.add(url)
+                last_error = exc
+            except AppError as exc:
+                last_error = exc
+            logger.warning("封面分辨率 %s 第 %s/%s 次失败（%s）：%s",
+                           resolution, attempt, _THUMBNAIL_ATTEMPTS, url, last_error)
+            if attempt < _THUMBNAIL_ATTEMPTS and len(too_small) < len(urls):
+                events.wait(_THUMBNAIL_RETRY_DELAY)
+    raise last_error or AppError("没有可用的 1280×720 及以上 YouTube 封面。")
 
 
 def describe_js_runtimes(settings: Settings) -> str:
@@ -736,21 +810,51 @@ def _format_ytdlp_error(prefix: str, exc: BaseException | None) -> str:
 
 
 def _best_thumbnail(info: dict[str, Any]) -> str:
+    return _thumbnail_candidates(info)[0]
+
+
+def _thumbnail_candidates(info: dict[str, Any]) -> list[str]:
+    return [item["url"] for item in _thumbnail_options(info)]
+
+
+def _could_be_high_resolution_thumbnail(url: str) -> bool:
+    name = Path(urlsplit(url).path).stem.removesuffix("_live")
+    return name in _HIGH_RES_THUMBNAIL_NAMES
+
+
+def _thumbnail_options(info: dict[str, Any], *, min_width: int = 0, min_height: int = 0) -> list[dict[str, Any]]:
     thumbs = info.get("thumbnails") or []
-    scored: list[tuple[int, str]] = []
+    scored: list[tuple[int, int, dict[str, Any]]] = []
     for item in thumbs:
         url = item.get("url")
         if not url:
             continue
-        area = int(item.get("width") or 0) * int(item.get("height") or 0)
-        scored.append((area, url))
-    if scored:
-        scored.sort(key=lambda x: x[0])
-        return scored[-1][1]
+        width, height = int(item.get("width") or 0), int(item.get("height") or 0)
+        if min_width and min_height:
+            if width and height:
+                if width < min_width or height < min_height:
+                    continue
+            elif not _could_be_high_resolution_thumbnail(url):
+                continue
+        area = width * height
+        # yt-dlp assigns quality preferences to generated URLs whose size is unknown.
+        preference = item.get("preference")
+        scored.append((int(preference) if preference is not None else -1, area,
+                       {"url": url, "width": width, "height": height}))
     fallback = info.get("thumbnail") or ""
-    if not fallback:
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    options = [item for _, _, item in scored]
+    if fallback and (not min_width or _could_be_high_resolution_thumbnail(fallback)):
+        options.append({"url": fallback, "width": 0, "height": 0})
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in options:
+        if item["url"] not in seen:
+            seen.add(item["url"])
+            unique.append(item)
+    if not unique and not min_width:
         raise AppError("该视频没有可用封面。")
-    return fallback
+    return unique
 
 
 def _find_source(work_dir: Path) -> Path | None:

@@ -226,7 +226,7 @@ class ShutdownServiceTests(unittest.TestCase):
             self.wait_idle()
         task = self.service.task(identity)
         Path(task.cover_path).unlink()
-        with patch.object(youtube, "download_thumbnail", side_effect=events.Cancelled("cancelled")), \
+        with patch.object(youtube, "download_best_thumbnail", side_effect=events.Cancelled("cancelled")), \
              patch.object(media, "extract_frame_cover") as extract:
             with self.assertRaises(events.Cancelled):
                 pipeline._prepare_assets(self.service.config.build(), self.service.store, task,
