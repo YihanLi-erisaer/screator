@@ -14,7 +14,7 @@ try {
   await page.getByRole("button", { name: "账号与连接", exact: true }).click();
   await page.getByRole("heading", { name: "DeepL 翻译" }).waitFor();
   await page.screenshot({ path: path.join(output, "account-dark.png"), animations: "disabled" });
-  await page.getByRole("button", { name: /^任务中心/ }).click();
+  await page.getByRole("button", { name: /^投稿中心/ }).click();
   await page.getByRole("button", { name: "切换明暗主题" }).click();
   await page.locator('html[data-theme="light"]').waitFor();
   await page.screenshot({ path: path.join(output, "tasks-light.png"), animations: "disabled" });

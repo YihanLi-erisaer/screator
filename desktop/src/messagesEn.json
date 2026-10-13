@@ -1,6 +1,6 @@
 {
   "加载中…": "Loading…",
-  "任务中心": "Task center",
+  "投稿中心": "Submission center",
   "投稿记录": "Submission history",
   "正在加载投稿记录": "Loading submission history",
   "正在加载任务": "Loading tasks",
@@ -19,6 +19,9 @@
   "连接你的账号，开始本地创作流程。": "Connect your accounts to start the local workflow.",
   "按你的习惯设置工作目录与投稿默认值。": "Choose your work folder and submission defaults.",
   "新建任务": "New task",
+  "新建下载素材任务": "New material download task",
+  "新建投稿任务": "New submission task",
+  "新建下载任务": "New download task",
   "导入投稿记录": "Import submission history",
   "导出投稿记录": "Export submission history",
   "删除所有投稿记录": "Delete all submission history",
@@ -1614,5 +1617,10 @@
   "已连接服务": "CONNECTED SERVICES",
   "个性化设置": "MAKE IT YOURS",
   "当前为界面预览，请在桌面应用中创建真实任务。": "This is a UI preview. Create real tasks in the desktop app.",
-  "该操作需要真实桌面服务，预览不会调用外部账号。": "This operation requires the desktop service. Preview does not access external accounts."
+  "该操作需要真实桌面服务，预览不会调用外部账号。": "This operation requires the desktop service. Preview does not access external accounts.",
+  "选择继续任务的投稿模式": "Choose a submission mode to resume",
+  "请重新选择本次任务的投稿方式。": "Choose how to submit this task again.",
+  "已继续准备素材，完成后自动投稿。": "Asset preparation resumed; submit automatically when it finishes.",
+  "点击右上角“新建下载任务”下载素材到素材库。同一链接可以重复下载。": "Click New download task at the top right to download materials to a library. You can download the same URL multiple times.",
+  "添加本地素材，或点击右上角“新建下载任务”下载素材后点击刷新查看。": "Add local materials, or click New download task at the top right to download materials, then refresh to view them."
 }

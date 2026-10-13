@@ -2,8 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 
 async function openImageForm(page: Page, connected = true) {
   await page.goto(`/?preview&accounts=1${connected ? "&xiaohongshu=1" : ""}`);
-  await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).click();
   await page.getByRole("tab", { name: "图文上传" }).click();
   return page.getByRole("tabpanel", { name: "图文上传" });
 }

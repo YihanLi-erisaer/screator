@@ -29,7 +29,7 @@ test("resources show app totals, refresh, pause and resume", async ({ page }) =>
   });
   await expect(monitor.locator("time")).not.toHaveAttribute("datetime", hiddenSample!);
   await page.screenshot({ path: "test-results/resource-monitor.png", fullPage: true });
-  await page.getByRole("button", { name: "任务中心", exact: true }).click();
+  await page.getByRole("button", { name: "投稿中心", exact: true }).click();
   await expect(monitor).toHaveCount(0);
   for (const width of [1024, 600]) {
     await page.setViewportSize({ width, height: 680 });

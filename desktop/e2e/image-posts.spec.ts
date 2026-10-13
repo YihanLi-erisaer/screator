@@ -3,8 +3,7 @@ import { test, expect } from "@playwright/test";
 test("image uploader validates required fields, previews, sorts and retains its draft", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 680 });
   await page.goto("/?preview&accounts=1");
-  await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).click();
   await expect(page.getByRole("tab", { name: "视频上传" })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "图文上传" }).click();
   const panel = page.getByRole("tabpanel", { name: "图文上传" });
@@ -39,8 +38,7 @@ test("image uploader validates required fields, previews, sorts and retains its 
 
 test("image uploader limits the gallery to nine images", async ({ page }) => {
   await page.goto("/?preview&accounts=1");
-  await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).click();
   await page.getByRole("tab", { name: "图文上传" }).click();
   const panel = page.getByRole("tabpanel", { name: "图文上传" });
   for (let i = 1; i <= 9; i++) {
@@ -89,7 +87,7 @@ test("image uploader renders in the light theme and English", async ({ page }) =
   await page.getByRole("button", { name: "保存设置", exact: true }).click();
   await page.locator("nav .nav-item").first().click();
   await page.locator(".page-heading button.primary").click();
-  await page.getByRole("tab", { name: "One-click upload" }).click();
+  await expect(page.getByRole("dialog", { name: "New submission task", exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Image post upload" }).click();
   const panel = page.getByRole("tabpanel", { name: "Image post upload" });
   await panel.getByLabel("Image file path").fill("/photos/first.png");

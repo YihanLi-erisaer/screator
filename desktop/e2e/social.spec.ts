@@ -2,14 +2,12 @@ import { test, expect } from "@playwright/test";
 
 test("social opt-ins require connected accounts and TikTok rejects automatic mode", async ({ page }) => {
   await page.goto("/?preview&accounts=1");
-  await page.getByRole("button", { name: /新建任务/ }).first().click();
-  await page.getByRole("tab", { name: "一键上传", exact: true }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).first().click();
   for (const name of [/同步上传 X/, /同步上传 Facebook/, /同步上传 TikTok/]) {
     await expect(page.getByRole("checkbox", { name })).toBeDisabled();
   }
   await page.goto("/?preview&accounts=1&social=1");
-  await page.getByRole("button", { name: /新建任务/ }).first().click();
-  await page.getByRole("tab", { name: "一键上传", exact: true }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).first().click();
   const panel = page.getByRole("tabpanel", { name: "视频上传", exact: true });
   const tiktok = panel.getByRole("checkbox", { name: /同步上传 TikTok/ });
   await expect(tiktok).toBeEnabled();

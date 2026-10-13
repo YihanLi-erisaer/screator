@@ -121,7 +121,7 @@ type ShutdownStatus = {
   translation_active?: boolean;
 };
 const titles = {
-  tasks: "任务中心",
+  tasks: "投稿中心",
   materials: "素材管理",
   history: "投稿记录",
   data: "数据中心",
@@ -159,6 +159,7 @@ function Modal({
       aria-labelledby={titleId}
       onCancel={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         close();
       }}
     >
@@ -246,7 +247,7 @@ export default function App() {
   const [connectionError, setConnectionError] = useState("");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [newTask, setNewTask] = useState(false);
+  const [newTask, setNewTask] = useState<"download" | "publish" | null>(null);
   const [confirmDeleteAllHistory, setConfirmDeleteAllHistory] = useState(false);
   const [setup, setSetup] = useState(false);
   const [selected, setSelected] = useState<Task | null>(null);
@@ -546,12 +547,13 @@ export default function App() {
     const key = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        if (connected) setNewTask(true);
+        if (connected)
+          setNewTask(page === "materials" ? "download" : "publish");
       }
     };
     addEventListener("keydown", key);
     return () => removeEventListener("keydown", key);
-  }, [connected]);
+  }, [connected, page]);
 
   useEffect(() => {
     if (!shutdownStarted) return;
@@ -741,14 +743,16 @@ export default function App() {
                 )}
               </p>
             </div>
-            {page === "tasks" && (
+            {(page === "tasks" || page === "materials") && (
               <button
                 className="primary"
-                onClick={() => setNewTask(true)}
+                onClick={() =>
+                  setNewTask(page === "materials" ? "download" : "publish")
+                }
                 disabled={!connected}
               >
                 <Plus size={17} />
-                {uiText("新建任务 ")}
+                {uiText(page === "materials" ? "新建下载任务 " : "新建投稿任务 ")}
                 <kbd>⌘ / Ctrl N</kbd>
               </button>
             )}
@@ -1268,7 +1272,7 @@ export default function App() {
                         {!query && !filter && page === "tasks" && (
                           <button
                             className="secondary"
-                            onClick={() => setNewTask(true)}
+                            onClick={() => setNewTask("publish")}
                             disabled={!connected}
                           >
                             <Plus size={16} />
@@ -1442,15 +1446,16 @@ export default function App() {
       )}
       {newTask && (
         <NewTask
+          kind={newTask}
           accounts={auth.accounts || []}
           config={config}
           busy={busy}
           action={action}
           close={() => {
-            if (!busy) setNewTask(false);
+            if (!busy) setNewTask(null);
           }}
           done={async () => {
-            setNewTask(false);
+            setNewTask(null);
             await loadTasks();
           }}
         />
@@ -1641,36 +1646,14 @@ type NewTaskProps = {
   close: () => void;
   done: () => Promise<void>;
 };
-function NewTask(props: NewTaskProps) {
-  const [tab, setTab] = useState("download");
+function NewTask(props: NewTaskProps & { kind: "download" | "publish" }) {
   const [publishType, setPublishType] = useState("video");
   return (
-    <Modal title={uiText("新建任务")} close={props.close}>
-      <div
-        className="task-source-tabs"
-        role="tablist"
-        aria-label={uiText("任务类型")}
-      >
-        <button
-          role="tab"
-          aria-selected={tab === "download"}
-          className={tab === "download" ? "primary" : "secondary"}
-          disabled={props.busy}
-          onClick={() => setTab("download")}
-        >
-          {uiText("下载素材")}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "publish"}
-          className={tab === "publish" ? "primary" : "secondary"}
-          disabled={props.busy}
-          onClick={() => setTab("publish")}
-        >
-          {uiText("一键上传")}
-        </button>
-      </div>
-      {tab === "download" ? (
+    <Modal
+      title={uiText(props.kind === "download" ? "新建下载素材任务" : "新建投稿任务")}
+      close={props.close}
+    >
+      {props.kind === "download" ? (
         <DownloadTask {...props} />
       ) : (
         <>
@@ -2461,6 +2444,10 @@ function TaskDetail({
   const isImagePost = task.source_kind === "image_post";
   const [logs, setLogs] = useState<any[]>([]);
   const [confirm, setConfirm] = useState("");
+  const [retryOptions, setRetryOptions] = useState<{
+    useCurrentTranslationSettings: boolean;
+  } | null>(null);
+  const [retryMode, setRetryMode] = useState<"preview" | "auto">("preview");
   const [bv, setBv] = useState("");
   const [douyinDirty, setDouyinDirty] = useState(false);
   const descriptionLimit = task.publications?.some(
@@ -2471,6 +2458,11 @@ function TaskDetail({
     ? 1000
     : 2000;
   const op = useRef(operationId());
+  const chooseRetryMode = (useCurrentTranslationSettings = false) => {
+    setRetryMode(task.snapshot?.mode === "auto" ? "auto" : "preview");
+    setRetryOptions({ useCurrentTranslationSettings });
+    op.current = operationId();
+  };
   useEffect(() => {
     let alive = true;
     setPostImages([]);
@@ -2914,19 +2906,93 @@ function TaskDetail({
         <button
           className="text-button"
           disabled={busy}
-          onClick={() =>
-            void action(async () => {
-              await request("tasks.retry", {
-                task_id: task.task_id,
-                operation_id: operationId(),
-                use_current_translation_settings: true,
-              });
-              await refresh();
-            }, "已使用当前翻译设置继续准备素材。")
-          }
+          onClick={() => chooseRetryMode(true)}
         >
           {uiText("使用当前翻译设置重试")}
         </button>
+      )}
+      {retryOptions && (
+        <Modal
+          title={uiText("选择继续任务的投稿模式")}
+          close={() => {
+            if (!busy) setRetryOptions(null);
+          }}
+        >
+          <p className="modal-copy">
+            {uiText("请重新选择本次任务的投稿方式。")}
+          </p>
+          <div className="mode-options">
+            <label className={retryMode === "preview" ? "chosen" : ""}>
+              <input
+                type="radio"
+                name="retry-mode"
+                checked={retryMode === "preview"}
+                disabled={busy}
+                onChange={() => {
+                  setRetryMode("preview");
+                  op.current = operationId();
+                }}
+              />
+              <span>
+                <strong>
+                  {uiText("准备素材并预览 ")}
+                  <em>{uiText("推荐")}</em>
+                </strong>
+                <small>{uiText("下载、校验和翻译完成后，由你确认投稿。")}</small>
+              </span>
+            </label>
+            <label className={retryMode === "auto" ? "chosen" : ""}>
+              <input
+                type="radio"
+                name="retry-mode"
+                checked={retryMode === "auto"}
+                disabled={busy}
+                onChange={() => {
+                  setRetryMode("auto");
+                  op.current = operationId();
+                }}
+              />
+              <span>
+                <strong>{uiText("自动投稿")}</strong>
+                <small>{uiText("素材准备好后，自动提交到本次选择的平台。")}</small>
+              </span>
+            </label>
+          </div>
+          <div className="modal-actions">
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => setRetryOptions(null)}
+            >
+              {uiText("取消")}
+            </button>
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() =>
+                void action(
+                  async () => {
+                    await request("tasks.retry", {
+                      task_id: task.task_id,
+                      operation_id: op.current,
+                      mode: retryMode,
+                      use_current_translation_settings:
+                        retryOptions.useCurrentTranslationSettings,
+                    });
+                    op.current = operationId();
+                    setRetryOptions(null);
+                    await refresh();
+                  },
+                  retryMode === "auto"
+                    ? "已继续准备素材，完成后自动投稿。"
+                    : "已继续准备素材，完成后等待预览。",
+                )
+              }
+            >
+              {uiText("继续任务")}
+            </button>
+          </div>
+        </Modal>
       )}
       {confirm && (
         <div className="confirm-box">
@@ -3030,9 +3096,7 @@ function TaskDetail({
           <button
             className="primary"
             disabled={busy}
-            onClick={() =>
-              command("tasks.retry", "已继续准备素材，完成后等待预览。")
-            }
+            onClick={() => chooseRetryMode()}
           >
             <RefreshCw size={15} />
             {uiText("继续任务")}

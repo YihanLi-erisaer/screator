@@ -41,16 +41,14 @@ test(`AcFun security verification accepts only the official frame at ${host}`, a
 
 test("AcFun opt-in supports preview and automatic submission", async ({ page }) => {
   await page.goto("/?preview&accounts=1");
-  await page.getByRole("button", { name: /新建任务/ }).first().click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).first().click();
   let dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeDisabled();
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
 
   await page.goto("/?preview&accounts=1&acfun=1");
   await expect(page.getByText("AcFun 独立上传")).toBeVisible();
-  await page.getByRole("button", { name: /新建任务/ }).first().click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).first().click();
   dialog = page.getByRole("dialog");
   const sync = dialog.getByRole("checkbox", { name: /同步上传 AcFun/ });
   await expect(sync).toBeEnabled();

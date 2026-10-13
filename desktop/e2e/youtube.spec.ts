@@ -2,13 +2,11 @@ import { test, expect } from "@playwright/test";
 
 test("YouTube opt-in follows the AcFun preview and automatic workflow", async ({ page }) => {
   await page.goto("/?preview&accounts=1");
-  await page.getByRole("button", { name: /新建任务/ }).first().click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).first().click();
   await expect(page.getByRole("checkbox", { name: /同步上传 YouTube/ })).toBeDisabled();
   await page.goto("/?preview&accounts=1&youtube=1");
   await expect(page.getByText("YouTube 独立上传", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /新建任务/ }).first().click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).first().click();
   const dialog = page.getByRole("dialog");
   const sync = dialog.getByRole("checkbox", { name: /同步上传 YouTube/ });
   await expect(sync).toBeEnabled();

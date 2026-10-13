@@ -246,6 +246,55 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(self.service.task("abcdefghijk").status, "failed")
             self.assertFalse(self.uploads)
 
+    def test_retry_uses_selected_mode_after_auto_task_stops(self):
+        for status in ("failed", "cancelled", "interrupted"):
+            for mode in ("preview", "auto"):
+                with self.subTest(status=status, mode=mode), self.mocks():
+                    video_id = f"{len(self.service.store.list_all()) + 1:011d}"
+                    with patch.object(youtube, "download_video", side_effect=AppError("download failed")):
+                        created = self.create(video_id, mode="auto")
+                        self.wait_idle()
+                    task_id = created["task_id"]
+                    self.service.store.update(task_id, status=status)
+                    count = len(self.uploads)
+                    operation = f"retry-{status}-{mode}"
+                    self.service.dispatch("tasks.retry", {"task_id": task_id, "operation_id": operation, "mode": mode})
+                    self.wait_idle()
+                    self.assertEqual(self.service.store.get_job(task_id)["mode"], mode)
+                    self.assertEqual(self.service.task(task_id).status, "submitted" if mode == "auto" else "ready")
+                    self.assertEqual(len(self.uploads), count + (mode == "auto"))
+                    self.service.retry(task_id, operation, mode=mode)
+                    self.assertEqual(len(self.uploads), count + (mode == "auto"))
+                    with self.assertRaises(AppError):
+                        self.service.retry(task_id, operation, mode="preview" if mode == "auto" else "auto")
+
+    def test_retry_auto_with_current_translation_settings(self):
+        with self.mocks():
+            with patch.object(youtube, "download_video", side_effect=AppError("download failed")):
+                created = self.create(mode="auto")
+                self.wait_idle()
+            self.service.config.values["local_llm_model"] = "qwen3:8b"
+            self.service.retry(created["task_id"], "retry-current-auto", use_current_translation_settings=True, mode="auto")
+            self.wait_idle()
+        saved = self.service.store.get_job(created["task_id"])
+        self.assertEqual(saved["settings"]["local_llm_model"], "qwen3:8b")
+        self.assertEqual(saved["mode"], "auto")
+        self.assertEqual(len(self.uploads), 1)
+
+    def test_retry_rejects_invalid_mode_and_preview_only_auto_target(self):
+        with self.mocks():
+            with patch.object(youtube, "download_video", side_effect=AppError("download failed")):
+                created = self.create()
+                self.wait_idle()
+            task_id = created["task_id"]
+            with self.assertRaises(AppError):
+                self.service.retry(task_id, "retry-bad-mode", mode="submit")
+            with patch.object(publications, "items", return_value=[{"platform": "tiktok", "account_id": "test", "status": "failed"}]):
+                with self.assertRaisesRegex(AppError, "TikTok"):
+                    self.service.retry(task_id, "retry-tiktok-auto", mode="auto")
+            self.assertEqual(self.service.task(task_id).status, "failed")
+            self.assertFalse(self.uploads)
+
     def test_repair_preserves_bv_without_posting(self):
         task = Task("abcdefghijk", "https://youtu.be/abcdefghijk", "submitted", bv_id="BV1234567890")
         task.account_id = self.account["account_id"]

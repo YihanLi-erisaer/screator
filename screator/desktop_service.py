@@ -784,24 +784,38 @@ class DesktopService:
             self.emit("history.changed", {"deleted": result["deleted"]})
         return result
 
-    def retry(self, task_id, operation_id, use_current_translation_settings=False):
+    def retry(self, task_id, operation_id, use_current_translation_settings=False, mode="preview"):
+        if mode not in ("preview", "auto"):
+            raise AppError("任务模式无效。")
         def action():
             task = self.task(task_id)
-            if any(p["status"] in publications.TERMINAL | {"submission_unknown"} for p in publications.items(self.store, task_id)):
+            pubs = publications.items(self.store, task_id)
+            if any(p["status"] in publications.TERMINAL | {"submission_unknown"} for p in pubs):
                 raise AppError("请在平台投稿记录中单独继续未完成目标。")
             if task.status not in ("failed", "cancelled", "interrupted"):
                 raise AppError("只有失败、取消或中断的任务可以继续；待核对投稿需先核对结果。")
             snapshot = self.store.get_job(task_id) or {}
             settings = snapshot.get("settings")
+            if mode == "auto" and task.source_kind != "material":
+                account = self.store.account(task.account_id)
+                if account["auth_state"] != "valid":
+                    self.accounts.verify(task.account_id)
+                services = {"douyin": self.douyin, "acfun": self.acfun,
+                            "youtube": self.youtube_upload, "xiaohongshu": self.xiaohongshu, **self.social}
+                for p in pubs:
+                    if p["platform"] in services:
+                        services[p["platform"]].check(p["account_id"], auto=True)
+                    if p["platform"] == "acfun":
+                        self.acfun.validate_channel(json.loads(p["snapshot"]).get("channel_id"))
             if use_current_translation_settings is True:
                 from screator.translation.config import DEFAULTS
                 settings = {**(settings or self.config.snapshot()), **{k: self.config.values[k] for k in DEFAULTS}}
                 record = self.store.translation(task_id) or {}
                 record["config_snapshot"] = {k: self.config.values[k] for k in DEFAULTS}
                 self.store.save_translation(task, record)
-            self.scheduler.add(task, "download" if task.source_kind == "material" else "preview", settings)
+            self.scheduler.add(task, "download" if task.source_kind == "material" else mode, settings)
             return {"queued": True}
-        return self.operation(operation_id, "tasks.retry", action, {"task_id": task_id, "use_current_translation_settings": use_current_translation_settings})
+        return self.operation(operation_id, "tasks.retry", action, {"task_id": task_id, "use_current_translation_settings": use_current_translation_settings, "mode": mode})
 
     def submit(self, task_id, operation_id, targets=None, revisions=None):
         if targets is not None and (not isinstance(targets, list) or not targets or len(targets) > len(publications.PLATFORMS) or any(not isinstance(v, str) for v in targets) or len(set(targets)) != len(targets)):

@@ -66,17 +66,26 @@ export function LibraryPicker({
   onChange: (id: string) => void;
   action: MaterialAction;
 }) {
+  const { showError } = useToast();
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [creating, setCreating] = useState(false);
   const [directory, setDirectory] = useState("");
   const [saving, setSaving] = useState(false);
-  const load = useCallback(async () => {
+  const load = useCallback(async (isCurrent: () => boolean = () => true) => {
     const result = await request("materials.libraries");
-    setLibraries(result.items);
+    if (isCurrent()) setLibraries(result.items);
   }, []);
   useEffect(() => {
-    void action(load);
-  }, [load]);
+    let current = true;
+    // Reading libraries must not block closing the dialog or another picker.
+    void load(() => current).catch((error) => {
+      if (current)
+        showError(String(error instanceof Error ? error.message : error));
+    });
+    return () => {
+      current = false;
+    };
+  }, [load, showError]);
   return (
     <div className="library-picker">
       <label className="field">
@@ -235,7 +244,7 @@ export function Materials({
         />
         <p className="help">
           {uiText(
-            "在任务中心新建任务，选择“下载素材”即可保存到素材库。同一链接可以重复下载。",
+            "点击右上角“新建下载任务”下载素材到素材库。同一链接可以重复下载。",
           )}
         </p>
         {path && (
@@ -314,7 +323,7 @@ export function Materials({
                   <h3>{uiText("暂无素材")}</h3>
                   <p>
                     {uiText(
-                      "添加本地素材，或在任务中心下载素材后点击刷新查看。",
+                      "添加本地素材，或点击右上角“新建下载任务”下载素材后点击刷新查看。",
                     )}
                   </p>
                 </div>

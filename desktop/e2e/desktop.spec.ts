@@ -4,7 +4,7 @@ test("data center loads account metrics and pages through recorded submissions",
   await page.setViewportSize({ width: 1024, height: 680 });
   await page.goto("/?preview&accounts=2&populated&manyTasks&slowData");
   const nav = page.getByRole("navigation", { name: "主导航" }).getByRole("button");
-  await expect(nav).toHaveText(["任务中心", "素材管理", "投稿记录", "数据中心", "账号与连接", "设置"]);
+  await expect(nav).toHaveText(["投稿中心", "素材管理", "投稿记录", "数据中心", "账号与连接", "设置"]);
   await page.getByRole("button", { name: "数据中心", exact: true }).click();
   await expect(page.getByRole("status", { name: "正在加载稿件数据" })).toBeVisible();
   await expect(page.locator(".data-account-card")).toHaveCount(2);
@@ -63,13 +63,13 @@ test("display language is saved in general settings and updates the interface", 
   await page.getByRole("button", { name: "保存设置" }).click();
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
   await expect(page.getByRole("heading", { name: "General settings" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Task center", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Submission center", exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "Display language" }).click();
   await page.getByRole("option", { name: "繁體中文" }).click();
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-HK");
   await expect(page.getByRole("heading", { name: "通用設定" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "任務中心", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "投稿中心", exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "介面語言" }).click();
   await page.getByRole("option", { name: "简体中文" }).click();
   await page.getByRole("button", { name: "儲存設定" }).click();
@@ -312,9 +312,8 @@ test("AcFun login enables task selection without an account page switch", async 
   await page.getByRole("button", { name: "账号与连接", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "启用 AcFun 实验性接入" })).toHaveCount(0);
   await expect(page.locator(".status-heading").filter({ hasText: "AcFun 同步投稿" })).toContainText("已连接");
-  await page.getByRole("button", { name: "任务中心", exact: true }).click();
-  await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
+  await page.getByRole("button", { name: "投稿中心", exact: true }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).click();
   await expect(page.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeEnabled();
 });
 
@@ -329,10 +328,9 @@ test("unconnected Douyin and AcFun show status without error toasts", async ({ p
   await expect(page.getByRole("combobox", { name: "AcFun 默认分区（自动投稿必填）" })).toBeDisabled();
   await expect(page.locator(".error-toast")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "任务中心", exact: true }).click();
-  await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
-  const dialog = page.getByRole("dialog", { name: "新建任务" });
+  await page.getByRole("button", { name: "投稿中心", exact: true }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).click();
+  const dialog = page.getByRole("dialog", { name: "新建投稿任务" });
   await expect(dialog.getByRole("checkbox", { name: /同步上传抖音/ })).toBeDisabled();
   await expect(dialog.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeDisabled();
   await expect(dialog.locator(".error-toast")).toHaveCount(0);
@@ -340,9 +338,8 @@ test("unconnected Douyin and AcFun show status without error toasts", async ({ p
 
 test("new task explains a stale AcFun backend without showing its obsolete error", async ({ page }) => {
   await page.goto("/?preview&accounts=1&acfun=1&acfunLegacyWorker");
-  await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
-  const dialog = page.getByRole("dialog", { name: "新建任务" });
+  await page.getByRole("button", { name: /新建投稿任务/ }).click();
+  const dialog = page.getByRole("dialog", { name: "新建投稿任务" });
   await expect(dialog.getByRole("checkbox", { name: /同步上传 AcFun/ })).toBeDisabled();
   await expect(dialog).toContainText("AcFun 账号已登录，但后台仍使用旧版配置。请使用最新构建，完整退出并重新打开应用后重试。");
   await expect(dialog).not.toContainText("实验性网页投稿尚未启用");
@@ -410,8 +407,7 @@ test("empty workspace, preview default, and modal keyboard focus", async ({
 }) => {
   await page.goto("/?preview&accounts=5");
   await expect(page.getByText("你的下一条视频，从这里开始")).toBeVisible();
-  await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("radio").first()).toBeChecked();
@@ -430,9 +426,8 @@ test("empty workspace, preview default, and modal keyboard focus", async ({
 test("errors appear as dismissible floating toasts for five seconds", async ({ page }) => {
   await page.goto("/?preview&accounts=1");
   await page.clock.install();
-  await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
-  const dialog = page.getByRole("dialog", { name: "新建任务" });
+  await page.getByRole("button", { name: /新建投稿任务/ }).click();
+  const dialog = page.getByRole("dialog", { name: "新建投稿任务" });
   await dialog.getByRole("textbox").fill("https://youtu.be/abcdefghijk");
   await dialog.getByRole("checkbox", { name: /我拥有该视频的版权/ }).check();
   await dialog.getByRole("combobox", { name: "目标 Bilibili 账号" }).click();
@@ -527,7 +522,7 @@ test("production-style unconnected page never pretends to perform work", async (
 }) => {
   await page.goto("/");
   await expect(page.getByText("未连接到后台")).toBeVisible();
-  await expect(page.getByRole("button", { name: /新建任务/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /新建投稿任务/ })).toBeDisabled();
 });
 test("five accounts plus Douyin and AcFun and three shared stages have ten lanes", async ({
   page,
@@ -627,10 +622,9 @@ test("select popups remain visible beyond clipped cards and inside dialogs", asy
   await expect(select).toContainText("测试分区 12");
 
   await page.setViewportSize({ width: 1024, height: 680 });
-  await page.getByRole("button", { name: "任务中心", exact: true }).click();
-  await page.getByRole("button", { name: /新建任务/ }).click();
-  await page.getByRole("tab", { name: "一键上传" }).click();
-  const dialog = page.getByRole("dialog", { name: "新建任务" });
+  await page.getByRole("button", { name: "投稿中心", exact: true }).click();
+  await page.getByRole("button", { name: /新建投稿任务/ }).click();
+  const dialog = page.getByRole("dialog", { name: "新建投稿任务" });
   await dialog.getByRole("combobox", { name: "目标 Bilibili 账号" }).click();
   const dialogMenu = dialog.getByRole("listbox", { name: "目标 Bilibili 账号" });
   await expect(dialogMenu).toBeVisible();
@@ -683,7 +677,7 @@ test("delete all submission history requires a modal confirmation", async ({ pag
   await expect(dialog).toHaveCount(0);
   await expect(page.getByText("还没有投稿记录")).toBeVisible();
   await expect(removeAll).toBeDisabled();
-  await page.getByRole("button", { name: /^任务中心/ }).click();
+  await page.getByRole("button", { name: /^投稿中心/ }).click();
   await expect(page.getByRole("button", { name: /关于设计系统/ })).toBeVisible();
 });
 

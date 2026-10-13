@@ -47,7 +47,7 @@ async function nativeBridge(page: Page, stallPrepare = false) {
     };
   }, { stallPrepare });
   await page.goto("/?accounts=1&populated");
-  await expect(page.getByRole("button", { name: /新建任务/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /新建投稿任务/ })).toBeEnabled();
   await expect.poll(() => page.evaluate(() => (window as any).shutdownCalls.includes("tasks.list"))).toBeTruthy();
   await page.evaluate(() => (window as any).emitNative("app-close-requested"));
   await page.getByRole("button", { name: "退出应用", exact: true }).click();

@@ -20,7 +20,7 @@ for (const locale of ["en", "zh-HK"] as const) {
     const dictionary = locale === "en" ? english : traditional;
     await expect(page.locator("html")).toHaveAttribute("lang", locale);
     for (const label of [
-      "任务中心",
+      "投稿中心",
       "素材管理",
       "投稿记录",
       "数据中心",
@@ -65,7 +65,7 @@ test("English UI has no untranslated application copy across all pages", async (
     "/?preview&populated&accounts=1&acfun=1&youtube=1&xiaohongshu=1&uiLanguage=en",
   );
   for (const label of [
-    "任务中心",
+    "投稿中心",
     "素材管理",
     "投稿记录",
     "数据中心",
@@ -243,7 +243,7 @@ test("English layout stays within a compact desktop window", async ({
     "/?preview&populated&accounts=5&acfun=1&youtube=1&uiLanguage=en",
   );
   for (const label of [
-    "任务中心",
+    "投稿中心",
     "素材管理",
     "投稿记录",
     "数据中心",

@@ -36,7 +36,7 @@ test("task center filters every supported platform with status and search", asyn
   await expect(page.getByRole("button", { name: "下一页" })).toBeDisabled();
   await page.getByRole("button", { name: "投稿记录", exact: true }).click();
   await page.getByRole("tab", { name: "AcFun", exact: true }).click();
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: /^任务中心/ }).click();
+  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: /^投稿中心/ }).click();
   await expect(page.getByRole("tab", { name: "Bilibili", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(rows).toHaveCount(3);
   for (const width of [1280, 1024, 600]) {
