@@ -542,6 +542,26 @@ export async function request(method: string, params: any): Promise<any> {
     task.revision += 1;
     return { requested: true, status: task.status };
   }
+  if (method === "tasks.cancel_all" || method === "tasks.retry_all") {
+    const retryStates = ["failed", "cancelled", "interrupted"];
+    const result = { processed: 0, skipped: 0, errors: [] as { task_id: string; error: string }[] };
+    for (const task of tasks) {
+      if (task.imported_history || (method === "tasks.retry_all"
+        ? !retryStates.includes(task.status)
+        : ["submitted", "downloaded", "completed_with_abandon", "cancelled", "cancel_requested", "submission_unknown", "partial_success"].includes(task.status))) {
+        result.skipped += 1;
+        continue;
+      }
+      if (task.status === "uploading") {
+        result.errors.push({ task_id: task.task_id, error: "正在提交，请等待上传结束并核对结果。" });
+        continue;
+      }
+      task.status = method === "tasks.cancel_all" ? "cancelled" : "queued_download";
+      task.revision += 1;
+      result.processed += 1;
+    }
+    return result;
+  }
   if (method === "history.delete") {
     const index = tasks.findIndex((t) => t.task_id === params.task_id);
     if (!params.confirmed || index < 0 || tasks[index].revision !== params.expected_revision)

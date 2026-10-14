@@ -191,6 +191,7 @@ class DesktopService:
             "history.export": self.export_history, "history.import": self.import_history,
             "history.delete": self.delete_history, "history.delete_all": self.delete_all_history,
             "tasks.retry": self.retry, "tasks.cancel": self.cancel, "tasks.submit": self.submit,
+            "tasks.cancel_all": self.cancel_all, "tasks.retry_all": self.retry_all,
             "tasks.repair": self.repair, "tasks.update_metadata": self.update_metadata,
             "tasks.resolve": self.resolve, "tasks.cover": self.cover,
             "tasks.open_folder": self.open_folder,
@@ -1071,6 +1072,89 @@ class DesktopService:
         self.task(task_id)
         self.scheduler.cancel(task_id)
         return {"requested": True, "status": self.task(task_id).status}
+
+    def cancel_all(self, operation_id):
+        return self._batch_tasks(operation_id, "tasks.cancel_all")
+
+    def retry_all(self, operation_id):
+        return self._batch_tasks(operation_id, "tasks.retry_all")
+
+    def _batch_tasks(self, operation_id, method):
+        """Snapshot all local tasks, committing each operation independently."""
+        if not isinstance(operation_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,100}", operation_id):
+            raise AppError("缺少有效操作 ID。")
+        fingerprint = hashlib.sha256(b"{}").hexdigest()
+        retry_states = {"failed", "cancelled", "interrupted", "blocked_validation"}
+        with self.mutation:
+            previous = self.store.operation(operation_id, method, request_hash=fingerprint)
+            if previous is not None:
+                return previous
+            if self.scheduler.closing:
+                raise AppError("应用正在退出。")
+            result = {"processed": 0, "skipped": 0, "errors": []}
+            # Do not hold a store transaction while cancelling: scheduler workers
+            # acquire their guard before the store lock.
+            for task in self.store.list_all():
+                pubs = publications.items(self.store, task.task_id)
+                try:
+                    if method == "tasks.cancel_all":
+                        if task.status in {"submitted", "downloaded", "completed_with_abandon", "cancelled", "cancel_requested"}:
+                            result["skipped"] += 1
+                            continue
+                        if task.status in {"partial_success", "submission_unknown"}:
+                            pending = [p for p in pubs if p["status"] not in
+                                       publications.TERMINAL | publications.INFLIGHT | {"submission_unknown", "cancelled"}]
+                            if not pending:
+                                result["skipped"] += 1
+                                continue
+                            errors, changed = [], False
+                            for p in pending:
+                                try:
+                                    self.cancel_publication(p["publication_id"])
+                                    changed = True
+                                except AppError as exc:
+                                    errors.append(str(exc))
+                            if errors:
+                                result["errors"].append({"task_id": task.task_id, "error": "; ".join(errors)})
+                            if changed:
+                                result["processed"] += 1
+                            continue
+                        else:
+                            self.cancel(task.task_id)
+                    else:
+                        if task.status not in retry_states | {"partial_success", "submission_unknown"}:
+                            result["skipped"] += 1
+                            continue
+                        child_id = hashlib.sha256(f"{operation_id}:{task.task_id}".encode()).hexdigest()
+                        if task.status in {"partial_success", "submission_unknown"} or any(
+                                p["status"] in publications.TERMINAL | {"submission_unknown"} for p in pubs):
+                            pending = [p for p in pubs if p["status"] in retry_states]
+                            if not pending:
+                                result["skipped"] += 1
+                                continue
+                            errors, changed = [], False
+                            for p in pending:
+                                target_id = hashlib.sha256(f"{child_id}:{p['publication_id']}".encode()).hexdigest()
+                                try:
+                                    self.retry_publication(p["publication_id"], target_id)
+                                    changed = True
+                                except AppError as exc:
+                                    errors.append(str(exc))
+                            if errors:
+                                result["errors"].append({"task_id": task.task_id, "error": "; ".join(errors)})
+                            if changed:
+                                result["processed"] += 1
+                            continue
+                        else:
+                            saved = self.store.get_job(task.task_id) or {}
+                            mode = "auto" if saved.get("mode") == "auto" else "preview"
+                            self.retry(task.task_id, child_id, mode=mode)
+                    result["processed"] += 1
+                except AppError as exc:
+                    result["errors"].append({"task_id": task.task_id, "error": str(exc)})
+            with self.store.transaction():
+                self.store.operation(operation_id, method, result, request_hash=fingerprint)
+            return result
 
     def repair(self, task_id, operation_id):
         def action():

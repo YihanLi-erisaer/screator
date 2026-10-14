@@ -245,6 +245,9 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [batchAction, setBatchAction] = useState<"cancel" | "retry" | null>(
+    null,
+  );
   const busyRef = useRef(false);
   const [newTask, setNewTask] = useState<"download" | "publish" | null>(null);
   const [confirmDeleteAllHistory, setConfirmDeleteAllHistory] = useState(false);
@@ -617,6 +620,38 @@ export default function App() {
       await loadTasks();
       setSelected(null);
     }, "本机记录已删除。");
+  const runBatch = (kind: "cancel" | "retry") =>
+    action(async () => {
+      setBatchAction(kind);
+      try {
+        const result = await request<{
+          processed: number;
+          skipped: number;
+          errors: { task_id: string; error: string }[];
+        }>(kind === "cancel" ? "tasks.cancel_all" : "tasks.retry_all", {
+          operation_id: operationId(),
+        });
+        await loadTasks();
+        const message = uiText(
+          kind === "cancel"
+            ? "已请求取消 {p0} 个任务，跳过 {p1} 个任务。"
+            : "已恢复 {p0} 个任务，跳过 {p1} 个任务。",
+          { p0: result.processed, p1: result.skipped },
+        );
+        if (result.errors.length) {
+          showError(
+            `${message} ${uiText("{p0} 个任务未能操作：{p1}", {
+              p0: result.errors.length,
+              p1: result.errors
+                .map((item) => `${item.task_id}: ${uiText(item.error)}`)
+                .join("; "),
+            })}`,
+          );
+        } else showSuccess(message);
+      } finally {
+        setBatchAction(null);
+      }
+    });
   const activeAccounts = accountOptions.filter(
     (account) => account.lifecycle === "active",
   );
@@ -743,17 +778,59 @@ export default function App() {
               </p>
             </div>
             {(page === "tasks" || page === "materials") && (
-              <button
-                className="primary"
-                onClick={() =>
-                  setNewTask(page === "materials" ? "download" : "publish")
-                }
-                disabled={!connected}
-              >
-                <Plus size={17} />
-                {uiText(page === "materials" ? "新建下载任务 " : "新建投稿任务 ")}
-                <kbd>⌘ / Ctrl N</kbd>
-              </button>
+              <div className="button-row task-heading-actions">
+                {page === "tasks" && (
+                  <>
+                    <button
+                      className="secondary danger"
+                      disabled={
+                        !connected || busy || shutdownStarted || allTotal === 0
+                      }
+                      title={uiText(
+                        "取消全部未完成任务，不受分页和筛选影响；正在投稿和待核对的结果会保留。",
+                      )}
+                      onClick={() => void runBatch("cancel")}
+                    >
+                      {batchAction === "cancel" ? (
+                        <Loader2 size={16} className="spin" />
+                      ) : (
+                        <X size={16} />
+                      )}
+                      {uiText("取消所有未完成")}
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={
+                        !connected || busy || shutdownStarted || allTotal === 0
+                      }
+                      title={uiText(
+                        "重试全部失败、取消和中断任务，沿用原投稿模式；部分成功任务仅恢复未完成目标至待预览。",
+                      )}
+                      onClick={() => void runBatch("retry")}
+                    >
+                      {batchAction === "retry" ? (
+                        <Loader2 size={16} className="spin" />
+                      ) : (
+                        <RefreshCw size={16} />
+                      )}
+                      {uiText("重试所有未完成")}
+                    </button>
+                  </>
+                )}
+                <button
+                  className="primary"
+                  onClick={() =>
+                    setNewTask(page === "materials" ? "download" : "publish")
+                  }
+                  disabled={!connected || busy || shutdownStarted}
+                >
+                  <Plus size={17} />
+                  {uiText(
+                    page === "materials" ? "新建下载任务 " : "新建投稿任务 ",
+                  )}
+                  <kbd>⌘ / Ctrl N</kbd>
+                </button>
+              </div>
             )}
             {page === "history" && (
               <div className="button-row">

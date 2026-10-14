@@ -1623,5 +1623,12 @@
   "请重新选择本次任务的投稿方式。": "Choose how to submit this task again.",
   "已继续准备素材，完成后自动投稿。": "Asset preparation resumed; submit automatically when it finishes.",
   "点击右上角“新建下载任务”下载素材到素材库。同一链接可以重复下载。": "Click New download task at the top right to download materials to a library. You can download the same URL multiple times.",
-  "添加本地素材，或点击右上角“新建下载任务”下载素材后点击刷新查看。": "Add local materials, or click New download task at the top right to download materials, then refresh to view them."
+  "添加本地素材，或点击右上角“新建下载任务”下载素材后点击刷新查看。": "Add local materials, or click New download task at the top right to download materials, then refresh to view them.",
+  "取消所有未完成": "Cancel all unfinished",
+  "重试所有未完成": "Retry all unfinished",
+  "取消全部未完成任务，不受分页和筛选影响；正在投稿和待核对的结果会保留。": "Cancel all unfinished tasks across pages and filters. In-flight submissions and results awaiting verification are preserved.",
+  "重试全部失败、取消和中断任务，沿用原投稿模式；部分成功任务仅恢复未完成目标至待预览。": "Retry all failed, cancelled and interrupted tasks using their original submission mode. Unfinished targets of partially successful tasks return to preview.",
+  "已请求取消 {p0} 个任务，跳过 {p1} 个任务。": "Cancellation requested for {p0} tasks; {p1} tasks skipped.",
+  "已恢复 {p0} 个任务，跳过 {p1} 个任务。": "Resumed {p0} tasks; {p1} tasks skipped.",
+  "{p0} 个任务未能操作：{p1}": "Could not process {p0} tasks: {p1}"
 }
