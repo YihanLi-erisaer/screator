@@ -39,7 +39,6 @@ export function ToastViewport() {
   useUiLanguage();
   const { toasts, dismissToast } = useToast();
   const ref = useRef<HTMLDivElement>(null);
-  const [top, setTop] = useState<number>();
   useLayoutEffect(() => {
     const viewport = ref.current;
     if (!viewport?.isConnected) return;
@@ -47,31 +46,8 @@ export function ToastViewport() {
     if (toasts.length && !open) viewport.showPopover();
     else if (!toasts.length && open) viewport.hidePopover();
   }, [toasts.length]);
-  useLayoutEffect(() => {
-    const dialog = ref.current?.closest("dialog");
-    if (!dialog) return;
-    const position = () => {
-      const close = dialog
-        .querySelector(".modal-head .icon-button")
-        ?.getBoundingClientRect();
-      const margin = window.innerWidth <= 600 ? 12 : 20;
-      setTop(close ? Math.max(margin, close.bottom + 12) : undefined);
-    };
-    position();
-    const observer = new ResizeObserver(position);
-    observer.observe(dialog);
-    const header = dialog.querySelector(".modal-head");
-    if (header) observer.observe(header);
-    document.addEventListener("scroll", position, true);
-    window.addEventListener("resize", position);
-    return () => {
-      observer.disconnect();
-      document.removeEventListener("scroll", position, true);
-      window.removeEventListener("resize", position);
-    };
-  }, []);
   return (
-    <div ref={ref} className="toast-viewport" popover="manual" style={{ top }}>
+    <div ref={ref} className="toast-viewport" popover="manual">
       {toasts.map((toast) => (
         <div
           className={`toast ${toast.kind}-toast${toast.exiting ? " exiting" : ""}`}
@@ -173,7 +149,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     let stack: HTMLDialogElement[] = [];
     const syncContainer = (records: MutationRecord[] = []) => {
       // Keep toast controls in the active dialog's focus scope, while the
-      // popover top layer lets them escape its scrolling/clipping boundary.
+      // popover top layer keeps their position relative to the app viewport,
+      // outside the dialog's scrolling/clipping boundary.
       const dialogs = Array.from(
         document.querySelectorAll<HTMLDialogElement>("dialog[open]"),
       ).filter((dialog) => dialog.matches(":modal"));
