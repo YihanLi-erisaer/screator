@@ -55,11 +55,53 @@ class UploadArgumentTests(unittest.TestCase):
         stop = Mock()
         stop.wait.side_effect = [False, False, True]
         state = {}
-        with patch.object(bili_upload, "_process_read_bytes", side_effect=[100, 1100, 3100]), \
+        with patch.object(bili_upload, "_process_upload_bytes", side_effect=[100, 1100, 3100]), \
              patch.object(bili_upload.time, "monotonic", side_effect=[0, 1, 2]):
             bili_upload._monitor_upload(123, stop, report, state)
         self.assertEqual([call.kwargs["speed"] for call in report.call_args_list], [1000, 2000])
         self.assertEqual(state["speed"], 2000)
+
+    def test_macos_samples_only_the_upload_process_network_bytes(self):
+        output = ",bytes_out,\nother.9123,999999,\nbiliup.123,1048576,\n"
+        with patch.object(bili_upload.sys, "platform", "darwin"), \
+             patch.object(bili_upload.subprocess, "run", return_value=SimpleNamespace(
+                 returncode=0, stdout=output)) as run:
+            self.assertEqual(bili_upload._process_upload_bytes(123), 1048576)
+        self.assertEqual(run.call_args.args[0], [
+            "/usr/bin/nettop", "-P", "-L", "1", "-n", "-x",
+            "-J", "bytes_out", "-p", "123",
+        ])
+        self.assertEqual(run.call_args.kwargs["timeout"], 1)
+
+    def test_macos_unavailable_network_sample_is_not_reported_as_zero(self):
+        for output in (",bytes_out,\n", ",bytes_out,\nbiliup.123,invalid,\n",
+                       ",bytes_in,\nbiliup.123,1024,\n"):
+            with self.subTest(output=output), \
+                 patch.object(bili_upload.sys, "platform", "darwin"), \
+                 patch.object(bili_upload.subprocess, "run", return_value=SimpleNamespace(
+                     returncode=0, stdout=output)):
+                self.assertIsNone(bili_upload._process_upload_bytes(123))
+
+    def test_macos_sampling_failure_does_not_interrupt_upload(self):
+        for error in (OSError("unavailable"), subprocess.TimeoutExpired("nettop", 1)):
+            with self.subTest(error=error), \
+                 patch.object(bili_upload.sys, "platform", "darwin"), \
+                 patch.object(bili_upload.subprocess, "run", side_effect=error):
+                self.assertIsNone(bili_upload._process_upload_bytes(123))
+        with patch.object(bili_upload.sys, "platform", "darwin"), \
+             patch.object(bili_upload.subprocess, "run", return_value=SimpleNamespace(
+                 returncode=70, stdout="")):
+            self.assertIsNone(bili_upload._process_upload_bytes(123))
+
+    def test_upload_monitor_recovers_after_missing_or_reset_counters(self):
+        report, stop = Mock(), Mock()
+        stop.wait.side_effect = [False] * 6 + [True]
+        state = {}
+        with patch.object(bili_upload, "_process_upload_bytes", side_effect=[
+            None, 100, 1100, None, 5000, 100, 2100,
+        ]), patch.object(bili_upload.time, "monotonic", side_effect=range(7)):
+            bili_upload._monitor_upload(123, stop, report, state)
+        self.assertEqual([call.kwargs["speed"] for call in report.call_args_list], [1000, 2000])
 
     def test_captured_progress_keeps_identity_in_monitor_thread(self):
         emitted = []

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import logging
 import platform
 import shutil
@@ -197,7 +198,29 @@ def _is_cert_failure(output: str) -> bool:
     return any(token in text for token in _CERT_FAIL)
 
 
-def _process_read_bytes(pid: int) -> int | None:
+def _process_upload_bytes(pid: int) -> int | None:
+    if sys.platform == "darwin":
+        # macOS has no /proc I/O counters. Read this uploader's network bytes
+        # instead; disk reads would miss video data already in the file cache.
+        try:
+            result = subprocess.run(
+                ["/usr/bin/nettop", "-P", "-L", "1", "-n", "-x",
+                 "-J", "bytes_out", "-p", str(pid)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1,
+            )
+            if result.returncode == 0:
+                rows = csv.reader(io.StringIO(result.stdout))
+                header = next(rows, [])
+                column = header.index("bytes_out")
+                for row in rows:
+                    # nettop names rows as <process name>.<pid>. Match the PID
+                    # too, so another process can never inflate this speed.
+                    if len(row) > column and row[0].endswith(f".{pid}"):
+                        return max(0, int(row[column]))
+        except (OSError, subprocess.TimeoutExpired, ValueError, csv.Error):
+            pass
+        return None
+    # Existing Windows/Linux fallback estimates throughput from file reads.
     if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
@@ -232,10 +255,10 @@ def _process_read_bytes(pid: int) -> int | None:
 
 
 def _monitor_upload(pid: int, stop, report, state: dict) -> None:
-    previous = _process_read_bytes(pid)
+    previous = _process_upload_bytes(pid)
     previous_time = time.monotonic()
     while not stop.wait(1):
-        current = _process_read_bytes(pid)
+        current = _process_upload_bytes(pid)
         now = time.monotonic()
         if current is not None and previous is not None and current >= previous and now > previous_time:
             speed = (current - previous) / (now - previous_time)
