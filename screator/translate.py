@@ -20,8 +20,10 @@ def translate_title_and_desc(
     title_limit: int,
     desc_body_limit: int,
 ) -> tuple[str, str]:
+    from screator.translation.preprocessing import remove_link_sentences
+
     title_zh = title.strip()
-    desc_zh = description.strip()
+    desc_zh = remove_link_sentences(description)
     if _is_zh_lang(source_lang):
         logger.info("源语言已是中文，跳过翻译。")
         return clamp_title(title_zh, title_limit), desc_zh.strip()

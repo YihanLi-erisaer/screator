@@ -18,6 +18,7 @@ from screator.locking import FileLock
 from screator.process_manager import creation_options
 from screator.translate import _is_zh_lang, clamp_title
 from .config import snapshot, component_root
+from .preprocessing import remove_link_sentences
 from .types import TranslationError, TranslationResult
 from .process_tree import ProcessTree
 
@@ -103,7 +104,7 @@ def isolated_request(payload, deadline):
 def translate(settings, title, description, source_lang, title_limit, desc_body_limit, *, config=None, request_fn=None):
     config = snapshot(settings) if config is None else config
     events.check_cancelled()
-    title, description = title.strip(), description.strip()
+    title, description = title.strip(), remove_link_sentences(description)
     if _is_zh_lang(source_lang) or not (title or description):
         return TranslationResult(clamp_title(title, title_limit), description, "none",
                                  skipped_reason="source_chinese" if _is_zh_lang(source_lang) else "empty")

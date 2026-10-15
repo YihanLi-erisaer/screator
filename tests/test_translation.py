@@ -17,6 +17,46 @@ from screator.translation.service import translate, isolated_request, execution_
 from screator.translation.types import TranslationError
 from screator.translation.runtime import manifest
 from screator.translation import deepl_provider
+from screator.translation.preprocessing import remove_link_sentences
+
+
+class DescriptionCleanupTests(unittest.TestCase):
+    def test_removes_whole_link_sentences_and_preserves_neighbors(self):
+        cases = (
+            ("First sentence. Visit https://example.com/page for more. Last sentence!",
+             "First sentence. Last sentence!"),
+            ("第一句。详情见https://example.com/page。最后一句！", "第一句。最后一句！"),
+            ("Keep this! Follow https://a.example/x and https://b.example/y? Done.",
+             "Keep this! Done."),
+            ("Keep. [Watch here](https://example.com/video). Next.", "Keep. Next."),
+            ('Keep. Visit "https://example.com". Next.', "Keep. Next."),
+            ("Keep. See www.example.com/a. Next.", "Keep. Next."),
+            ("Keep. Download FTP://example.com/file.zip now! Next.", "Keep. Next."),
+            ("Keep. Details: HTTPS://example.com/a.b?x=1&y=2! Next.", "Keep. Next."),
+            ("Keep this line\nMore at https://example.com\nKeep this too", "Keep this line\nKeep this too"),
+            ("Paragraph one.\n\nhttps://example.com\nhttps://example.org\n\nParagraph two.",
+             "Paragraph one.\n\nParagraph two."),
+            ("See https://example.com for more", ""),
+            ("https://example.com", ""),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(remove_link_sentences(source), expected)
+
+    def test_text_without_links_is_preserved(self):
+        source = "Version 2.0.\n\nKeep the M2A1, numbers 123 and original  spacing."
+        self.assertEqual(remove_link_sentences(source), source)
+
+    def test_failed_task_description_standalone_social_links(self):
+        source = ("Welcome back to the Daily Aviation.\n\n"
+                  "Don't forget to subscribe us on Facebook or Twitter.\n"
+                  "https://www.facebook.com/DailyAviationArchive\n"
+                  "https://twitter.com/DailyMDA\n\n"
+                  "You have a question? Send us a message.")
+        self.assertEqual(remove_link_sentences(source),
+                         "Welcome back to the Daily Aviation.\n\n"
+                         "Don't forget to subscribe us on Facebook or Twitter.\n\n"
+                         "You have a question? Send us a message.")
 
 
 class TranslationTests(unittest.TestCase):
@@ -152,6 +192,34 @@ class TranslationTests(unittest.TestCase):
         self.assertTrue(result.input_truncated)
         self.assertEqual(len(fn.call_args.args[0]["source"]["description"]), 400)
 
+    def test_link_cleanup_applies_before_truncation_and_to_fallback(self):
+        seen = []
+        def request(payload, deadline):
+            seen.append(payload["source"].copy())
+            if payload["provider"] == "local_llm":
+                raise TranslationError("UNAVAILABLE", "服务不可用")
+            return self.successful(payload, deadline)
+        source = "Keep. " + "Visit " + "x" * 500 + " https://example.com for details. Next."
+        result = translate(self.settings, "Title", source, "en", 80, 200, request_fn=request)
+        self.assertEqual([item["description"] for item in seen], ["Keep. Next."] * 2)
+        self.assertEqual([item["title"] for item in seen], ["Title"] * 2)
+        self.assertFalse(result.input_truncated)
+
+    def test_chinese_description_is_cleaned_without_request(self):
+        fn = Mock(side_effect=AssertionError("must not translate"))
+        result = translate(self.settings, "标题", "保留。访问https://example.com。结束。", "zh", 80, 1000, request_fn=fn)
+        self.assertEqual(result.description, "保留。结束。")
+        fn.assert_not_called()
+
+    def test_description_removed_entirely_does_not_require_nonempty_translation(self):
+        fn = Mock(return_value={"title": "译文", "description": "", "provider": "local_llm"})
+        result = translate(self.settings, "Title", "Visit https://example.com.", "en", 80, 1000, request_fn=fn)
+        self.assertEqual(result.description, "")
+        self.assertEqual(fn.call_args.args[0]["source"]["description"], "")
+        result = translate(self.settings, "", "https://example.com", "en", 80, 1000, request_fn=fn)
+        self.assertEqual(result.skipped_reason, "empty")
+        self.assertEqual(fn.call_count, 1)
+
     def test_invalid_addresses_and_booleans(self):
         for address in ("https://127.0.0.1:10", "http://localhost:11434", "http://127.0.0.1:2@evil.com:80", "http://10.0.0.1:11434", "http://127.0.0.1:11434/path"):
             with self.subTest(address=address), self.assertRaises(Exception):
@@ -247,6 +315,15 @@ class LocalHttpTests(unittest.TestCase):
         self.assertFalse(self.last_body["think"])
         self.assertFalse(self.last_body["stream"])
         self.assertEqual(self.last_body["format"]["required"],["title","description"])
+
+    def test_description_with_links_reaches_model_without_link_sentences(self):
+        settings = SimpleNamespace(**DEFAULTS, translation_root=Path(self.temp.name), deepl_auth_key="")
+        result = translate(settings, "Title", "Body. Follow https://example.com for more.",
+                           "en", 80, 1000, config=self.config)
+        source = json.loads(self.last_body["messages"][1]["content"])
+        self.assertEqual(source["description"], "Body.")
+        self.assertEqual(result.description, "正文")
+        self.assertFalse(result.fallback_used)
 
     def test_legacy_model_snapshot_keeps_its_original_digest(self):
         self.model_name = "qwen3:8b"
