@@ -231,8 +231,11 @@ test("data center translates review status while preserving publication titles",
   await page
     .getByRole("button", { name: english["数据中心"], exact: true })
     .click();
-  await expect(page.locator(".data-row")).toContainText("Approved");
-  await expect(page.locator(".data-row")).toContainText("让创作回归简单");
+  const publicationRow = page.getByRole("button", {
+    name: /让创作回归简单/,
+  });
+  await expect(publicationRow).toContainText("Approved");
+  await expect(publicationRow).toContainText("让创作回归简单");
 });
 
 test("English layout stays within a compact desktop window", async ({
