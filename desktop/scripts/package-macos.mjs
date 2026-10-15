@@ -41,9 +41,8 @@ output(bundledNode, ["--version"]);
 for (const name of ["ffmpeg", "ffprobe", "biliup"]) {
   const source = path.join(root, "bin", name);
   checkNativeExecutable(name, source);
-  if (name === "ffmpeg" && !output(source, ["-hide_banner", "-hwaccels"]).split(/\r?\n/).includes("videotoolbox"))
-    throw new Error("Bundled FFmpeg must support VideoToolbox hardware decoding.");
 }
+run(process.execPath, ["desktop/scripts/check-macos-media.mjs", path.join(root, "bin/ffmpeg")]);
 const icon = path.join(root, "desktop/src-tauri/icons/icon.png");
 run("/usr/bin/sips", ["-s", "format", "icns", icon, "--out", path.join(root, "desktop/src-tauri/icons/icon.icns")]);
 const tools = path.join(root, "packaging/staging/macos-bin");

@@ -108,6 +108,23 @@ class ValidationBackendTests(unittest.TestCase):
         self.assertEqual([args[-1] for args in candidates[1:]], [str(node) for node in nodes])
         self.assertTrue(all(args[args.index("-c:v") + 1] == "av1" for args in candidates[1:]))
 
+    def test_macos_selects_native_decoder_for_videotoolbox(self):
+        for backend in ("auto", "videotoolbox"):
+            for codec in ("av1", "h264", "hevc"):
+                with self.subTest(backend=backend, codec=codec), \
+                     patch.object(media.platform, "system", return_value="Darwin"), \
+                     patch.dict(os.environ, {"SCREATOR_HWACCEL": backend}):
+                    candidates = media._validation_decode_candidates({**self.info, "vcodec": codec})
+                    self.assertEqual(len(candidates), 1)
+                    self.assertEqual(candidates[0], ["-hwaccel", "videotoolbox", "-hwaccel_output_format",
+                                                     "videotoolbox_vld", "-c:v", codec])
+
+    def test_macos_cpu_or_inapplicable_backend_does_not_try_videotoolbox(self):
+        with patch.object(media.platform, "system", return_value="Darwin"):
+            for backend in ("cpu", "cuda", "vaapi", "d3d11va"):
+                with self.subTest(backend=backend), patch.dict(os.environ, {"SCREATOR_HWACCEL": backend}):
+                    self.assertEqual(media._validation_decode_candidates(self.info), [])
+
     def test_manual_backend_and_device_are_used_without_other_gpu_backends(self):
         for system, backend, device in (("Windows", "d3d11va", "1"), ("Linux", "vaapi", "/dev/dri/renderD129"),
                                         ("Windows", "cuda", "1")):
@@ -124,11 +141,11 @@ class ValidationBackendTests(unittest.TestCase):
             for extra in ({"pix_fmt": "yuv444p"}, {"color_transfer": "smpte2084"}, {"vcodec": "mpeg4"}):
                 self.assertEqual(media._validation_decode_candidates({**self.info, **extra}), [])
 
-    def run_validation(self, effects):
+    def run_validation(self, effects, system="Windows"):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "source.mp4"
             source.write_bytes(b"fixture")
-            with patch.object(media.platform, "system", return_value="Windows"), \
+            with patch.object(media.platform, "system", return_value=system), \
                  patch.object(media, "probe_brief", return_value=self.info), \
                  patch.object(media, "_decode_track", side_effect=effects) as decode:
                 result = media.validate_media(source, 3)
@@ -147,12 +164,25 @@ class ValidationBackendTests(unittest.TestCase):
         with self.assertRaises(InvalidMediaError):
             self.run_validation(InvalidMediaError("corrupt"))
 
+    def test_macos_hardware_success_keeps_audio_on_cpu(self):
+        _, calls = self.run_validation([3., 3.], system="Darwin")
+        self.assertEqual(calls[0].args[3][-2:], ["-c:v", "av1"])
+        self.assertEqual(calls[1].args[1:], ("a:0", 3, []))
+
+    def test_macos_hardware_failure_restarts_full_video_on_cpu(self):
+        _, calls = self.run_validation([InvalidMediaError("no AV1 hardware"), 3., 3.], system="Darwin")
+        self.assertEqual(calls[1].args[1:], ("v:0", 3, []))
+        self.assertEqual(calls[2].args[1:], ("a:0", 3, []))
+        with self.assertRaises(InvalidMediaError):
+            self.run_validation(InvalidMediaError("corrupt"), system="Darwin")
+
     def test_cancellation_never_tries_another_backend(self):
         with self.assertRaises(events.Cancelled):
             self.run_validation(events.Cancelled())
 
     def test_hardware_frames_are_required_and_backend_reported(self):
-        for method, pixel_format in (("d3d11va", "d3d11"), ("vaapi", "vaapi")):
+        for method, pixel_format in (("d3d11va", "d3d11"), ("vaapi", "vaapi"),
+                                     ("videotoolbox", "videotoolbox_vld")):
             with self.subTest(method=method):
                 process = MagicMock()
                 process.stdout = io.StringIO("out_time_us=3000000\n")
@@ -163,4 +193,4 @@ class ValidationBackendTests(unittest.TestCase):
                     media._decode_track(Path("source.mp4"), "v:0", 3,
                                         ["-hwaccel", method, "-hwaccel_output_format", pixel_format])
                 self.assertIn(f"format={pixel_format}", launch.call_args.args[0])
-                self.assertIn(method.upper(), progress.call_args.kwargs["backend"])
+                self.assertIn(method.upper(), progress.call_args.kwargs["backend"].upper())

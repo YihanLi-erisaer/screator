@@ -16,11 +16,20 @@ npm run desktop
 
 桌面数据位于 `~/Library/Application Support/StarDazz/screator/`。首次在设置中安装本地翻译组件：应用会下载并校验固定版本的 Ollama macOS 运行时及 Qwen3.5 4B 模型，单独保存在数据目录的 `translation/` 下。无需先启动系统 Ollama。若已安装 Ollama，也可切换为“连接已有本机 Ollama”，默认地址为 `http://127.0.0.1:11434`。在“本地试译”结果中核对 `Apple GPU (Metal)`；显示 `CPU` 说明该次模型没有用 GPU，应检查系统版本、模型内存和 Ollama 的硬件支持。
 
-完整校验默认选择 `auto`。H.264、HEVC 和 AV1 视频会优先尝试 VideoToolbox，并要求 FFmpeg 实际输出硬件帧；硬件不可用或无法解码时，从头用 CPU 复核。音频仍由 CPU 校验。需只用 CPU 时，在设置里选“仅 CPU”，或对 CLI 设置 `SCREATOR_HWACCEL=cpu`。AV1 的 VideoToolbox 支持取决于芯片代际和 FFmpeg 构建。日志和进度会显示 `VideoToolbox` 或 `CPU`。
+完整校验默认选择 `auto`。H.264、HEVC 和 AV1 视频会优先尝试 VideoToolbox，并显式选择对应的 FFmpeg 原生解码器（`-c:v h264|hevc|av1`），避免默认选中无法调用 VideoToolbox 的 libaom/libdav1d 软件解码器。校验要求 FFmpeg 实际输出硬件帧；硬件不可用或无法解码时，从头用 CPU 复核。音频仍由 CPU 校验。需只用 CPU 时，在设置里选“仅 CPU”，或对 CLI 设置 `SCREATOR_HWACCEL=cpu`。AV1 硬解从 M3 系列开始支持，M1/M2 使用 CPU；FFmpeg 构建也必须包含 AV1 VideoToolbox 支持。日志和进度会显示 `VideoToolbox` 或 `CPU`。
 
 ## 生成 arm64 应用与 DMG
 
-项目根目录 `bin/` 被 Git 忽略，重新克隆或清理工作目录后需要单独准备发布工具。将原生 arm64 的 `ffmpeg`、`ffprobe`、`biliup` 放入该目录。发布脚本会检查这三个文件包含 arm64 代码，且不依赖包外的 Homebrew 动态库；还会检查 FFmpeg 列出 `videotoolbox` 硬件加速。FFmpeg 应使用可独立分发、启用 VideoToolbox 的构建。
+项目根目录 `bin/` 被 Git 忽略，重新克隆或清理工作目录后需要单独准备发布工具。将原生 arm64 的 `ffmpeg`、`ffprobe`、`biliup` 放入该目录。发布脚本会检查这三个文件包含 arm64 代码，且不依赖包外的 Homebrew 动态库；还会逐一检查 FFmpeg 原生 H.264、HEVC、AV1 解码器的 `Supported hardware devices` 包含 `videotoolbox`，仅有 `-hwaccels` 列出该名称不算通过。可以单独执行 `node desktop/scripts/check-macos-media.mjs` 检查。
+
+本次使用 [OSXExperts 的独立 arm64 FFmpeg 9.0 构建](https://www.osxexperts.net/)，下载 [ffmpeg9arm.zip](https://www.osxexperts.net/ffmpeg9arm.zip) 和 [ffprobe9arm.zip](https://www.osxexperts.net/ffprobe9arm.zip)，解压到临时目录。核对解压后可执行文件的 SHA-256，再同时替换 `bin/ffmpeg` 和 `bin/ffprobe`，并保留可执行权限：
+
+```text
+ffmpeg   591260c945d0eef150e3bf82b0ef988bd36a9cecc18ff05d6679617159f0a95e
+ffprobe  e11c17e8200b3ee4c4c186d245e2b4053f01d56957336c1817fca0b997469106
+```
+
+以上是本次验证版本的文件哈希；供应方若更新同名下载，需重新核对发布页面和实际解码能力，不能跳过校验。旧的 7.1 随包构建不含 AV1 VideoToolbox 支持，不能继续用于此发布。替换项目 `bin/` 后需重新打包、安装，已经运行的旧应用不会自动更新。
 
 随包 Node.js 按 `SCREATOR_BUILD_NODE` 指定路径、项目 `bin/node`、执行打包脚本的 Node.js 的顺序选择。若使用 Homebrew Node.js，请从 [Node.js 官方发行目录](https://nodejs.org/dist/) 下载 Node.js 22+ 的 `darwin-arm64.tar.gz`，把其中的 `bin/node` 复制到项目 `bin/node`；Homebrew 的 Node.js 可能依赖本机动态库，不能直接放进安装包。
 
@@ -43,4 +52,16 @@ npm run desktop:package:mac
 
 ## 验证范围
 
-可运行 `.desktop-venv/bin/python -m unittest discover -s tests -v`、`npm run build` 和 `npm run test:launcher`。GPU 验收需用真实 M 系列设备、含 H.264/HEVC/AV1 的授权测试素材以及实际模型试译；模拟测试只覆盖设备选择、失败回退、归档安全与流程状态。
+可在项目根目录运行 `PATH="$PWD/bin:$PATH" .desktop-venv/bin/python -m unittest discover -s tests -v`，在 `desktop/` 运行 `npm run build` 和 `npm run test:launcher`。完整测试需允许本地 HTTP 端口和进程监测。GPU 验收需用真实 M 系列设备、含 H.264/HEVC/AV1 的授权测试素材以及实际模型试译；模拟测试只覆盖设备选择、失败回退、归档安全与流程状态。
+
+AV1 全片硬解验收（M3 或更新且支持 AV1 的机器）可执行：
+
+```sh
+.desktop-venv/bin/python scripts/verify_macos_av1.py /path/to/av1.mp4 --report build/av1-validation/report.json
+```
+
+该脚本使用实际校验函数，禁用校验缓存，要求视频只使用 VideoToolbox；任何视频 CPU 回退都会使验收失败。音频按正常流程使用 CPU。脚本比较校验前后的整文件 SHA-256，确认源视频未被改写，并记录各轨道时长、耗时和 FFmpeg 指纹。视频读取期间请勿移动或清理文件。在限制硬件访问的沙箱内可能无法初始化 VideoToolbox，需在可访问本机媒体硬件的终端运行。
+
+2026-10-15 实测：Apple M3，1920×1080、59.94 fps、AV1/yuv420p + Opus 的 1496.701 秒 MP4。禁用缓存后，视频全轨使用 VideoToolbox 解码 1496.662 秒内容，耗时 194.761 秒；音频由 CPU 校验，耗时 2.720 秒；整个校验函数耗时 197.660 秒。视频未回退 CPU，校验前后整文件 SHA-256 一致。原始报告与日志位于本机 `build/av1-validation/hardware-report.json`、`hardware.log`（被 Git 忽略）。
+
+同次验证完整测试共 444 项：436 项通过，8 项跳过（2 项 NVIDIA、1 项 Windows、5 项需显式启用浏览器的测试）。打包能力检查拒绝旧的 7.1 构建、接受新的 9.0 构建；冻结后台离线测试、前端构建、原生 WebView/IPC、应用签名及 DMG 校验均通过。生成 `dist/macos/screator_1.0.0-alpha_aarch64.dmg`，未替换正在使用的已安装应用。

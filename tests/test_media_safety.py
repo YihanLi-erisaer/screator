@@ -240,7 +240,8 @@ class ValidationAccelerationCacheTests(unittest.TestCase):
              patch.object(media, "_decode_track", side_effect=[InvalidMediaError("no device"), 3.0, 3.0]) as decode:
             media.validate_media(self.source, 3)
         self.assertEqual(decode.call_args_list[0].args[3],
-                         ["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"])
+                         ["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld",
+                          "-c:v", "h264"])
         self.assertEqual(decode.call_args_list[1].args[3], [])
 
     def test_gpu_and_cpu_failure_never_saved_as_pass(self):

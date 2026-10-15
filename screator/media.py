@@ -22,7 +22,7 @@ from screator.tools import find_tool
 
 logger = logging.getLogger(__name__)
 _validated: dict[tuple, dict] = {}
-_VALIDATION_VERSION = 3
+_VALIDATION_VERSION = 4
 VALIDATION_HWACCELS = ("auto", "cpu", "cuda", "d3d11va", "vaapi", "videotoolbox")
 
 
@@ -137,7 +137,10 @@ def _validation_decode_candidates(info: dict) -> list[list[str]]:
     if system == "Darwin":
         if (choice in {"", "auto", "videotoolbox"}
                 and info.get("vcodec") in {"h264", "hevc", "av1"}):
-            return [["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"]]
+            # libdav1d/libaom defaults cannot use VideoToolbox. Select the
+            # native decoder, which exposes FFmpeg's hardware acceleration.
+            return [["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld",
+                     "-c:v", info["vcodec"]]]
         return []
     # Keep HDR and unusual chroma profiles on the established CPU path.
     if (info.get("pix_fmt") not in {"yuv420p", "yuv420p10le", "nv12", "p010le"}
