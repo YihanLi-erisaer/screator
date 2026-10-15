@@ -18,6 +18,7 @@ from screator.xiaohongshu import AuthRequired, RateLimited, Rejected, UnknownRes
 
 CREATOR = "https://creator.xiaohongshu.com"
 PUBLISH_URL = CREATOR + "/publish/publish?from=menu&target=image"
+VIDEO_PUBLISH_URL = CREATOR + "/publish/publish?from=menu&target=video"
 IDENTITY_URL = CREATOR + "/api/galaxy/user/info"
 CREATE_PATHS = {"/web_api/sns/v2/note", "/api/sns/web/v1/note/publish", "/api/galaxy/creator/note/publish"}
 CREATE_HOSTS = {"creator.xiaohongshu.com", "edith.xiaohongshu.com"}
@@ -159,7 +160,7 @@ class BrowserClient:
 
     @staticmethod
     def _check(cancel):
-        if cancel.is_set(): raise events.Cancelled("小红书任务已取消，图片已保留。")
+        if cancel.is_set(): raise events.Cancelled("小红书任务已取消，素材已保留。")
 
     def _wait(self, page, predicate, cancel, seconds=60):
         deadline = time.monotonic() + seconds
@@ -167,34 +168,45 @@ class BrowserClient:
             self._check(cancel)
             if predicate(): return
             page.wait_for_timeout(250)
-        raise AppError("小红书页面未完成准备，请检查图片、网络或网页安全验证后继续此目标。")
+        raise AppError("小红书页面未完成准备，请检查素材、网络或网页安全验证后继续此目标。")
 
     def _publish(self, cookies, paths, snapshot, creating, cancel, progress):
         context, create_started = None, False
         try:
             self._check(cancel)
+            video = snapshot.get("media_type") == "video"
+            if video and len(paths) != 1: raise AppError("小红书视频任务必须包含一个视频文件。")
             context = self._new_context(cookies)
             page = context.new_page()
-            page.goto(PUBLISH_URL, wait_until="domcontentloaded", timeout=45000)
+            page.goto(VIDEO_PUBLISH_URL if video else PUBLISH_URL, wait_until="domcontentloaded", timeout=45000)
             if urlsplit(page.url).hostname != "creator.xiaohongshu.com" or "/login" in urlsplit(page.url).path:
                 raise AuthRequired("小红书登录已失效，请重新登录。")
             # Read back the actual browser session before preparing any submission.
             user_id, _ = identity(context.cookies())
             if user_id != snapshot["user_id"]: raise AuthRequired("小红书浏览器账号与投稿目标不一致。")
-            tab = page.get_by_text("上传图文", exact=True)
+            tab = page.get_by_text("上传视频" if video else "上传图文", exact=True)
             if tab.count() and tab.first.is_visible(): tab.first.click()
-            upload = page.locator('input[type="file"][accept*="image"], input[type="file"][accept*=".jpg"], input[type="file"][accept*=".png"], input.upload-input').first
-            self._wait(page, lambda: upload.count() > 0, cancel, 20)
-            for index, path in enumerate(paths):
-                self._check(cancel)
-                upload.set_input_files(str(path))
-                self._wait(page, lambda: page.locator(".img-preview-area .pr").count() == index + 1, cancel)
-                if progress: progress(percent=(index + 1) / (len(paths) + 1) * 100)
-                upload = page.locator('input[type="file"][accept*="image"], input[type="file"][accept*=".jpg"], input[type="file"][accept*=".png"]').first
-            if page.locator(".img-preview-area .pr").count() != len(paths):
-                raise AppError("小红书图片数量与任务不一致，已停止发布。")
             title = page.locator('input[placeholder*="标题"], div.d-input input').first
             content = page.locator('div[role="textbox"][contenteditable="true"], div.tiptap[contenteditable="true"], div.ql-editor[contenteditable="true"]').first
+            if video:
+                # Never choose an image/cover input when the video input is absent.
+                upload = page.locator('input[type="file"][accept*="video"], input[type="file"][accept*=".mp4"], input[type="file"][accept*=".mov"]').first
+                self._wait(page, lambda: upload.count() > 0, cancel, 20)
+                video_deadline = time.monotonic() + 1200
+                upload.set_input_files(str(paths[0]))
+                # Upload and transcode can take minutes. Poll so cancellation works.
+                self._wait(page, lambda: title.is_visible() and content.is_visible(), cancel, max(0, video_deadline - time.monotonic()))
+            else:
+                upload = page.locator('input[type="file"][accept*="image"], input[type="file"][accept*=".jpg"], input[type="file"][accept*=".png"], input.upload-input').first
+                self._wait(page, lambda: upload.count() > 0, cancel, 20)
+                for index, path in enumerate(paths):
+                    self._check(cancel)
+                    upload.set_input_files(str(path))
+                    self._wait(page, lambda: page.locator(".img-preview-area .pr").count() == index + 1, cancel)
+                    if progress: progress(percent=(index + 1) / (len(paths) + 1) * 100)
+                    upload = page.locator('input[type="file"][accept*="image"], input[type="file"][accept*=".jpg"], input[type="file"][accept*=".png"]').first
+                if page.locator(".img-preview-area .pr").count() != len(paths):
+                    raise AppError("小红书图片数量与任务不一致，已停止发布。")
             title.fill(snapshot["title"])
             content.fill(snapshot["description"])
             title.click()
@@ -206,7 +218,7 @@ class BrowserClient:
             if not button.count(): button = page.get_by_role("button", name="发布", exact=True)
             def enabled():
                 return button.count() == 1 and button.is_visible() and button.is_enabled() and button.get_attribute("submit-disabled") != "true"
-            self._wait(page, enabled, cancel, 20)
+            self._wait(page, enabled, cancel, max(0, video_deadline - time.monotonic()) if video else 20)
             self._check(cancel)
             # Register a response observer BEFORE persisting intent or clicking.
             # A navigation/success toast alone is never treated as a receipt.

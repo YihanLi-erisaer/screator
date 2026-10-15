@@ -31,7 +31,13 @@ cd desktop
 npm run desktop:package:mac
 ```
 
-脚本依次冻结 arm64 Python 后台、运行离线后台测试、构建 Tauri 原生应用、做本机临时签名并验证原生窗口启动，最后用 macOS 的 `hdiutil` 生成和校验 DMG。`dist/macos/` 只保留 DMG；构建结束会清理 Tauri 的 `.app` 和旧的临时 `rw.*.dmg`，也不会复制应用到 `/Applications`。打开 DMG 后手动将 `screator.app` 拖入 `Applications` 才会安装。也可设置 `SCREATOR_BUILD_PYTHON` 指向另一套已装依赖的 arm64 Python 环境。
+脚本依次冻结 arm64 Python 后台、运行离线后台测试、构建 Tauri 原生应用、做本机临时签名并验证原生窗口启动，最后用 macOS 的 `hdiutil` 生成和校验 DMG。`dist/macos/` 只保留 DMG；构建结束会清理 Tauri 的 `.app` 和旧的临时 `rw.*.dmg`，也不会复制应用到 `/Applications`。也可设置 `SCREATOR_BUILD_PYTHON` 指向另一套已装依赖的 arm64 Python 环境。
+
+打开 DMG 后，双击其中的 `screator.app` 会先显示安装提示。程序检查 `/Applications/screator.app` 和 `~/Applications/screator.app`；已有安装时显示两个版本及安装位置，可选择“打开已安装版本”或“替换并打开”。首次安装默认写入 `/Applications`。取消操作不会从 DMG 启动业务后台。也可以手动拖入 `Applications` 安装或替换；单独打开 DMG 只挂载磁盘镜像，不会执行安装代码。
+
+替换前需退出正在运行的 screator。安装程序先复制并校验新应用签名，再替换旧应用；复制或校验失败会保留旧版本，提交替换或请求启动失败时会尝试恢复旧版本。账号、设置、任务及本地翻译组件保存在独立用户数据目录，不会随应用替换。目标文件夹不可写时会提示检查权限或手动安装，不会自动请求管理员权限。安装检查在单实例插件和 Python 后台之前执行，并识别 Gatekeeper 的 AppTranslocation 路径；正常从 Applications 启动及打包冒烟测试均不会弹出安装提示。
+
+安装回归测试（macOS）：`cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml macos_install`。测试在临时目录复制、签名和校验真实的小型应用包，覆盖首次安装、版本替换、取消、打开旧版、运行中阻止替换、签名损坏、启动失败恢复、用户目录安装识别和并发安装锁，不改动本机已安装应用。
 
 仓库打包时使用临时签名，未做 Apple Developer ID 签名和公证；首次打开时 macOS 可能要求在“隐私与安全性”中明确允许。若要向其他用户公开分发且正常通过 Gatekeeper，需用自己的 Apple Developer ID 重新签名并公证。发布前还须核对随包 FFmpeg 和其它二进制的许可证。此仓库没有附带或自动下载这些发布用二进制。
 

@@ -220,6 +220,36 @@ class ShutdownServiceTests(unittest.TestCase):
     upload = desktop_tests.DesktopTests.upload
     create = desktop_tests.DesktopTests.create
 
+    def test_cancel_blocked_metadata_settles_task_and_can_retry(self):
+        from test_youtube_cancellation import endpoint
+        entered, release = threading.Event(), threading.Event()
+
+        def serve(handler):
+            entered.set()
+            release.wait(10)
+            handler.send_response(503)
+            handler.end_headers()
+
+        try:
+            with endpoint(serve) as url, self.mocks(), \
+                 patch.object(youtube, "_base_opts", return_value={"socket_timeout": 30, "proxy": ""}), \
+                 patch.object(youtube, "fetch_meta", side_effect=lambda *_: youtube._extract(url, None, False)):
+                identity = self.create()["task_id"]
+                self.assertTrue(entered.wait(5))
+                started = time.monotonic()
+                self.service.cancel(identity)
+                self.wait_idle()
+                self.assertLess(time.monotonic() - started, 2)
+                self.assertEqual(self.service.task(identity).status, "cancelled")
+                self.assertEqual(self.service.store.get_job(identity)["execution_state"], "finished")
+                self.assertEqual(self.uploads, [])
+            with self.mocks():
+                self.service.retry(identity, "retry-metadata-cancel")
+                self.wait_idle()
+            self.assertEqual(self.service.task(identity).status, "ready")
+        finally:
+            release.set()
+
     def test_cancelled_thumbnail_does_not_start_fallback_extraction(self):
         with self.mocks():
             identity = self.create()["task_id"]

@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, mkdirSync, existsSync, chmodSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, existsSync, chmodSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -81,6 +81,7 @@ try {
   run("/usr/bin/codesign", ["--verify", "--deep", "--strict", packagedApp]);
   run(python, ["scripts/smoke_native.py", "--release", path.join(packagedApp, "Contents/MacOS/screator")]);
   symlinkSync("/Applications", path.join(dmgStage, "Applications"));
+  writeFileSync(path.join(dmgStage, "安装说明.txt"), "双击 screator.app 开始安装。\n\n程序会检测 /Applications 或 ~/Applications 中已有的 screator，显示已安装版本和安装包版本。可选择打开已有版本，或退出旧程序后替换并打开。账号、设置和任务数据会保留。\n\n也可以将 screator.app 拖入 Applications 手动安装或替换。安装完成后可推出此磁盘镜像。\n", "utf8");
   run("/usr/bin/hdiutil", ["create", "-ov", "-format", "UDZO", "-volname", "screator", "-srcfolder", dmgStage, dmg]);
   run("/usr/bin/hdiutil", ["verify", dmg]);
 } finally {

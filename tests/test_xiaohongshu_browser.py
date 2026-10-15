@@ -20,10 +20,12 @@ NOTE = "abcdef0123456789abcdef01"
 
 
 class FixtureBrowser(BrowserClient):
-    def __init__(self, response, *, widget=False):
+    def __init__(self, response, *, widget=False, video=False, cancel=None):
         super().__init__()
         self.response, self.widget = response, widget
+        self.video, self.cancel_event = video, cancel
         self.sent = []
+        self.uploaded = []
 
     def _browser(self):
         if self.browser: return self.browser
@@ -52,7 +54,31 @@ class FixtureBrowser(BrowserClient):
               images:Array.from(document.querySelectorAll('.pr')).map(e => e.textContent)
             })});
           </script></body></html>'''
+        if self.video:
+            html = '''<html><head><meta charset="utf-8"></head><body>
+            <input type="file" accept="image/*" id="decoy">
+            <input type="file" accept="video/mp4,video/quicktime" id="video">
+            <div id="editor" hidden><input placeholder="填写标题">
+            <div role="textbox" contenteditable="true"></div>''' + button + '''</div>
+            <script>
+            document.querySelector('#decoy').onchange = () => { throw Error('wrong input'); };
+            document.querySelector('#video').onchange = () => {
+              fetch('/uploaded', {method:'POST', body:JSON.stringify({file:document.querySelector('#video').files[0].name})});
+              setTimeout(() => { document.querySelector('#editor').hidden=false; }, 350);
+            };
+            document.querySelector('button,xhs-publish-btn').onclick = () => fetch('/web_api/sns/v2/note', {
+              method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+                title:document.querySelector('[placeholder]').value,
+                description:document.querySelector('[contenteditable]').innerText,
+                video:document.querySelector('#video').files[0].name
+              })});
+            </script></body></html>'''
         def route_handler(route):
+            if route.request.url.endswith("/uploaded"):
+                self.uploaded.append(json.loads(route.request.post_data))
+                if self.cancel_event: self.cancel_event.set()
+                route.fulfill(status=200, body="{}")
+                return
             if route.request.method == "POST":
                 self.sent.append(route.request.post_data_json)
                 route.fulfill(status=200, content_type="application/json", body=json.dumps(self.response))
@@ -90,3 +116,34 @@ class BrowserContractTests(unittest.TestCase):
     def test_missing_id_is_unknown_and_business_rejection_remains_retryable(self):
         with self.assertRaises(UnknownResult): self.run_publish({"success": True, "data": {}})
         with self.assertRaises(Rejected): self.run_publish({"success": False, "code": -1})
+
+    def video_publish(self, response, *, widget=False, cancel_during_upload=False):
+        cancel = threading.Event()
+        client = FixtureBrowser(response, widget=widget, video=True, cancel=cancel if cancel_during_upload else None)
+        self.addCleanup(client.close)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        path = Path(temporary.name) / "prepared.mp4"
+        path.write_bytes(b"fixture video")
+        intent = []
+        with patch("screator.xiaohongshu_browser.identity", return_value=(USER, "Fixture")):
+            result = client.publish([], [path], {"user_id": USER, "media_type": "video", "title": "视频标题", "description": ""},
+                                    lambda: intent.append(True), cancel, None)
+        self.assertEqual(intent, [True])
+        self.assertEqual(client.uploaded, [{"file": "prepared.mp4"}])
+        self.assertEqual(client.sent, [{"title": "视频标题", "description": "", "video": "prepared.mp4"}])
+        return result
+
+    def test_video_waits_for_transcode_and_uses_video_input_for_both_buttons(self):
+        for widget in (False, True):
+            with self.subTest(widget=widget):
+                self.assertEqual(self.video_publish({"code": 0, "data": {"id": NOTE}}, widget=widget), NOTE)
+
+    def test_video_missing_receipt_and_explicit_rejection(self):
+        with self.assertRaises(UnknownResult): self.video_publish({"success": True, "data": {}})
+        with self.assertRaises(Rejected): self.video_publish({"success": False, "code": -1})
+
+    def test_video_cancel_during_upload_does_not_create_a_note(self):
+        from screator.events import Cancelled
+        with self.assertRaises(Cancelled):
+            self.video_publish({"success": True, "data": {"id": NOTE}}, cancel_during_upload=True)

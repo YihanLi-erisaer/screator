@@ -82,7 +82,7 @@ test("uncertain Xiaohongshu result offers account review without a retry action"
 test("Xiaohongshu account panel connects through the browser login flow", async ({ page }) => {
   await page.goto("/?preview&accounts=1");
   await page.getByRole("button", { name: "账号与连接", exact: true }).click();
-  const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: "小红书图文同步 · 单账号" }) }).last();
+  const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: "小红书视频与图文同步 · 单账号" }) }).last();
   await expect(panel.getByText("尚未绑定小红书账号")).toBeVisible();
   await panel.getByRole("button", { name: "登录小红书", exact: true }).click();
   await expect(panel.getByRole("button", { name: "恢复小红书队列" })).toBeVisible();

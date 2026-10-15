@@ -97,7 +97,7 @@ import {
 } from "./i18n";
 import { Materials, LibraryPicker } from "./Materials";
 import { ImagePostForm, PostImages, type PostImage } from "./ImagePost";
-import { XiaohongshuAccountPanel } from "./Xiaohongshu";
+import { XiaohongshuAccountPanel, type XiaohongshuStatus } from "./Xiaohongshu";
 
 const SetupWizard = lazy(() => import("./SetupWizard"));
 const TranslationPanel = lazy(() => import("./TranslationPanel"));
@@ -1726,7 +1726,9 @@ function NewTask(props: NewTaskProps & { kind: "download" | "publish" }) {
   const [publishType, setPublishType] = useState("video");
   return (
     <Modal
-      title={uiText(props.kind === "download" ? "新建下载素材任务" : "新建投稿任务")}
+      title={uiText(
+        props.kind === "download" ? "新建下载素材任务" : "新建投稿任务",
+      )}
       close={props.close}
     >
       {props.kind === "download" ? (
@@ -1904,6 +1906,11 @@ function PublishTask({
   const [syncDouyin, setSyncDouyin] = useState(false);
   const [acfun, setAcfun] = useState<any>(null);
   const [syncAcfun, setSyncAcfun] = useState(false);
+  const [xiaohongshu, setXiaohongshu] = useState<XiaohongshuStatus | null>(
+    null,
+  );
+  const [syncXiaohongshu, setSyncXiaohongshu] = useState(false);
+  const [xhsTitle, setXhsTitle] = useState("");
   const [youtubeUpload, setYoutubeUpload] = useState<any>(null);
   const [syncYoutube, setSyncYoutube] = useState(false);
   const [syncSocial, setSyncSocial] = useState<SocialTarget[]>([]);
@@ -1927,6 +1934,11 @@ function PublishTask({
     request("acfun.auth.status", { verify: true })
       .then((s) => {
         if (alive) setAcfun(s);
+      })
+      .catch(() => {});
+    request<XiaohongshuStatus>("xiaohongshu.auth.status", { verify: true })
+      .then((s) => {
+        if (alive) setXiaohongshu(s);
       })
       .catch(() => {});
     return () => {
@@ -2076,7 +2088,7 @@ function PublishTask({
               {uiText("简介")}
               <textarea
                 rows={3}
-                maxLength={syncAcfun ? 1000 : 2000}
+                maxLength={syncAcfun || syncXiaohongshu ? 1000 : 2000}
                 value={description}
                 onChange={(e) => {
                   setDescription(e.target.value);
@@ -2254,6 +2266,51 @@ function PublishTask({
               : null
           }
         />
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={syncXiaohongshu}
+            disabled={!xiaohongshu?.can_sync}
+            onChange={(e) => {
+              setSyncXiaohongshu(e.target.checked);
+              op.current = operationId();
+            }}
+          />
+          {uiText("同步上传小红书")}
+          {xiaohongshu?.account ? ` · ${xiaohongshu.account.nickname}` : ""}
+        </label>
+        {!xiaohongshu?.can_sync && (
+          <p className="help">
+            {uiText("请先到账号与连接登录小红书，登录后可选择同步上传。")}
+          </p>
+        )}
+        {syncXiaohongshu && (
+          <>
+            <label className="field">
+              {uiText("小红书标题")}
+              <input
+                value={xhsTitle}
+                maxLength={20}
+                onChange={(e) => {
+                  setXhsTitle(e.target.value);
+                  op.current = operationId();
+                }}
+              />
+            </label>
+            <p className="help">
+              {uiText(
+                "小红书使用独立队列，共用准备后的视频与简介；标题最多 20 字，简介最多 1000 字。发布时会打开 Chrome 或 Edge，封面使用网页默认视频帧。",
+              )}
+            </p>
+            <ReportError
+              message={
+                source === "local" && description.length > 1000
+                  ? "同步小红书时正文不能超过 1000 字，请缩短正文或取消同步。"
+                  : null
+              }
+            />
+          </>
+        )}
         <SocialTargets
           mode={mode}
           value={syncSocial}
@@ -2284,6 +2341,11 @@ function PublishTask({
               : !text.trim()) ||
             !authorized ||
             !accountId ||
+            (syncXiaohongshu &&
+              (!xiaohongshu?.can_sync ||
+                !xhsTitle.trim() ||
+                xhsTitle.length > 20 ||
+                (source === "local" && description.length > 1000))) ||
             (mode === "auto" &&
               syncSocial.some((target) => target.platform === "tiktok")) ||
             (syncDouyin &&
@@ -2295,6 +2357,10 @@ function PublishTask({
           }
           onClick={() =>
             action(async () => {
+              if (syncXiaohongshu && !xiaohongshu?.account)
+                throw new Error(
+                  "请先到账号与连接登录小红书，登录后可选择同步上传。",
+                );
               const result = await request("tasks.create", {
                 url: source === "local" ? "" : text,
                 ...(source === "local"
@@ -2322,6 +2388,15 @@ function PublishTask({
                     }
                   : {}),
                 sync_social: syncSocial,
+                ...(syncXiaohongshu && xiaohongshu?.account
+                  ? {
+                      sync_xiaohongshu: true,
+                      xiaohongshu_account_id: xiaohongshu.account.account_id,
+                      xiaohongshu_binding_revision:
+                        xiaohongshu.account.binding_revision,
+                      xiaohongshu_title: xhsTitle,
+                    }
+                  : {}),
                 ...(syncYoutube
                   ? {
                       sync_youtube: true,
@@ -3014,7 +3089,9 @@ function TaskDetail({
                   {uiText("准备素材并预览 ")}
                   <em>{uiText("推荐")}</em>
                 </strong>
-                <small>{uiText("下载、校验和翻译完成后，由你确认投稿。")}</small>
+                <small>
+                  {uiText("下载、校验和翻译完成后，由你确认投稿。")}
+                </small>
               </span>
             </label>
             <label className={retryMode === "auto" ? "chosen" : ""}>
@@ -3030,7 +3107,9 @@ function TaskDetail({
               />
               <span>
                 <strong>{uiText("自动投稿")}</strong>
-                <small>{uiText("素材准备好后，自动提交到本次选择的平台。")}</small>
+                <small>
+                  {uiText("素材准备好后，自动提交到本次选择的平台。")}
+                </small>
               </span>
             </label>
           </div>
@@ -3336,7 +3415,12 @@ function Account({
           </div>
           <p className="help">
             {uiText(
-              "导出前请完全退出对应浏览器。若系统加密或权限阻止读取，可改用 Netscape 格式 TXT 文件导入。",
+              "浏览器导出：先在浏览器中登录 YouTube，再完全退出浏览器（包括后台进程），然后在上方选择对应浏览器，点击“从浏览器导出”。",
+            )}
+          </p>
+          <p className="help">
+            {uiText(
+              "若系统加密或权限阻止读取，可在 Chrome / Edge 安装 Get cookies.txt LOCALLY 扩展（Firefox 使用 cookies.txt），打开已登录的 youtube.com 页面，通过扩展将当前网站的 Cookie 导出为 Netscape 格式的 cookies.txt，再点击“导入 Cookie 文件”选择该文件。",
             )}
           </p>
         </div>

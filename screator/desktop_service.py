@@ -429,10 +429,19 @@ class DesktopService:
     def create(self, url, operation_id, account_id=None, mode="preview", sync_douyin=False, douyin_account_id=None, douyin_binding_revision=None,
                sync_acfun=False, acfun_account_id=None, acfun_binding_revision=None,
                sync_youtube=False, youtube_account_id=None, youtube_binding_revision=None,
-               local_path=None, title="", description="", cover_path=None, sync_social=None):
+               local_path=None, title="", description="", cover_path=None, sync_social=None,
+               sync_xiaohongshu=False, xiaohongshu_account_id=None,
+               xiaohongshu_binding_revision=None, xiaohongshu_title=""):
         if type(sync_douyin) is not bool: raise AppError("同步抖音必须为开关值。")
         if type(sync_acfun) is not bool: raise AppError("同步 AcFun 必须为开关值。")
         if type(sync_youtube) is not bool: raise AppError("同步 YouTube 必须为开关值。")
+        if type(sync_xiaohongshu) is not bool: raise AppError("同步小红书必须为开关值。")
+        if sync_xiaohongshu:
+            from screator.xiaohongshu import validate_metadata
+            validate_metadata({"title": xiaohongshu_title, "description": description if local_path is not None else "", "media_type": "video"})
+            if not isinstance(xiaohongshu_account_id, str) or not xiaohongshu_account_id or type(xiaohongshu_binding_revision) is not int:
+                raise AppError("请选择已绑定的小红书账号并刷新登录状态。")
+        xhs_account = None
         dy_account = ac_account = None
         yt_account = None
         social_accounts = {}
@@ -477,7 +486,9 @@ class DesktopService:
         if not account_id or not isinstance(account_id, str):
             raise AppError("请选择本次投稿的 Bilibili 账号。")
         def preflight():
-            nonlocal dy_account, ac_account, ac_tags, yt_account
+            nonlocal dy_account, ac_account, ac_tags, yt_account, xhs_account
+            if sync_xiaohongshu:
+                xhs_account = self.xiaohongshu.check(xiaohongshu_account_id, xiaohongshu_binding_revision, auto=mode == "auto")
             for target in social_targets:
                 platform = target["platform"]
                 social_accounts[platform] = self.social[platform].check(target.get("account_id"), target.get("binding_revision"), auto=mode == "auto")
@@ -504,6 +515,7 @@ class DesktopService:
             if old:
                 selected = {"bilibili"} | ({"douyin"} if sync_douyin else set()) | ({"acfun"} if sync_acfun else set()) | ({"youtube"} if sync_youtube else set())
                 selected.update(social_accounts)
+                if sync_xiaohongshu: selected.add("xiaohongshu")
                 existing = {p["platform"] for p in publications.items(self.store, old.task_id)}
                 if selected != existing:
                     raise AppError("此 Bilibili 账号已有同视频任务，目标不可追加；请继续原任务。")
@@ -517,6 +529,16 @@ class DesktopService:
                 task.desc_orig = task.desc_zh = description
             self.store.upsert(task)
             publications.ensure_bili(self.store, task)
+            if sync_xiaohongshu:
+                if self.xiaohongshu.account() != xhs_account:
+                    raise AppError("小红书账号状态已变化，请刷新窗口。")
+                if self.store._conn.execute("SELECT 1 FROM task_publications WHERE platform='xiaohongshu' AND account_id=? AND source_video_id=?", (xhs_account["account_id"], video_id)).fetchone():
+                    raise AppError("此小红书账号已有同视频任务，请继续原任务。")
+                publication_id = str(uuid.uuid4())
+                snapshot = {k: xhs_account[k] for k in ("user_id", "nickname", "binding_revision")}
+                snapshot.update(media_type="video", title=xiaohongshu_title.strip(), description=description if local_path is not None else "")
+                self.store._conn.execute("INSERT INTO task_publications(publication_id,task_id,platform,account_id,source_video_id,snapshot,text) VALUES(?,?,'xiaohongshu',?,?,?,?)",
+                    (publication_id, task.task_id, xhs_account["account_id"], video_id, json.dumps(snapshot, ensure_ascii=False), xiaohongshu_title.strip()))
             if sync_douyin:
                 account_now = self.douyin.account()
                 if not account_now or account_now != dy_account:
@@ -569,6 +591,9 @@ class DesktopService:
         if sync_acfun: params.update(sync_acfun=True, acfun_account_id=acfun_account_id, acfun_binding_revision=acfun_binding_revision)
         if sync_youtube: params.update(sync_youtube=True, youtube_account_id=youtube_account_id, youtube_binding_revision=youtube_binding_revision)
         if sync_social is not None: params["sync_social"] = sync_social
+        if sync_xiaohongshu:
+            params.update(sync_xiaohongshu=True, xiaohongshu_account_id=xiaohongshu_account_id,
+                          xiaohongshu_binding_revision=xiaohongshu_binding_revision, xiaohongshu_title=xiaohongshu_title)
         return self.operation(operation_id, "tasks.create", action, params, preflight)
 
     def inspect_images(self, paths):
@@ -1187,10 +1212,10 @@ class DesktopService:
             if task.source_kind == "image_post":
                 from screator.image_posts import validate_text
                 validate_text(description)
-                if xhs and xhs["status"] == "ready":
-                    from screator.xiaohongshu import validate_metadata
-                    validate_metadata({**json.loads(xhs["snapshot"]), "description": description})
             task.desc_zh = description if task.source_kind in ("local", "image_post") else translate.build_description(body, task.uploader, desc_limit)
+            if xhs and xhs["status"] == "ready":
+                from screator.xiaohongshu import validate_metadata
+                validate_metadata({**json.loads(xhs["snapshot"]), "description": task.desc_zh})
             record = self.store.translation(task_id) or {}
             record.update(state="edited", user_edited=True, description=body)
             if task.source_kind in ("local", "image_post"):

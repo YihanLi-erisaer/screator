@@ -69,7 +69,7 @@ export function XiaohongshuAccountPanel() {
   return (
     <section className="settings-card section-body account-connection-panel">
       <div className="status-heading">
-        <h3>{uiText("小红书图文同步 · 单账号")}</h3>
+        <h3>{uiText("小红书视频与图文同步 · 单账号")}</h3>
         <StatusBadge
           tone={
             !status && !error
@@ -94,7 +94,7 @@ export function XiaohongshuAccountPanel() {
       </div>
       <p className="help">
         {uiText(
-          "在浏览器中登录小红书创作中心。图文同步使用独立队列，共用图片与正文；发布时会打开浏览器。需要安装 Chrome 或 Edge。",
+          "在浏览器中登录小红书创作中心。视频与图文同步使用独立队列，共用素材与正文；发布时会打开浏览器。需要安装 Chrome 或 Edge。",
         )}
       </p>
       <p>
@@ -193,7 +193,8 @@ export function XiaohongshuPublicationFields({
   run: (work: () => Promise<unknown>) => Promise<void>;
   onDirtyChange: (id: string, value: boolean) => void;
 }) {
-  let snapshot: { title?: string; description?: string } = {};
+  let snapshot: { title?: string; description?: string; media_type?: string } =
+    {};
   try {
     snapshot = JSON.parse(pub.snapshot || "{}");
   } catch {
@@ -221,9 +222,15 @@ export function XiaohongshuPublicationFields({
         />
       </label>
       <p className="help">
-        {uiText("共用图文正文：")}
+        {uiText(
+          snapshot.media_type === "video" ? "共用视频简介：" : "共用图文正文：",
+        )}
         {(snapshot.description || "").length}
-        {uiText(" / 1000 字。图片按任务中的顺序发布。")}
+        {uiText(
+          snapshot.media_type === "video"
+            ? " / 1000 字。视频封面使用网页默认视频帧。"
+            : " / 1000 字。图片按任务中的顺序发布。",
+        )}
       </p>
       {pub.status === "ready" && (
         <button

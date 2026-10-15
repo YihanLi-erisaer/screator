@@ -166,6 +166,9 @@ class WorkerRPC:
 
 
 def main():
+    if "--youtube-request" in sys.argv:
+        from screator.youtube_worker import main as youtube_request
+        return youtube_request()
     if "--translation-request" in sys.argv:
         from screator.translation.worker import main as translate_request
         return translate_request()

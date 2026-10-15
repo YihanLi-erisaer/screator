@@ -1,5 +1,8 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
+#[cfg(target_os = "macos")]
+mod macos_install;
+
 use serde_json::{json, Value};
 use std::{collections::HashMap, fs::OpenOptions, io::{BufRead, BufReader, Write}, path::PathBuf,
     process::{Child, ChildStdin, Command, Stdio}, sync::{Arc, Mutex, OnceLock, atomic::{AtomicBool, AtomicU64, Ordering}}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
@@ -433,6 +436,16 @@ fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Er
 }
 
 fn main() {
+    let context = tauri::generate_context!();
+    // Installation must precede the single-instance plugin: an installed copy
+    // may already be running when the user opens a new DMG.
+    #[cfg(target_os = "macos")]
+    let context = if smoke_enabled() { context } else {
+        match macos_install::handle_disk_image_launch(context) {
+            Some(context) => context,
+            None => return,
+        }
+    };
     std::panic::set_hook(Box::new(|info| log_shell(&format!("desktop panic: {info}"))));
     // A packaged smoke test must run even when the installed app is open.
     let builder = if smoke_enabled() { tauri::Builder::default() } else {
@@ -481,7 +494,7 @@ fn main() {
                 let _ = window.emit("app-close-requested", ());
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("无法启动桌面应用；请检查 Python 环境与后台日志。");
     app.run(|app, event| {
         if let tauri::RunEvent::Exit = event {

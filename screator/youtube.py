@@ -6,8 +6,8 @@ import shutil
 import sys
 import threading
 import uuid
-from contextlib import contextmanager, nullcontext
-from dataclasses import asdict, dataclass, field
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -48,17 +48,38 @@ def download_slots(gate):
         _download_context.gate = previous
 
 
-def _download_with_slot(opts: dict, url: str) -> dict:
+@contextmanager
+def _cancellable_slot(gate):
+    if gate is None:
+        yield
+        return
+    while not gate.acquire(timeout=.1):
+        events.check_cancelled()
+    try:
+        events.check_cancelled()
+        yield
+    finally:
+        gate.release()
+
+
+def _extract_info(opts, url, download):
+    if events.cancellation_event() is not None:
+        from screator.youtube_worker import isolated_extract
+        return isolated_extract(opts, url, download)
     yt_dlp = __getattr__("yt_dlp")
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        return ydl.extract_info(url, download=download)
+
+
+def _download_with_slot(opts: dict, url: str) -> dict:
     gate = getattr(_download_context, "gate", None)
     logger.info("等待下载名额：%s", url)
     # Include yt-dlp merging, renaming and cookie writes in the critical section.
     # Validation, cache checks and retry backoff must remain outside it.
-    with gate if gate is not None else nullcontext():
-        with _download_lock if _download_lock is not None else nullcontext():
+    with _cancellable_slot(gate):
+        with _cancellable_slot(_download_lock):
             events.check_cancelled()
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                result = ydl.extract_info(url, download=True)
+            result = _extract_info(opts, url, download=True)
             events.check_cancelled()
     logger.info("下载/合并阶段结束，已释放下载名额：%s", url)
     return result
@@ -529,8 +550,9 @@ def export_browser_cookies(settings: Settings, browser: str | None = None) -> Pa
         if not name:
             continue
         logger.info("尝试从 %s 导出 YouTube cookies（请先完全退出该浏览器）…", name)
-        opts = _base_opts(settings)
-        opts.pop("cookiefile", None)
+        # The destination is an output file and may not exist on first export.
+        # Build shared options without validating it as an input cookie file.
+        opts = _base_opts(replace(settings, youtube_cookies=None, youtube_cookies_from_browser=None))
         opts["cookiesfrombrowser"] = _parse_browser(name)
         opts["cookiefile"] = str(dest)
         opts["skip_download"] = True
@@ -572,13 +594,15 @@ def export_browser_cookies(settings: Settings, browser: str | None = None) -> Pa
 
 
 def _extract(url: str, settings: Settings, download: bool) -> dict[str, Any]:
-    yt_dlp = __getattr__("yt_dlp")
     opts = _base_opts(settings)
     opts["skip_download"] = not download
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=download)
+        info = _extract_info(opts, url, download)
+        events.check_cancelled()
+    except events.Cancelled:
+        raise
     except Exception as exc:
+        events.check_cancelled()
         raise AppError(_format_ytdlp_error("解析 YouTube 链接失败", exc)) from exc
     if not info:
         raise AppError("解析 YouTube 链接失败：没有返回信息。")

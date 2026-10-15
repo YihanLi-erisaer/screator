@@ -30,7 +30,8 @@ def prepare(settings, store, task, meta, folder, *, force=False):
     if not force:
         record["config_snapshot"] = config
         store.save_translation(task, record)
-    description_limit = min(settings.desc_limit, 1000) if has_acfun else settings.desc_limit
+    has_xiaohongshu = publications.for_platform(store, task.task_id, "xiaohongshu") is not None
+    description_limit = min(settings.desc_limit, 1000) if has_acfun or has_xiaohongshu else settings.desc_limit
     reserve = 32 + len(meta.uploader)
     try:
         result = translate_group(settings, meta.title, meta.description, meta.language,

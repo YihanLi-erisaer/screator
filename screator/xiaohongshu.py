@@ -1,4 +1,4 @@
-"""Image-note synchronization through the user-operated creator website.
+"""Image and video synchronization through the user-operated creator website.
 
 Browser selectors are deliberately isolated in xiaohongshu_browser. Cookies
 live only in the OS credential vault, never in tasks, IPC, backups or logs.
@@ -9,8 +9,9 @@ import json
 import re
 import threading
 import uuid
+from pathlib import Path
 
-from screator import events, image_posts, publications
+from screator import events, image_posts, media, publications
 from screator.db import _now
 from screator.exceptions import AppError
 
@@ -29,6 +30,7 @@ def validate_metadata(snapshot):
     title, description = snapshot.get("title"), snapshot.get("description")
     # Match the website's UTF-16 counters, including emoji surrogate pairs.
     for value, limit, label in ((title, TITLE_LIMIT, "标题"), (description, TEXT_LIMIT, "正文")):
+        if label == "正文" and snapshot.get("media_type") == "video" and value == "": continue
         if not isinstance(value, str) or not value.strip() or len(value.encode("utf-16-le")) // 2 > limit:
             raise AppError(f"小红书{label}须为 1～{limit} 字。")
 
@@ -154,10 +156,19 @@ class XiaohongshuService:
         return {"resumed": True}
 
     def validate_assets(self, item, snapshot):
-        validate_metadata(snapshot)
         task = self.store.require(item.task_id)
+        expected = "image" if task.source_kind == "image_post" else "video"
+        if snapshot.get("media_type", "image") != expected:
+            raise AppError("小红书素材类型与任务不一致，请重新创建任务。")
+        validate_metadata(snapshot)
         if task.source_kind != "image_post":
-            raise AppError("小红书同步目前仅支持图文任务。")
+            path = Path(task.video_path)
+            if not path.is_file() or path.suffix.lower() not in (".mp4", ".mov") or path.stat().st_size <= 0:
+                raise AppError("小红书视频须为有效的 MP4 或 MOV 文件。")
+            info = media.probe_brief(path)
+            if not info or not info.get("has_video") or not info.get("duration") or info["duration"] <= 0:
+                raise AppError("无法验证小红书视频内容或时长，请检查视频文件。")
+            return [path]
         paths = image_posts.prepared_paths(task)
         # Animated GIFs cannot silently turn into a different image on this target.
         if any(image_posts.image_info(path)["extension"] not in (".jpg", ".png") for path in paths):
@@ -182,7 +193,7 @@ class XiaohongshuService:
             cookies = self._credential()
         publications.project(self.store, item.task_id)
         def creating():
-            if item.cancel.is_set(): raise events.Cancelled("任务已取消，已保留图片。")
+            if item.cancel.is_set(): raise events.Cancelled("任务已取消，已保留素材。")
             with self.store.transaction() as db:
                 db.execute("UPDATE xiaohongshu_attempts SET phase='creating',updated_at=? WHERE publication_id=?", (_now(), p["publication_id"]))
                 publications.change(self.store, p["publication_id"], status="creating")
