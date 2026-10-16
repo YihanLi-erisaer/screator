@@ -544,12 +544,14 @@ test("production-style unconnected page never pretends to perform work", async (
   await expect(page.getByText("未连接到后台")).toBeVisible();
   await expect(page.getByRole("button", { name: /新建投稿任务/ })).toBeDisabled();
 });
-test("five accounts plus Douyin and AcFun and three shared stages have ten lanes", async ({
+test("five accounts plus seven platforms and three shared stages have fifteen lanes", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1024, height: 680 });
   await page.goto("/?preview&accounts=5");
-  await expect(page.locator(".queue-card")).toHaveCount(10);
+  const queue = page.locator(".queue-overview:not(.queue-overview-skeleton)");
+  await expect(queue.locator(".queue-card")).toHaveCount(15);
+  await expect(queue).toContainText("TikTok 独立上传");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth > innerWidth,
