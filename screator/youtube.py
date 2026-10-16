@@ -279,7 +279,8 @@ def download_video(
                 continue
             if attempt < max_attempts:
                 events.wait(2 ** attempt)
-    raise AppError(_format_ytdlp_error("视频下载失败", last_error))
+    raise AppError(_format_ytdlp_error("视频下载失败", last_error,
+                   cookies_configured=bool(opts.get("cookiefile") or opts.get("cookiesfrombrowser"))))
 
 
 def _finish_existing_source(
@@ -431,7 +432,8 @@ def _download_audio_only(url: str, work_dir: Path, settings: Settings) -> Path:
                 continue
             if attempt < max_attempts:
                 events.wait(2 ** attempt)
-    raise AppError(_format_ytdlp_error("音轨下载失败", last_error))
+    raise AppError(_format_ytdlp_error("音轨下载失败", last_error,
+                   cookies_configured=bool(opts.get("cookiefile") or opts.get("cookiesfrombrowser"))))
 
 
 def _find_audio(work_dir: Path) -> Path | None:
@@ -603,7 +605,8 @@ def _extract(url: str, settings: Settings, download: bool) -> dict[str, Any]:
         raise
     except Exception as exc:
         events.check_cancelled()
-        raise AppError(_format_ytdlp_error("解析 YouTube 链接失败", exc)) from exc
+        raise AppError(_format_ytdlp_error("解析 YouTube 链接失败", exc,
+                       cookies_configured=bool(opts.get("cookiefile") or opts.get("cookiesfrombrowser")))) from exc
     if not info:
         raise AppError("解析 YouTube 链接失败：没有返回信息。")
     return info
@@ -635,13 +638,9 @@ def _base_opts(settings: Settings) -> dict[str, Any]:
         "fragment_retries": 10,
         "extractor_retries": 5,
         "socket_timeout": 30,
-        "extractor_args": {
-            "youtube": {
-                # tv/web_safari 常被限制在 1080p HLS；web_embedded 才能拿到 1440/2160 DASH。
-                "player_client": ["web_embedded", "tv", "web_safari"],
-            }
-        },
     }
+    # Let yt-dlp choose clients for the actual login state. Forcing the older
+    # embedded/TV/Safari set can report public videos as unavailable with cookies.
     if runtimes:
         opts["js_runtimes"] = runtimes
     ffmpeg = Path(media.ffmpeg_tool("ffmpeg"))
@@ -797,8 +796,15 @@ def _is_bot_block(exc: BaseException) -> bool:
     return any(marker in text for marker in _BOT_MARKERS)
 
 
-def _format_ytdlp_error(prefix: str, exc: BaseException | None) -> str:
+def _format_ytdlp_error(prefix: str, exc: BaseException | None, *, cookies_configured=False) -> str:
     detail = str(exc).strip() if exc else "未知错误"
+    if cookies_configured and exc is not None and (_is_bot_block(exc) or "video unavailable" in detail.lower()):
+        return (
+            f"{prefix}：{detail}\n"
+            "已配置 YouTube cookies，但 YouTube 仍拒绝本次解析。"
+            "请先在相同网络、相同登录账号的浏览器中确认视频可以播放；"
+            "若能播放，请检查 cookies 是否失效或下载器客户端是否兼容，再重试。"
+        )
     if exc is not None and _is_bot_block(exc):
         return (
             f"{prefix}：YouTube 把本次请求当成机器人拦截了。\n"

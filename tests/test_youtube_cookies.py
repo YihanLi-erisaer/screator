@@ -56,6 +56,36 @@ class YoutubeCookieExportTests(unittest.TestCase):
         with self.assertRaisesRegex(AppError, "YouTube cookies 文件不存在"):
             youtube._base_opts(settings)
 
+    def test_metadata_keeps_cookies_and_allows_downloader_to_choose_clients(self):
+        cookie_file = self.root / "secrets/youtube_cookies.txt"
+        cookie_file.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+        settings = replace(self.settings, youtube_cookies=cookie_file)
+        with patch.object(youtube, "_extract_info", return_value={"id": "UKhwU_Q-FgU"}) as extract:
+            meta = youtube.fetch_meta("https://youtu.be/UKhwU_Q-FgU", settings)
+        opts, _, download = extract.call_args.args
+        self.assertEqual(meta.video_id, "UKhwU_Q-FgU")
+        self.assertEqual(opts["cookiefile"], str(cookie_file))
+        self.assertFalse(download)
+        self.assertNotIn("player_client", opts.get("extractor_args", {}).get("youtube", {}))
+
+    def test_unavailable_with_configured_cookies_does_not_ask_to_configure_env(self):
+        cookie_file = self.root / "secrets/youtube_cookies.txt"
+        cookie_file.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+        settings = replace(self.settings, youtube_cookies=cookie_file)
+        with patch.object(youtube, "_extract_info", side_effect=RuntimeError("Video unavailable")):
+            with self.assertRaises(AppError) as failure:
+                youtube.fetch_meta("https://youtu.be/UKhwU_Q-FgU", settings)
+        message = str(failure.exception)
+        self.assertIn("已配置 YouTube cookies", message)
+        self.assertIn("Video unavailable", message)
+        self.assertNotIn("YOUTUBE_COOKIES", message)
+
+    def test_bot_block_with_browser_cookies_reports_existing_configuration(self):
+        message = youtube._format_ytdlp_error("解析 YouTube 链接失败",
+            RuntimeError("Sign in to confirm you're not a bot"), cookies_configured=True)
+        self.assertIn("已配置 YouTube cookies", message)
+        self.assertNotIn("当前 IP 已无法匿名解析", message)
+
 
 if __name__ == "__main__":
     unittest.main()

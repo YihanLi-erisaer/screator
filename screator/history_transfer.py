@@ -38,6 +38,11 @@ def _local_record(store, task):
     values = asdict(task)
     record = {key: values.get(key) or "" for key in TEXT_FIELDS}
     record["source_kind"] = task.source_kind
+    with store._lock:
+        receipt = store._conn.execute(
+            "SELECT MAX(ended_at) FROM upload_attempts WHERE task_id=? AND outcome='submitted'",
+            (task.task_id,)).fetchone()
+    record["submitted_at"] = receipt[0] or task.updated_at
     record["publications"] = [
         {key: item.get(key) or "" for key in PUBLICATION_FIELDS}
         for item in publications.items(store, task.task_id)
@@ -113,6 +118,7 @@ def _validated_record(value):
     if not isinstance(value, dict) or not isinstance(value.get("publications"), list):
         raise AppError("投稿记录结构无效。")
     record = {key: _string(value.get(key), key) for key in TEXT_FIELDS}
+    record["submitted_at"] = _string(value.get("submitted_at", ""), "submitted_at", 100)
     record["source_kind"] = _string(value.get("source_kind", "youtube"), "source_kind", 30)
     if record["source_kind"] not in ("youtube", "local", "image_post"):
         raise AppError("投稿记录的来源类型无效。")

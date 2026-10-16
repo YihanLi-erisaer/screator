@@ -144,6 +144,17 @@ if (new URLSearchParams(location.search).has("importedHistory"))
       status: "submitted", revision: 0, text: "AcFun 稿件", remote_id: "123456", error: "",
     }],
   });
+if (new URLSearchParams(location.search).has("importedBiliHistory"))
+  tasks.push({
+    task_id: "imported-bili-preview", video_id: "imported-bili", imported_history: true,
+    url: "https://youtu.be/imported-bili", title_orig: "", desc_orig: "", desc_zh: "", uploader: "",
+    work_dir: "", video_path: "", cover_path: "", error: "",
+    account_id: null, account_uid_snapshot: "99887766", account_name_snapshot: "历史投稿账号",
+    status: "submitted", revision: 1, title_zh: "历史 Bilibili 投稿", bv_id: "BV0987654321",
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    publications: [{ publication_id: "", account_id: "", revision: 0, text: "", error: "",
+      platform: "bilibili", status: "submitted", remote_id: "BV0987654321" }],
+  });
 if (new URLSearchParams(location.search).has("historyFilters") && tasks.length) {
   const template = tasks[0];
   tasks = platformOptions.flatMap(({ value: platform }) =>
@@ -476,6 +487,20 @@ export async function request(method: string, params: any): Promise<any> {
       const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29 + index);
       return localDate(day);
     });
+    const trendCounts: Record<string, number[]> = {};
+    const trendLabels: Record<string, { uid: string; name: string }> = {};
+    for (const task of tasks) {
+      const submitted = task.publications?.length
+        ? task.publications.some((pub: any) => pub.platform === "bilibili" && pub.status === "submitted")
+        : task.status === "submitted" && Boolean(task.bv_id);
+      if (!submitted) continue;
+      const day = trendDates.indexOf(localDate(new Date(task.submitted_at || task.updated_at)));
+      if (day < 0) continue;
+      const account = accounts.find((account) => account.uid === task.account_uid_snapshot);
+      const id = task.account_id || account?.account_id || `history:${task.account_uid_snapshot || "unknown"}`;
+      (trendCounts[id] ??= Array(30).fill(0))[day] += 1;
+      trendLabels[id] = { uid: task.account_uid_snapshot || "", name: task.account_name_snapshot || "" };
+    }
     const items = tasks.filter(
       (t) =>
         (!params.account_id || t.account_id === params.account_id) &&
@@ -509,14 +534,8 @@ export async function request(method: string, params: any): Promise<any> {
       ),
       submission_trend: params.history ? {
         dates: trendDates,
-        by_account: Object.fromEntries(accounts.map((account) => [
-          account.account_id,
-          trendDates.map((date) => tasks.filter((task) =>
-            !task.imported_history && task.account_id === account.account_id &&
-            task.status === "submitted" &&
-            localDate(new Date(task.updated_at)) === date,
-          ).length),
-        ])),
+        by_account: trendCounts,
+        account_labels: trendLabels,
       } : null,
       queue: {
         active: [],

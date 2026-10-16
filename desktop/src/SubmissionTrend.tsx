@@ -6,6 +6,7 @@ import { accountLabel, type BiliAccount } from "./types";
 export interface SubmissionTrendData {
   dates: string[];
   by_account: Record<string, number[]>;
+  account_labels?: Record<string, { uid: string; name: string }>;
 }
 
 const colors = [
@@ -62,12 +63,31 @@ export function SubmissionTrend({
       account.lifecycle === "active" ||
       trend?.by_account[account.account_id]?.some(Boolean),
   );
-  const series = visibleAccounts.map((account, index) => ({
+  const knownAccounts = new Set(
+    visibleAccounts.map((account) => account.account_id),
+  );
+  const chartAccounts = [
+    ...visibleAccounts.map((account) => ({
+      id: account.account_id,
+      label: accountLabel(account),
+      name: account.remark || account.nickname || `UID ${account.uid}`,
+    })),
+    ...Object.keys(trend?.by_account || {})
+      .filter((id) => !knownAccounts.has(id))
+      .map((id) => {
+        const account = trend?.account_labels?.[id];
+        const name = account?.name || uiText("历史账号");
+        return {
+          id,
+          name,
+          label: account?.uid ? `${name} · UID ${account.uid}` : name,
+        };
+      }),
+  ];
+  const series = chartAccounts.map((account, index) => ({
     account,
     color: colors[index] || `hsl(${(index * 137.508) % 360} 72% 53%)`,
-    values: dates.map(
-      (_, day) => trend?.by_account[account.account_id]?.[day] || 0,
-    ),
+    values: dates.map((_, day) => trend?.by_account[account.id]?.[day] || 0),
   }));
   const peak = Math.max(0, ...series.flatMap((item) => item.values));
   const step = axisStep(peak);
@@ -192,7 +212,7 @@ export function SubmissionTrend({
                 ))}
                 {hasSubmissions &&
                   series.map(({ account, color, values }) => (
-                    <g key={account.account_id}>
+                    <g key={account.id}>
                       <polyline
                         points={values
                           .map((value, index) => `${x(index)},${y(value)}`)
@@ -226,7 +246,7 @@ export function SubmissionTrend({
                     />
                     {series.map(({ account, color, values }) => (
                       <circle
-                        key={account.account_id}
+                        key={account.id}
                         cx={x(displayDay)}
                         cy={y(values[displayDay])}
                         r="5"
@@ -246,13 +266,9 @@ export function SubmissionTrend({
                 >
                   <strong>{uiNode(dates[displayDay])}</strong>
                   {series.map(({ account, color, values }) => (
-                    <div key={account.account_id}>
+                    <div key={account.id}>
                       <i style={{ backgroundColor: color }} />
-                      <span>
-                        {account.remark ||
-                          account.nickname ||
-                          `UID ${account.uid}`}
-                      </span>
+                      <span>{account.name}</span>
                       <b>{values[displayDay]}</b>
                     </div>
                   ))}
@@ -271,9 +287,9 @@ export function SubmissionTrend({
             aria-label={uiText("账号颜色与近30天投稿总数")}
           >
             {series.map(({ account, color, values }) => (
-              <div key={account.account_id} title={accountLabel(account)}>
+              <div key={account.id} title={account.label}>
                 <i style={{ backgroundColor: color }} />
-                <span>{accountLabel(account)}</span>
+                <span>{account.label}</span>
                 <strong>
                   {values.reduce((sum, value) => sum + value, 0)}{" "}
                   <small>{uiText("条")}</small>

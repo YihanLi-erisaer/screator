@@ -178,6 +178,26 @@ test("publishing history shows skeletons until its records finish loading", asyn
   expect(Math.abs(loadingTrendHeight - loadedTrendHeight)).toBeLessThan(20);
 });
 
+test("history trend includes imported accounts and updates after deleting records", async ({ page }) => {
+  await page.goto("/?preview&accounts=1&populated&importedBiliHistory");
+  await page.getByRole("button", { name: "投稿记录", exact: true }).click();
+  const chart = page.getByRole("region", { name: "近30天 Bilibili 投稿数量" });
+  await expect(chart.locator(".submission-trend-summary strong")).toHaveText("2 条");
+  await expect(chart.locator("polyline")).toHaveCount(2);
+  await expect(chart.locator(".submission-trend-legend")).toContainText("历史投稿账号 · UID 99887766");
+  await page.getByRole("button", { name: /历史 Bilibili 投稿/ }).click();
+  const detail = page.getByRole("dialog", { name: "导入的投稿记录" });
+  await detail.getByRole("button", { name: "删除投稿记录" }).click();
+  await detail.getByRole("button", { name: "确认删除记录" }).click();
+  await expect(chart.locator(".submission-trend-summary strong")).toHaveText("1 条");
+  await expect(chart.locator("polyline")).toHaveCount(1);
+  await page.getByRole("button", { name: "删除所有投稿记录", exact: true }).click();
+  await page.getByRole("dialog", { name: "删除所有投稿记录" })
+    .getByRole("button", { name: "确认删除所有投稿记录" }).click();
+  await expect(chart.locator(".submission-trend-summary strong")).toHaveText("0 条");
+  await expect(chart.locator("polyline")).toHaveCount(0);
+});
+
 test("local-first translation settings and fallback can be changed", async ({
   page,
 }) => {

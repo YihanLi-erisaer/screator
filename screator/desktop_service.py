@@ -710,30 +710,9 @@ class DesktopService:
         with self.store._lock:
             submission_trend = None
             if history:
-                first_day = today - timedelta(days=29)
-                trend_start = datetime.combine(first_day, time.min).astimezone(timezone.utc).isoformat()
-                trend_end = end
-                dates = [(first_day + timedelta(days=index)).isoformat() for index in range(30)]
-                counts_by_account = {}
-                for row in self.store._conn.execute("""
-                    SELECT p.account_id, COALESCE(receipt.submitted_at, t.updated_at) AS submitted_at
-                    FROM task_publications AS p
-                    JOIN tasks AS t ON t.task_id = p.task_id
-                    LEFT JOIN (
-                        SELECT task_id, MAX(ended_at) AS submitted_at
-                        FROM upload_attempts WHERE outcome = 'submitted'
-                        GROUP BY task_id
-                    ) AS receipt ON receipt.task_id = p.task_id
-                    WHERE p.platform = 'bilibili' AND p.status = 'submitted'
-                      AND p.account_id IS NOT NULL
-                      AND COALESCE(receipt.submitted_at, t.updated_at) >= ?
-                      AND COALESCE(receipt.submitted_at, t.updated_at) < ?
-                """, (trend_start, trend_end)):
-                    day = datetime.fromisoformat(row["submitted_at"]).astimezone().date()
-                    index = (day - first_day).days
-                    if 0 <= index < 30:
-                        counts_by_account.setdefault(row["account_id"], [0] * 30)[index] += 1
-                submission_trend = {"dates": dates, "by_account": counts_by_account}
+                from screator.submission_stats import submission_trend as database_submission_trend
+                submission_trend = database_submission_trend(self.store, today)
+                counts_by_account = submission_trend["by_account"]
                 today_submitted = {account_id: values[-1] for account_id, values in counts_by_account.items() if values[-1]}
             else:
                 today_submitted = {

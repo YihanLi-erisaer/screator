@@ -68,6 +68,7 @@ export interface Task {
   error: string;
   created_at: string;
   updated_at: string;
+  submitted_at?: string;
   snapshot?: { mode: string; settings: Record<string, unknown> };
   file_exists?: boolean;
   translation?: {
