@@ -1,6 +1,7 @@
 """Managed material libraries and isolated multi-platform downloads."""
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -224,7 +225,8 @@ def download(task, settings, work_dir):
                 stream.write(chunk)
         output.with_suffix(suffix + ".part").replace(output)
     elif requested == "image":
-        download_gallery(url, destination)
+        cookie_file = settings.root / "secrets/instagram_cookies.txt"
+        download_gallery(url, destination, cookie_file if cookie_file.is_file() else None)
     else:
         opts = youtube._base_opts(settings)
         opts.update(outtmpl=str(destination / "%(title).90s-%(id)s.%(ext)s"),
@@ -248,7 +250,7 @@ def download_progress(data):
     events.download_progress(data)
 
 
-def download_gallery(url, destination):
+def download_gallery(url, destination, instagram_cookies=None):
     try:
         from gallery_dl import config, job, output
     except ImportError as exc:
@@ -264,6 +266,16 @@ def download_gallery(url, destination):
     config.set(("extractor",), "timeout", 30)
     config.set(("extractor",), "retries", 2)
     config.set(("extractor",), "image-filter", "extension.lower() in ('jpg','jpeg','png','webp','gif','avif','bmp','tiff')")
+    if instagram_cookies and urlparse(url).hostname in {"instagram.com", "www.instagram.com"}:
+        config.set(("extractor", "instagram"), "cookies", str(instagram_cookies))
+
+    class LoginRedirect(logging.Handler):
+        seen = False
+
+        def emit(self, record):
+            if "HTTP redirect to login page" in record.getMessage():
+                self.seen = True
+
     class Progress(output.NullOutput):
         def progress(self, total, downloaded, speed):
             events.progress("downloading", percent=downloaded / total * 100 if total else None, speed=speed)
@@ -283,10 +295,18 @@ def download_gallery(url, destination):
                 events.check_cancelled()
                 return super().handle_queue(*args)
             raise AppError("请输入单个图片帖子或作品链接，不支持批量下载主页。")
+    login_redirect = LoginRedirect()
+    instagram_log = logging.getLogger("instagram")
+    instagram_log.addHandler(login_redirect)
     try:
         result = Download(url).run()
         events.check_cancelled()
         if result:
+            if login_redirect.seen:
+                if instagram_cookies:
+                    raise AppError("Instagram 登录状态已失效或被站点拒绝，请重新导入 Instagram Cookie 后重试。")
+                raise AppError("Instagram 要求登录，请先在“账号与连接”导入 Instagram Cookie，再重试下载。")
             raise AppError("图片下载失败，请检查链接或站点登录要求。")
     finally:
+        instagram_log.removeHandler(login_redirect)
         config.clear()

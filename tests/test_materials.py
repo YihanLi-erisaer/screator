@@ -426,6 +426,74 @@ class MaterialTests(unittest.TestCase):
         self.assertEqual(len(files), 1)
         self.assertEqual(files[0].read_bytes(), (root / "image.png").read_bytes())
 
+    def test_instagram_cookie_import_is_scoped_and_can_be_cleared(self):
+        source = Path(self.tmp.name) / "browser-cookies.txt"
+        source.write_text("# Netscape HTTP Cookie File\n"
+                          "#HttpOnly_.instagram.com\tTRUE\t/\tTRUE\t2147483647\tsessionid\tinstagram-secret\n"
+                          ".example.com\tTRUE\t/\tTRUE\t2147483647\ttoken\tunrelated-secret\n",
+                          encoding="utf-8")
+        self.service.dispatch("auth.import", {"path": str(source), "kind": "instagram"})
+        target = self.paths.root / "secrets/instagram_cookies.txt"
+        self.assertTrue(self.service.config.public(False)["instagram_cookies"])
+        self.assertIn("instagram-secret", target.read_text(encoding="utf-8"))
+        self.assertNotIn("unrelated-secret", target.read_text(encoding="utf-8"))
+        self.service.dispatch("auth.clear", {"kind": "instagram"})
+        self.assertFalse(target.exists())
+        self.assertFalse(self.service.config.public(False)["instagram_cookies"])
+        source.write_text("# Netscape HTTP Cookie File\n"
+                          ".instagram.com\tTRUE\t/\tTRUE\t2147483647\tcsrftoken\tno-login\n",
+                          encoding="utf-8")
+        with self.assertRaisesRegex(AppError, "sessionid"):
+            self.service.dispatch("auth.import", {"path": str(source), "kind": "instagram"})
+        self.assertFalse(target.exists())
+
+    def test_instagram_login_redirect_uses_cookie_and_reports_login_state(self):
+        import re
+        from gallery_dl import exception, extractor
+        from gallery_dl.extractor.common import Extractor
+
+        seen = []
+        class Fixture(Extractor):
+            category = "instagram"
+            subcategory = "post"
+            pattern = r"https://www\.instagram\.com/p/([^/]+)"
+
+            def items(self):
+                seen.append(self.config("cookies"))
+                raise exception.AbortExtraction("HTTP redirect to login page (https://www.instagram.com/accounts/login/)")
+                yield
+
+        url = "https://www.instagram.com/p/example/"
+        folder = Path(self.tmp.name) / "gallery"
+        folder.mkdir()
+        cookie_file = Path(self.tmp.name) / "instagram-cookies.txt"
+        cookie_file.write_text("fixture", encoding="utf-8")
+        with patch.object(extractor, "find", side_effect=lambda _: Fixture(re.match(Fixture.pattern, url))):
+            with self.assertRaisesRegex(AppError, "先在.*导入 Instagram Cookie"):
+                materials.download_gallery(url, folder)
+            with self.assertRaisesRegex(AppError, "登录状态已失效"):
+                materials.download_gallery(url, folder, cookie_file)
+        self.assertEqual(seen, [None, str(cookie_file)])
+
+    def test_material_image_download_passes_imported_instagram_cookie(self):
+        from screator.db import Task
+
+        cookie_file = self.paths.root / "secrets/instagram_cookies.txt"
+        cookie_file.write_text("fixture", encoding="utf-8")
+        task = Task("instagram-post", "https://www.instagram.com/p/example/", "pending",
+                    source_kind="material", asset_type="image")
+        folder = Path(self.tmp.name) / "instagram-work"
+        folder.mkdir()
+
+        def fake_gallery(url, destination, cookies):
+            self.assertEqual(url, task.url)
+            self.assertEqual(cookies, cookie_file)
+            (destination / "image.jpg").write_bytes(b"image")
+
+        with patch.object(materials, "download_gallery", side_effect=fake_gallery):
+            self.assertEqual(materials.download(task, self.service.config.build(), folder),
+                             [folder / "materials/image.jpg"])
+
     def test_schema_five_migration_preserves_youtube_tasks_and_backs_up(self):
         from screator.db import Task, TaskStore
         path = Path(self.tmp.name) / "migration.sqlite"

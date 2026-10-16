@@ -1324,7 +1324,7 @@ class DesktopService:
         if kind == "bilibili":
             result = self.accounts.bind(validate_login(json.loads(content)), account_id)
             return {"imported": True, "account_id": result["account_id"]}
-        if kind != "youtube":
+        if kind not in ("youtube", "instagram"):
             raise AppError("不支持的 Cookie 类型。")
         with self.mutation:
             self.ensure_idle()
@@ -1333,10 +1333,20 @@ class DesktopService:
             try:
                 jar.load(ignore_discard=True, ignore_expires=True)
             except Exception as exc:
-                raise AppError("请使用 Netscape 格式的 YouTube Cookie 文件。") from exc
-            target = self.paths.root / "secrets/youtube_cookies.txt"
+                raise AppError("请使用 Netscape 格式的 Cookie 文件。") from exc
+            if kind == "instagram":
+                instagram_jar = http.cookiejar.MozillaCookieJar()
+                for cookie in jar:
+                    if cookie.domain.lstrip(".") == "instagram.com" and not cookie.is_expired():
+                        instagram_jar.set_cookie(cookie)
+                if not any(cookie.name == "sessionid" and cookie.value for cookie in instagram_jar):
+                    raise AppError("Instagram Cookie 文件缺少有效的 sessionid，请从已登录的 instagram.com 页面重新导出。")
+            target = self.paths.root / f"secrets/{kind}_cookies.txt"
             temporary = target.with_suffix(".tmp")
-            temporary.write_text(content, encoding="utf-8")
+            if kind == "instagram":
+                instagram_jar.save(str(temporary), ignore_discard=True)
+            else:
+                temporary.write_text(content, encoding="utf-8")
             temporary.replace(target)
             if os.name != "nt":
                 target.chmod(0o600)
@@ -1398,11 +1408,11 @@ class DesktopService:
     def clear_auth(self, kind, account_id=None):
         if kind == "bilibili":
             return self.accounts.clear(account_id)
-        if kind != "youtube":
+        if kind not in ("youtube", "instagram"):
             raise AppError("账号类型无效。")
         with self.mutation:
             self.ensure_idle()
-            (self.paths.root / "secrets/youtube_cookies.txt").unlink(missing_ok=True)
+            (self.paths.root / f"secrets/{kind}_cookies.txt").unlink(missing_ok=True)
         return {"cleared": True}
 
     def import_data(self, path):

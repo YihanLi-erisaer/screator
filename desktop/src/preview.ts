@@ -28,6 +28,7 @@ const config = {
   translation_total_timeout_seconds: 420,
   data_dir: "本地应用数据目录",
   youtube_cookies: false,
+  instagram_cookies: false,
   vault_error: "",
 };
 const number = Math.min(
@@ -337,6 +338,14 @@ export async function request(method: string, params: any): Promise<any> {
     const result: Record<string, unknown> = { ...config, readiness_pending: params.check_services === false };
     if (new URLSearchParams(location.search).has("legacyAudioSettings")) delete result.youtube_audio_language;
     return result;
+  }
+  if (method === "auth.import" && params.kind === "instagram") {
+    config.instagram_cookies = true;
+    return { imported: true };
+  }
+  if (method === "auth.clear" && params.kind === "instagram") {
+    config.instagram_cookies = false;
+    return { cleared: true };
   }
   if (method === "settings.status") {
     const result = { has_deepl_key: config.has_deepl_key, vault_error: config.vault_error,

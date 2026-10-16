@@ -89,7 +89,8 @@ class DesktopSettings:
         return {**self.values, **services,
                 "local_llm_backends": ["auto", "vulkan", "cpu"] if sys.platform == "win32" else ["auto", "cpu"],
                 "translation_upgrade_notice": self.translation_upgrade_notice,
-                "data_dir": str(self.paths.root), "youtube_cookies": (self.paths.root / "secrets/youtube_cookies.txt").is_file()}
+                "data_dir": str(self.paths.root), "youtube_cookies": (self.paths.root / "secrets/youtube_cookies.txt").is_file(),
+                "instagram_cookies": (self.paths.root / "secrets/instagram_cookies.txt").is_file()}
 
     def validate(self, incoming):
         if not isinstance(incoming, dict) or set(incoming) - set(self.values):

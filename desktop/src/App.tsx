@@ -3425,6 +3425,34 @@ function Account({
           </p>
         </div>
       </section>
+      <section className="settings-card">
+        <div className="section-title">
+          <div className="service-icon"><Link2 size={23} /></div>
+          <div>
+            <h2>{uiText("Instagram 素材下载")}</h2>
+            <p>{uiText("下载 Instagram 图片作品时使用本机保存的登录 Cookie。")}</p>
+          </div>
+          <StatusBadge tone={config.instagram_cookies ? "success" : "error"}>
+            {uiNode(config.instagram_cookies ? "已导入" : "未导入")}
+          </StatusBadge>
+        </div>
+        <div className="section-body">
+          <div className="button-row">
+            <button className="secondary" disabled={busy} onClick={() => importCookie("instagram")}>
+              <Upload size={15} />{uiText("导入 Cookie 文件")}
+            </button>
+            {config.instagram_cookies && (
+              <button className="text-button" disabled={busy} onClick={() =>
+                action(async () => {
+                  await request("auth.clear", { kind: "instagram" });
+                  await refresh();
+                }, "Instagram Cookie 已移除。")
+              }>{uiText("移除 Instagram Cookie")}</button>
+            )}
+          </div>
+          <p className="help">{uiText("请在浏览器登录 instagram.com，导出该网站的 Netscape 格式 cookies.txt，再导入。Cookie 只用于 Instagram 素材下载，并保存在本机。")}</p>
+        </div>
+      </section>
     </div>
   );
 }

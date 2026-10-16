@@ -101,6 +101,7 @@ export interface Config {
   has_deepl_key: boolean;
   data_dir: string;
   youtube_cookies: boolean;
+  instagram_cookies: boolean;
   vault_error: string;
   translation_primary: "local_llm" | "deepl";
   translation_fallback_enabled: boolean;
