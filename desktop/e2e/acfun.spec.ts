@@ -64,6 +64,8 @@ test("AcFun opt-in supports preview and automatic submission", async ({ page }) 
 test("AcFun settings select real video subchannels by name", async ({ page }) => {
   await page.goto("/?preview&accounts=1&acfun=1");
   await page.getByRole("button", { name: "设置", exact: true }).click();
+  // Cold CI runs must finish loading the settings page's lazy modules first.
+  await expect(page.getByRole("heading", { name: "投稿默认值", exact: true })).toBeVisible({ timeout: 15000 });
   const channel = page.getByRole("combobox", { name: "AcFun 默认分区（自动投稿必填）" });
   await expect(channel).toBeEnabled();
   await channel.click();
