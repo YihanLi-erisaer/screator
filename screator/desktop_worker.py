@@ -166,6 +166,9 @@ class WorkerRPC:
 
 
 def main():
+    if "--uninstall-data" in sys.argv:
+        from screator.uninstall import main as uninstall_data
+        return uninstall_data()
     if "--youtube-request" in sys.argv:
         from screator.youtube_worker import main as youtube_request
         return youtube_request()

@@ -46,7 +46,7 @@ def collect():
 
     for path in (ROOT / "screator").rglob("*.py"):
         # CLI-only commands and LLM prompts are not desktop UI copy.
-        if path.name in {"cli.py", "cli_settings.py", "prompts.py", "translate.py", "desktop_selftest.py"}:
+        if path.name in {"cli.py", "cli_settings.py", "prompts.py", "translate.py", "desktop_selftest.py", "uninstall.py"}:
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):

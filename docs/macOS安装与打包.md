@@ -50,6 +50,16 @@ npm run desktop:package:mac
 
 仓库打包时使用临时签名，未做 Apple Developer ID 签名和公证；首次打开时 macOS 可能要求在“隐私与安全性”中明确允许。若要向其他用户公开分发且正常通过 Gatekeeper，需用自己的 Apple Developer ID 重新签名并公证。发布前还须核对随包 FFmpeg 和其它二进制的许可证。此仓库没有附带或自动下载这些发布用二进制。
 
+## 卸载
+
+先退出 screator，再打开新版本 DMG，双击其中的“卸载 screator.command”。卸载工具显示 `/Applications/screator.app` 和 `~/Applications/screator.app` 中找到的应用，提供“卸载并保留数据”（默认）、“卸载并删除数据”和“取消”。直接将应用拖入废纸篓仍会保留数据，macOS 不会在拖入废纸篓时执行卸载代码。
+
+保留数据时只将标准位置的应用移到废纸篓。删除数据时还会再次确认，永久清理 `~/Library/Application Support/StarDazz/screator/` 和旧版 `yt2bili/` 两个目录中的模型、运行时、缓存、历史记录、设置、默认素材及登录文件。确认取消不会删除数据或移除应用。自定义数据/素材目录、外部 Ollama 和系统钥匙串不会清理。没有找到应用时也可通过 DMG 工具清理残留数据。
+
+清理前会检查桌面及命令行任务占用；检测到正在运行的任务、目录链接或权限问题会停止。文件删除失败可能已经清理部分数据，应检查并重试。删除后重装需要重新安装模型，从备份导入需要的历史记录。卸载工具不请求管理员权限；应用移到废纸篓失败时会提示检查权限。
+
+卸载回归测试：`.desktop-venv/bin/python -m unittest discover -s tests -p test_uninstall.py -v` 与 `cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml macos_uninstall`。所有清理测试均使用临时目录，不操作真实用户数据。
+
 ## 验证范围
 
 可在项目根目录运行 `PATH="$PWD/bin:$PATH" .desktop-venv/bin/python -m unittest discover -s tests -v`，在 `desktop/` 运行 `npm run build` 和 `npm run test:launcher`。完整测试需允许本地 HTTP 端口和进程监测。GPU 验收需用真实 M 系列设备、含 H.264/HEVC/AV1 的授权测试素材以及实际模型试译；模拟测试只覆盖设备选择、失败回退、归档安全与流程状态。

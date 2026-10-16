@@ -2,6 +2,8 @@
 
 #[cfg(target_os = "macos")]
 mod macos_install;
+#[cfg(target_os = "macos")]
+mod macos_uninstall;
 
 use serde_json::{json, Value};
 use std::{collections::HashMap, fs::OpenOptions, io::{BufRead, BufReader, Write}, path::PathBuf,
@@ -437,6 +439,11 @@ fn start_worker(app: &tauri::AppHandle) -> Result<Worker, Box<dyn std::error::Er
 
 fn main() {
     let context = tauri::generate_context!();
+    #[cfg(target_os = "macos")]
+    let context = match macos_uninstall::handle_uninstall_launch(context) {
+        Some(context) => context,
+        None => return,
+    };
     // Installation must precede the single-instance plugin: an installed copy
     // may already be running when the user opens a new DMG.
     #[cfg(target_os = "macos")]

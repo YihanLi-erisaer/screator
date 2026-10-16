@@ -86,7 +86,7 @@ fn plist_value(app: &Path, key: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&result.stdout).trim().to_owned())
 }
 
-fn validate_app(app: &Path) -> Result<(), String> {
+pub(crate) fn validate_app(app: &Path) -> Result<(), String> {
     let metadata = fs::symlink_metadata(app).map_err(|error| error.to_string())?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() || plist_value(app, "CFBundleIdentifier")? != BUNDLE_ID {
         return Err(format!("{} 不是可替换的 screator 应用，请检查安装位置。", app.display()));
@@ -110,9 +110,9 @@ fn version(app: &Path) -> String {
 
 // Serialize installers, including two copies launched from different DMGs.
 // Keep the inode in place so a waiting process cannot acquire an obsolete lock.
-struct InstallLock(File);
+pub(crate) struct InstallLock(File);
 impl InstallLock {
-    fn acquire(parent: &Path) -> Result<Self, String> {
+    pub(crate) fn acquire(parent: &Path) -> Result<Self, String> {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         parent.hash(&mut hash);
         let name = format!("screator-install-{}-{:x}.lock", unsafe { libc::geteuid() }, hash.finish());

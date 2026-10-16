@@ -80,7 +80,10 @@ try {
   run("/usr/bin/codesign", ["--verify", "--deep", "--strict", packagedApp]);
   run(python, ["scripts/smoke_native.py", "--release", path.join(packagedApp, "Contents/MacOS/screator")]);
   symlinkSync("/Applications", path.join(dmgStage, "Applications"));
-  writeFileSync(path.join(dmgStage, "安装说明.txt"), "双击 screator.app 开始安装。\n\n程序会检测 /Applications 或 ~/Applications 中已有的 screator，显示已安装版本和安装包版本。可选择打开已有版本，或退出旧程序后替换并打开。账号、设置和任务数据会保留。\n\n也可以将 screator.app 拖入 Applications 手动安装或替换。安装完成后可推出此磁盘镜像。\n", "utf8");
+  const uninstaller = path.join(dmgStage, "卸载 screator.command");
+  copyFileSync(path.join(root, "packaging/macos-uninstall.command"), uninstaller);
+  chmodSync(uninstaller, 0o755);
+  writeFileSync(path.join(dmgStage, "安装说明.txt"), "双击 screator.app 开始安装。\n\n程序会检测 /Applications 或 ~/Applications 中已有的 screator，显示已安装版本和安装包版本。可选择打开已有版本，或退出旧程序后替换并打开。账号、设置和任务数据会保留。\n\n也可以将 screator.app 拖入 Applications 手动安装或替换。安装完成后可推出此磁盘镜像。\n\n卸载时请先退出应用，再双击本镜像中的“卸载 screator.command”。可选择保留数据或删除模型、历史记录、设置和默认素材；删除数据需要再次确认。直接将应用拖入废纸篓仍会保留数据。\n", "utf8");
   run("/usr/bin/hdiutil", ["create", "-ov", "-format", "UDZO", "-volname", "screator", "-srcfolder", dmgStage, dmg]);
   run("/usr/bin/hdiutil", ["verify", dmg]);
 } finally {
