@@ -1,4 +1,8 @@
 {
+  "自动识别链接中的视频、音频或图片，无需选择素材类型。": "Automatically detect video, audio, or images from the link. No media type selection is needed.",
+  "也支持视频、图片和音频文件直链。每次输入一个作品链接，自动保留素材类型，图片帖子最多 100 张。": "Direct video, image, and audio links are also supported. Enter one post link at a time. Media types are preserved automatically, with up to 100 images per post.",
+  "没有识别到可下载的视频、音频或图片。请检查链接或站点登录要求。": "No downloadable video, audio, or images were detected. Check the link or the site's login requirements.",
+  "无法内嵌预览，请点击下方“预览”打开。": "Inline preview unavailable. Click Preview below to open the file.",
   "加载中…": "Loading…",
   "投稿中心": "Submission center",
   "投稿记录": "Submission history",

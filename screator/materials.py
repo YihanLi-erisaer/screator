@@ -11,6 +11,7 @@ import threading
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
+from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from screator import events, youtube
@@ -115,7 +116,8 @@ class MaterialLibrary:
             for path in folder.iterdir():
                 if path.is_file() and not path.is_symlink() and kind(path):
                     stat = path.stat()
-                    files.append(dict(name=path.name, kind=kind(path), size=stat.st_size, modified=stat.st_mtime))
+                    files.append(dict(name=path.name, kind=kind(path), size=stat.st_size,
+                                      modified=stat.st_mtime, path=str(path.resolve())))
             return {"items": sorted(files, key=lambda f: (-f["modified"], f["name"])), "path": str(folder)}
 
     def import_files(self, library_id, paths):
@@ -206,41 +208,98 @@ class MaterialLibrary:
             return len(files)
 
 
+def download_direct(url, destination, requested):
+    """Use response metadata as well as the URL for extensionless media links."""
+    suffix = Path(urlparse(url).path).suffix.lower()
+    known_file = kind(Path("material" + suffix)) is not None
+    try:
+        response = urlopen(Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=30)
+    except (URLError, OSError):
+        events.check_cancelled()
+        if known_file:
+            raise
+        return False
+    with response:
+        events.check_cancelled()
+        content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        if content_type in ("text/html", "application/json"):
+            if known_file:
+                raise AppError("链接返回了网页，请使用素材文件直链或平台作品链接。")
+            return False
+        mime_suffixes = {
+            "video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov",
+            "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/aac": ".aac",
+            "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/flac": ".flac",
+            "audio/ogg": ".ogg", "audio/webm": ".weba",
+            "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+            "image/gif": ".gif", "image/avif": ".avif", "image/bmp": ".bmp", "image/tiff": ".tiff",
+        }
+        filename = response.headers.get_filename() or ""
+        candidates = (mime_suffixes.get(content_type, ""), Path(filename).suffix.lower(),
+                      Path(urlparse(response.geturl()).path).suffix.lower(), suffix)
+        suffix = next((ext for ext in candidates if kind(Path("material" + ext))), "")
+        detected = kind(Path("material" + suffix))
+        if not detected or (requested != "auto" and detected != requested):
+            return False
+        output = destination / ("material" + suffix)
+        partial = output.with_suffix(suffix + ".part")
+        with partial.open("wb") as stream:
+            while True:
+                events.check_cancelled()
+                chunk = response.read(256 * 1024)
+                if not chunk: break
+                stream.write(chunk)
+        events.check_cancelled()
+        partial.replace(output)
+        return True
+
+
+def supports_gallery(url):
+    try:
+        from gallery_dl import extractor
+    except ImportError:
+        return False
+    return extractor.find(url) is not None
+
+
 def download(task, settings, work_dir):
     url = validate_url(task.url)
     destination = work_dir / "materials"
     destination.mkdir(exist_ok=True)
     requested = task.asset_type
     suffix = Path(urlparse(url).path).suffix.lower()
-    if suffix in EXTENSIONS[requested]:
-        output = destination / ("material" + suffix)
-        with urlopen(Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=30) as response, output.with_suffix(suffix + ".part").open("wb") as stream:
-            content_type = response.headers.get("Content-Type", "").split(";")[0]
-            if content_type in ("text/html", "application/json"):
-                raise AppError("链接返回了网页，请使用素材文件直链或平台作品链接。")
-            while True:
-                events.check_cancelled()
-                chunk = response.read(256 * 1024)
-                if not chunk: break
-                stream.write(chunk)
-        output.with_suffix(suffix + ".part").replace(output)
-    elif requested == "image":
+    gallery = requested == "auto" and not kind(Path("material" + suffix)) and supports_gallery(url)
+    direct = (requested == "auto" and not gallery) or suffix in EXTENSIONS.get(requested, ())
+    if direct and download_direct(url, destination, requested):
+        pass
+    elif requested == "image" or gallery:
         cookie_file = settings.root / "secrets/instagram_cookies.txt"
-        download_gallery(url, destination, cookie_file if cookie_file.is_file() else None)
+        cookies = cookie_file if cookie_file.is_file() else None
+        if requested == "auto":
+            download_gallery(url, destination, cookies, all_media=True)
+        else:
+            download_gallery(url, destination, cookies)
     else:
         opts = youtube._base_opts(settings)
         opts.update(outtmpl=str(destination / "%(title).90s-%(id)s.%(ext)s"),
                     windowsfilenames=True, noplaylist=True, playlistend=1,
-                    format="bestaudio/best" if requested == "audio" else "bv*+ba/b",
+                    format={"audio": "bestaudio/best", "video": "bv*+ba/b"}.get(requested, "bv*+ba/b/bestaudio"),
                     progress_hooks=[download_progress], postprocessor_hooks=[lambda _: events.check_cancelled()])
         if requested == "audio":
             opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}]
         else:
             opts["merge_output_format"] = "mp4"
-        youtube._download_with_slot(opts, url)
+        info = youtube._download_with_slot(opts, url)
+        if requested == "auto" and info and info.get("vcodec") == "none":
+            # WebM can contain only audio; keep library previews classified as audio.
+            for path in destination.rglob("*.webm"):
+                path.rename(path.with_suffix(".weba"))
     events.check_cancelled()
-    files = [p for p in destination.rglob("*") if p.is_file() and not p.is_symlink() and p.stat().st_size and kind(p) == requested]
+    files = [p for p in destination.rglob("*") if p.is_file() and not p.is_symlink() and p.stat().st_size
+             and kind(p) and (requested == "auto" or kind(p) == requested)]
     if not files:
+        if requested == "auto":
+            raise AppError("没有识别到可下载的视频、音频或图片。请检查链接或站点登录要求。")
         raise AppError("没有下载到所选类型的素材。请检查链接、素材类型或站点登录要求。")
     return files
 
@@ -250,7 +309,7 @@ def download_progress(data):
     events.download_progress(data)
 
 
-def download_gallery(url, destination, instagram_cookies=None):
+def download_gallery(url, destination, instagram_cookies=None, *, all_media=False):
     try:
         from gallery_dl import config, job, output
     except ImportError as exc:
@@ -265,7 +324,8 @@ def download_gallery(url, destination, instagram_cookies=None):
     config.set(("extractor",), "image-range", "1-100")
     config.set(("extractor",), "timeout", 30)
     config.set(("extractor",), "retries", 2)
-    config.set(("extractor",), "image-filter", "extension.lower() in ('jpg','jpeg','png','webp','gif','avif','bmp','tiff')")
+    extensions = set().union(*EXTENSIONS.values()) if all_media else EXTENSIONS["image"]
+    config.set(("extractor",), "image-filter", f"extension.lower() in {tuple(sorted(ext[1:] for ext in extensions))!r}")
     if instagram_cookies and urlparse(url).hostname in {"instagram.com", "www.instagram.com"}:
         config.set(("extractor", "instagram"), "cookies", str(instagram_cookies))
 

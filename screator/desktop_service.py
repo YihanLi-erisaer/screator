@@ -658,11 +658,11 @@ class DesktopService:
                           xiaohongshu_binding_revision=xiaohongshu_binding_revision, xiaohongshu_title=xiaohongshu_title)
         return self.operation(operation_id, "image_posts.create", action, params, preflight)
 
-    def create_download(self, url, library_id, asset_type, operation_id):
+    def create_download(self, url, library_id, asset_type="auto", operation_id=None):
         from screator.materials import validate_url, EXTENSIONS
         url = validate_url(url)
         self.materials.folder(library_id)
-        if asset_type not in EXTENSIONS:
+        if asset_type not in (*EXTENSIONS, "auto"):
             raise AppError("请选择视频、图片或音频。")
         def action():
             identity = str(uuid.uuid4())

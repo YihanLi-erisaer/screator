@@ -59,6 +59,22 @@ class MaterialTests(unittest.TestCase):
             restored.open(result["id"])
             opened.assert_called_once_with(folder)
 
+    def test_listing_exposes_only_supported_library_files_for_inline_preview(self):
+        library = self.library()
+        folder = self.service.materials.folder(library)
+        for name in ("图片 #1.png", "video.mp4", "audio.wav", "private.txt"):
+            (folder / name).write_bytes(b"fixture")
+        (folder / "nested.png").mkdir()
+        listing = self.service.dispatch("materials.list", {"library_id": library})
+        self.assertEqual({item["name"] for item in listing["items"]},
+                         {"图片 #1.png", "video.mp4", "audio.wav"})
+        for item in listing["items"]:
+            self.assertEqual(Path(item["path"]), (folder / item["name"]).resolve())
+            self.assertEqual(Path(item["path"]).parent, folder.resolve())
+        with patch.object(Path, "is_symlink", autospec=True,
+                          side_effect=lambda path: path.name == "video.mp4"):
+            self.assertNotIn("video.mp4", {item["name"] for item in self.service.materials.list(library)["items"]})
+
     def test_existing_libraries_keep_their_location_after_schema_upgrade(self):
         folder = self.service.materials.root / "旧素材库"
         folder.mkdir()
@@ -219,6 +235,92 @@ class MaterialTests(unittest.TestCase):
         with self.assertRaises(AppError): self.service.materials.rename(library, "a.png", "a.exe")
         with self.assertRaises(AppError): self.service.materials.delete(library, "../a.png", True)
         self.assertTrue(path.exists())
+
+    def test_auto_download_detects_direct_media_without_a_type_and_keeps_repeat_records(self):
+        library = self.library()
+        root, base = self.source_server()
+        ids = []
+        for index, (name, expected) in enumerate((("clip.mp4", "video"), ("song.mp3", "audio"),
+                                                  ("photo.png", "image"), ("photo.png", "image"))):
+            (root / name).write_bytes(b"original media")
+            result = self.service.dispatch("materials.download", dict(
+                url=base + "/" + name, library_id=library, operation_id=f"auto-download-{index}"))
+            ids.append((result["task_id"], expected))
+        self.wait_idle()
+        for task_id, _ in ids:
+            task = self.service.task(task_id)
+            self.assertEqual(task.status, "downloaded", task.error)
+            self.assertEqual(task.asset_type, "auto")
+        items = self.service.materials.list(library)["items"]
+        self.assertCountEqual([item["kind"] for item in items], [expected for _, expected in ids])
+        self.assertEqual(len({item["name"] for item in items}), 4)
+
+    def test_auto_direct_download_uses_headers_and_redirects_for_extensionless_links(self):
+        from io import BytesIO
+        from email.message import Message
+        class Response(BytesIO):
+            def geturl(self):
+                return self.final_url
+        folder = Path(self.tmp.name) / "direct"
+        folder.mkdir()
+        for headers, final_url, suffix in (
+            ({"Content-Type": "audio/mpeg; charset=binary"}, "https://example.com/media", ".mp3"),
+            ({"Content-Type": "audio/webm"}, "https://example.com/song.webm", ".weba"),
+            ({"Content-Type": "application/octet-stream", "Content-Disposition": 'attachment; filename="photo.PNG"'},
+             "https://example.com/media", ".png"),
+            ({"Content-Type": "application/octet-stream"}, "https://example.com/clip.mp4", ".mp4"),
+        ):
+            with self.subTest(suffix=suffix):
+                response = Response(b"media content")
+                response.headers = Message()
+                for key, value in headers.items(): response.headers[key] = value
+                response.final_url = final_url
+                with patch.object(materials, "urlopen", return_value=response):
+                    self.assertTrue(materials.download_direct("https://example.com/download", folder, "auto"))
+                self.assertEqual((folder / ("material" + suffix)).read_bytes(), b"media content")
+
+    def test_auto_platform_download_preserves_video_and_native_audio(self):
+        from screator.db import Task
+        for name, info, expected in (("clip.mp4", {"vcodec": "avc1"}, "video"),
+                                     ("song.webm", {"vcodec": "none"}, "audio")):
+            with self.subTest(name=name):
+                folder = Path(self.tmp.name) / name
+                folder.mkdir()
+                task = Task(name, "https://example.com/post", "pending", source_kind="material", asset_type="auto")
+                def download(opts, url):
+                    self.assertNotIn("postprocessors", opts)
+                    (folder / "materials" / name).write_bytes(b"native media")
+                    return info
+                with patch.object(materials, "supports_gallery", return_value=False), \
+                     patch.object(materials, "download_direct", return_value=False), \
+                     patch.object(youtube, "_base_opts", return_value={}), \
+                     patch.object(youtube, "_download_with_slot", side_effect=download):
+                    files = materials.download(task, self.service.config.build(), folder)
+                self.assertEqual(len(files), 1)
+                self.assertEqual(materials.kind(files[0]), expected)
+
+    def test_auto_gallery_preserves_mixed_media_and_cancellation(self):
+        from screator.db import Task
+        folder = Path(self.tmp.name) / "mixed"
+        folder.mkdir()
+        task = Task("mixed", "https://www.instagram.com/p/example/", "pending",
+                    source_kind="material", asset_type="auto")
+        def download(url, destination, cookies, *, all_media=False):
+            self.assertTrue(all_media)
+            for name in ("photo.jpg", "clip.mp4", "music.mp3"):
+                (destination / name).write_bytes(b"media")
+        with patch.object(materials, "supports_gallery", return_value=True), \
+             patch.object(materials, "download_gallery", side_effect=download), \
+             patch.object(youtube, "_download_with_slot") as video:
+            files = materials.download(task, self.service.config.build(), folder)
+            self.assertEqual({materials.kind(path) for path in files}, {"video", "image", "audio"})
+            video.assert_not_called()
+        with patch.object(materials, "supports_gallery", return_value=True), \
+             patch.object(materials, "download_gallery", side_effect=events.Cancelled("cancelled")), \
+             patch.object(youtube, "_download_with_slot") as video:
+            with self.assertRaises(events.Cancelled):
+                materials.download(task, self.service.config.build(), folder)
+            video.assert_not_called()
 
     def test_queued_download_cancelled_immediately_and_failed_download_retries(self):
         library = self.library()
@@ -409,6 +511,8 @@ class MaterialTests(unittest.TestCase):
         root, base = self.source_server()
         from PIL import Image
         Image.new("RGB", (12, 12), "blue").save(root / "image.png")
+        (root / "clip.mp4").write_bytes(b"video")
+        (root / "music.mp3").write_bytes(b"audio")
         class Fixture(Extractor):
             category = "fixture"
             subcategory = "post"
@@ -416,15 +520,21 @@ class MaterialTests(unittest.TestCase):
             def items(self):
                 data = {"id": "post", "num": 1, "filename": "image", "extension": "png"}
                 yield Message.Directory, "", data
-                yield Message.Url, base + "/image.png", data
-        folder = Path(self.tmp.name) / "gallery"
-        folder.mkdir()
-        fixture = Fixture(re.match(Fixture.pattern, "https://fixture.test/post"))
-        with patch.object(extractor, "find", return_value=fixture):
-            materials.download_gallery("https://fixture.test/post", folder)
-        files = list(folder.rglob("*.png"))
-        self.assertEqual(len(files), 1)
-        self.assertEqual(files[0].read_bytes(), (root / "image.png").read_bytes())
+                for index, name in enumerate(("image.png", "clip.mp4", "music.mp3")):
+                    data = {**data, "num": index + 1, "filename": Path(name).stem, "extension": Path(name).suffix[1:]}
+                    yield Message.Url, base + "/" + name, data
+        for all_media in (False, True):
+            with self.subTest(all_media=all_media):
+                folder = Path(self.tmp.name) / f"gallery-{all_media}"
+                folder.mkdir()
+                fixture = Fixture(re.match(Fixture.pattern, "https://fixture.test/post"))
+                with patch.object(extractor, "find", return_value=fixture):
+                    materials.download_gallery("https://fixture.test/post", folder, all_media=all_media)
+                files = list(folder.rglob("*.png"))
+                self.assertEqual(len(files), 1)
+                self.assertEqual(files[0].read_bytes(), (root / "image.png").read_bytes())
+                self.assertEqual({materials.kind(path) for path in folder.rglob("*") if path.is_file()},
+                                 {"image", "video", "audio"} if all_media else {"image"})
 
     def test_instagram_cookie_import_is_scoped_and_can_be_cleared(self):
         source = Path(self.tmp.name) / "browser-cookies.txt"

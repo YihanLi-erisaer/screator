@@ -219,9 +219,9 @@ if (socialPublication && tasks.length) {
 let resourceSamples = 0;
 const materialLibraries = [{ id: "sample-library", name: "示例素材库", path: "示例素材目录" }];
 const materialFiles = [
-  { name: "示例视频.mp4", kind: "video", size: 2048000, modified: 1791691200 },
-  { name: "参考图片.png", kind: "image", size: 102400, modified: 1791691100 },
-  { name: "背景音乐.mp3", kind: "audio", size: 524288, modified: 1791691000 },
+  { name: "示例视频.mp4", kind: "video", size: 2048000, modified: 1791691200, path: "/preview-video.mp4" },
+  { name: "参考图片.png", kind: "image", size: 102400, modified: 1791691100, path: "/brand.png" },
+  { name: "背景音乐.mp3", kind: "audio", size: 524288, modified: 1791691000, path: "/preview-audio.wav" },
 ];
 const filesByLibrary = new Map([["sample-library", materialFiles]]);
 export async function request(method: string, params: any): Promise<any> {
@@ -243,7 +243,7 @@ export async function request(method: string, params: any): Promise<any> {
       const extension = name.split(".").pop()!.toLowerCase();
       const kind = ["mp4", "mkv", "webm", "mov", "avi", "flv", "m4v", "ts"].includes(extension) ? "video"
         : ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "weba"].includes(extension) ? "audio" : "image";
-      files.push({ name, kind, size: 102400, modified: Date.now() / 1000 });
+      files.push({ name, kind, size: 102400, modified: Date.now() / 1000, path: "" });
     }
     return { added: params.paths.length, skipped: 0 };
   }

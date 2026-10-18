@@ -95,7 +95,7 @@ import {
   useUiLanguage,
   getUiLanguage,
 } from "./i18n";
-import { Materials, LibraryPicker } from "./Materials";
+import { Materials, LibraryPicker, savedLibrary } from "./Materials";
 import { ImagePostForm, PostImages, type PostImage } from "./ImagePost";
 import { XiaohongshuAccountPanel, type XiaohongshuStatus } from "./Xiaohongshu";
 
@@ -250,6 +250,7 @@ export default function App() {
   );
   const busyRef = useRef(false);
   const [newTask, setNewTask] = useState<"download" | "publish" | null>(null);
+  const [materialLibrary, setMaterialLibrary] = useState(savedLibrary);
   const [confirmDeleteAllHistory, setConfirmDeleteAllHistory] = useState(false);
   const [setup, setSetup] = useState(false);
   const [selected, setSelected] = useState<Task | null>(null);
@@ -897,7 +898,14 @@ export default function App() {
               </div>
             }
           >
-            {page === "materials" && <Materials action={action} busy={busy} />}
+            {page === "materials" && (
+              <Materials
+                action={action}
+                busy={busy}
+                library={materialLibrary}
+                onLibraryChange={setMaterialLibrary}
+              />
+            )}
             {page === "data" && (
               <DataCenter
                 paused={shutdownStarted}
@@ -1523,6 +1531,7 @@ export default function App() {
       {newTask && (
         <NewTask
           kind={newTask}
+          initialLibrary={page === "materials" ? materialLibrary : ""}
           accounts={auth.accounts || []}
           config={config}
           busy={busy}
@@ -1715,6 +1724,7 @@ export default function App() {
 
 type Action = (work: () => Promise<unknown>, success?: string) => Promise<void>;
 type NewTaskProps = {
+  initialLibrary?: string;
   accounts: BiliAccount[];
   config: Config | null;
   busy: boolean;
@@ -1780,10 +1790,15 @@ function NewTask(props: NewTaskProps & { kind: "download" | "publish" }) {
     </Modal>
   );
 }
-function DownloadTask({ busy, action, close, done }: NewTaskProps) {
+function DownloadTask({
+  busy,
+  action,
+  close,
+  done,
+  initialLibrary = "",
+}: NewTaskProps) {
   const [url, setUrl] = useState("");
-  const [library, setLibrary] = useState("");
-  const [type, setType] = useState("video");
+  const [library, setLibrary] = useState(initialLibrary);
   const op = useRef(operationId());
   return (
     <>
@@ -1804,23 +1819,11 @@ function DownloadTask({ busy, action, close, done }: NewTaskProps) {
             }}
           />
         </label>
-        <label className="field">
-          {uiText("素材类型")}
-          <StyledSelect
-            label="素材类型"
-            value={type}
-            onChange={(value) => {
-              setType(value);
-              op.current = operationId();
-            }}
-            options={[
-              { value: "video", label: "视频" },
-              { value: "image", label: "图片" },
-              { value: "audio", label: "音频" },
-            ]}
-          />
-        </label>
+        <p className="help">
+          {uiText("自动识别链接中的视频、音频或图片，无需选择素材类型。")}
+        </p>
         <LibraryPicker
+          validateSelection
           value={library}
           onChange={(value) => {
             setLibrary(value);
@@ -1843,7 +1846,7 @@ function DownloadTask({ busy, action, close, done }: NewTaskProps) {
         </p>
         <p>
           {uiText(
-            "也支持视频、图片和音频文件直链。音频模式可提取视频中的音轨。每次输入一个作品链接，图片帖子最多 100 张。",
+            "也支持视频、图片和音频文件直链。每次输入一个作品链接，自动保留素材类型，图片帖子最多 100 张。",
           )}
         </p>
         <p>
@@ -1864,7 +1867,7 @@ function DownloadTask({ busy, action, close, done }: NewTaskProps) {
               await request("materials.download", {
                 url,
                 library_id: library,
-                asset_type: type,
+                asset_type: "auto",
                 operation_id: op.current,
               });
               await done();

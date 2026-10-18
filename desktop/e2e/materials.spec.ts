@@ -8,6 +8,7 @@ async function nativePickerBridge(page: Page) {
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: "main" } },
+      convertFileSrc(path: string) { return path; },
       transformCallback() { return 1; },
       async invoke(command: string, args: any = {}) {
         if (command === "plugin:dialog|open") {
@@ -26,6 +27,9 @@ async function nativePickerBridge(page: Page) {
           if (args.method === "materials.list" && w.libraryFixture && args.params.library_id !== "sample-library") {
             const library = w.libraryFixture.find((item: any) => item.id === args.params.library_id);
             return { items: [], path: library?.path ?? "" };
+          }
+          if (args.method === "materials.list" && w.materialFixture) {
+            return { items: w.materialFixture, path: "/素材/预览测试" };
           }
           if (args.method === "materials.import") {
             w.importedMaterials = args.params;
@@ -51,6 +55,63 @@ async function nativePickerBridge(page: Page) {
     };
   });
 }
+
+test("material names have inline image, video and audio previews with exclusive playback", async ({ page }) => {
+  await page.goto("/?preview");
+  await page.getByRole("button", { name: "素材管理", exact: true }).click();
+  await page.getByRole("combobox", { name: "素材库", exact: true }).click();
+  await page.getByRole("option", { name: "示例素材库", exact: true }).click();
+  const cards = page.locator(".material-card");
+  await expect(cards).toHaveCount(3);
+  for (const card of await cards.all()) {
+    const name = await card.locator("strong").boundingBox();
+    const preview = await card.locator(".material-preview").boundingBox();
+    expect(preview!.y).toBeGreaterThanOrEqual(name!.y + name!.height);
+    expect(Math.abs(preview!.width / preview!.height - 16 / 9)).toBeLessThan(0.02);
+  }
+  const image = cards.locator("img");
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  const video = cards.locator("video");
+  const audio = cards.locator("audio");
+  await expect(video).toHaveAttribute("controls", "");
+  await expect(audio).toHaveAttribute("controls", "");
+  await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.readyState)).toBeGreaterThanOrEqual(1);
+  expect(await video.evaluate((media: HTMLVideoElement) => media.autoplay)).toBe(false);
+  await video.evaluate(async (media: HTMLVideoElement) => { media.loop = true; await media.play(); });
+  await audio.evaluate(async (media: HTMLAudioElement) => { media.loop = true; await media.play(); });
+  await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.paused)).toBe(true);
+  expect(await audio.evaluate((media: HTMLAudioElement) => media.paused)).toBe(false);
+  const playingAudio = (await audio.elementHandle())!;
+  await page.getByRole("combobox", { name: "素材类型", exact: true }).click();
+  await page.getByRole("option", { name: "图片", exact: true }).click();
+  await expect(cards).toHaveCount(1);
+  await expect(cards.locator("video, audio")).toHaveCount(0);
+  // A detached player must stop when filtering or leaving the library.
+  await expect.poll(() => playingAudio.evaluate((media: HTMLAudioElement) => media.paused)).toBe(true);
+});
+
+test("native material previews use backend paths and keep external preview available on failure", async ({ page }) => {
+  await nativePickerBridge(page);
+  await page.addInitScript(() => {
+    (window as any).materialFixture = [
+      { name: "本地图片.png", kind: "image", size: 10, modified: 1, path: "/brand.png" },
+      { name: "不支持的视频.mkv", kind: "video", size: 10, modified: 1, path: "/invalid-preview.mkv" },
+    ];
+  });
+  await page.route("**/invalid-preview.mkv", route => route.fulfill({ status: 200, contentType: "video/x-matroska", body: "invalid media" }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "素材管理", exact: true }).click();
+  await page.getByRole("combobox", { name: "素材库", exact: true }).click();
+  await page.getByRole("option", { name: "示例素材库", exact: true }).click();
+  const image = page.locator(".material-card img");
+  await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  const broken = page.locator(".material-card").filter({ hasText: "不支持的视频.mkv" });
+  await expect(broken).toContainText("无法内嵌预览，请点击下方“预览”打开。");
+  await expect(broken.getByRole("button", { name: "预览", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "刷新", exact: true }).click();
+  await expect(page.locator(".material-card")).toHaveCount(2);
+});
 
 async function coverPickerBridge(page: Page) {
   await nativePickerBridge(page);
@@ -385,8 +446,8 @@ for (const asset of [
       await expect(submit).toBeDisabled();
       await dialog.getByLabel("素材链接").fill(asset.url);
       await expect(submit).toBeDisabled();
-      await dialog.getByRole("combobox", { name: "素材类型", exact: true }).click();
-      await dialog.getByRole("option", { name: asset.label, exact: true }).click();
+      await expect(dialog.getByRole("combobox", { name: "素材类型", exact: true })).toHaveCount(0);
+      await expect(dialog).toContainText("自动识别链接中的视频、音频或图片");
       await dialog.getByRole("combobox", { name: "素材库", exact: true }).click();
       await dialog.getByRole("option", { name: "示例素材库", exact: true }).click();
       await submit.click();
@@ -398,7 +459,7 @@ for (const asset of [
     expect(calls).toHaveLength(2);
     for (const params of calls) {
       expect(params).toEqual({
-        url: asset.url, library_id: "sample-library", asset_type: asset.type,
+        url: asset.url, library_id: "sample-library", asset_type: "auto",
         operation_id: expect.any(String),
       });
     }
@@ -406,6 +467,60 @@ for (const asset of [
     expect(await page.evaluate(() => (window as any).createdTask)).toBeUndefined();
   });
 }
+
+test("downloads inherit the open library and temporary changes do not switch the materials page", async ({ page }) => {
+  await nativePickerBridge(page);
+  await page.addInitScript(() => {
+    (window as any).libraryFixture = [
+      { id: "sample-library", name: "示例素材库", path: "/素材/示例" },
+      { id: "other-library", name: "其他素材库", path: "/素材/其他" },
+    ];
+  });
+  await page.goto("/?accounts=0");
+  await page.getByRole("button", { name: "素材管理", exact: true }).click();
+  const library = page.locator(".materials-page").getByRole("combobox", { name: "素材库", exact: true });
+  await library.click();
+  await page.getByRole("option", { name: "示例素材库", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "新建下载素材任务" });
+  for (const shortcut of [false, true]) {
+    if (shortcut) await page.keyboard.press("Control+n");
+    else await page.getByRole("button", { name: /新建下载任务/ }).click();
+    const picker = dialog.getByRole("combobox", { name: "素材库", exact: true });
+    await expect(picker).toContainText("示例素材库");
+    await dialog.getByLabel("素材链接").fill("https://example.com/photo.png");
+    await expect(dialog.getByRole("button", { name: "加入下载队列" })).toBeEnabled();
+    await picker.click();
+    await dialog.getByRole("option", { name: "其他素材库", exact: true }).click();
+    await dialog.getByRole("button", { name: "加入下载队列" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(library).toContainText("示例素材库");
+  }
+  const calls = await page.evaluate(() => (window as any).downloadCalls);
+  expect(calls.map((call: any) => call.library_id)).toEqual(["other-library", "other-library"]);
+  await library.click();
+  await page.getByRole("option", { name: "其他素材库", exact: true }).click();
+  await page.getByRole("button", { name: /新建下载任务/ }).click();
+  await expect(dialog.getByRole("combobox", { name: "素材库", exact: true })).toContainText("其他素材库");
+  await page.keyboard.press("Escape");
+  await library.click();
+  await page.getByRole("option", { name: "请选择素材库", exact: true }).click();
+  await page.getByRole("button", { name: /新建下载任务/ }).click();
+  await expect(dialog.getByRole("combobox", { name: "素材库", exact: true })).toContainText("请选择素材库");
+  await dialog.getByLabel("素材链接").fill("https://example.com/photo.png");
+  await expect(dialog.getByRole("button", { name: "加入下载队列" })).toBeDisabled();
+});
+
+test("remembered libraries populate new downloads after returning to materials", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("screator.materials.selectedLibrary", "sample-library");
+  });
+  await page.goto("/?preview");
+  await page.getByRole("button", { name: "素材管理", exact: true }).click();
+  await expect(page.locator(".material-card")).toHaveCount(3);
+  await page.getByRole("button", { name: /新建下载任务/ }).click();
+  const dialog = page.getByRole("dialog", { name: "新建下载素材任务" });
+  await expect(dialog.getByRole("combobox", { name: "素材库", exact: true })).toContainText("示例素材库");
+});
 
 test("download errors preserve the form and allow retrying the same operation", async ({ page }) => {
   await nativePickerBridge(page);

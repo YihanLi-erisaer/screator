@@ -1957,6 +1957,11 @@ pre {
 .material-card strong, .material-path { overflow-wrap: anywhere; }
 .material-card small, .material-kind { color: var(--muted); font-size: 12px; }
 .material-card .inline-controls { margin-top: auto; }
+.material-preview { aspect-ratio: 16 / 9; width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #101318; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+.material-preview img, .material-preview video { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+.material-preview audio { width: 100%; height: 40px; flex-shrink: 0; }
+.material-audio-icon { color: #aeb6c4; flex-shrink: 0; }
+.material-preview-unavailable { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; text-align: center; color: #aeb6c4; font-size: 12px; }
 .task-source-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
 .task-source-tabs > button { flex: 1; }
 .task-form-fields {

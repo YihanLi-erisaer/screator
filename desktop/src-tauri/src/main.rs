@@ -144,11 +144,24 @@ async fn request_worker(worker: &Worker, method: String, params: Value) -> Resul
 }
 
 #[tauri::command]
-async fn backend_request(manager: State<'_, WorkerManager>, method: String, params: Value) -> Result<Value, String> {
+async fn backend_request(app: tauri::AppHandle, manager: State<'_, WorkerManager>, method: String, params: Value) -> Result<Value, String> {
     let health = method == "system.health";
+    let materials = method == "materials.list";
     if health { log_shell("frontend health request"); }
     let worker = manager.get().await?;
     let result = request_worker(&worker, method, params).await;
+    // Only expose media paths validated by the backend's registered libraries.
+    // Keep the initial asset scope empty instead of granting folder-wide access.
+    if materials {
+        if let Ok(value) = &result {
+            if let Some(items) = value.get("items").and_then(Value::as_array) {
+                let scope = app.asset_protocol_scope();
+                for path in items.iter().filter_map(|item| item.get("path").and_then(Value::as_str)) {
+                    scope.allow_file(path).map_err(|error| error.to_string())?;
+                }
+            }
+        }
+    }
     if health { log_shell(if result.is_ok() { "frontend health response" } else { "frontend health failed" }); }
     result
 }

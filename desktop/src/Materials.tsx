@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FolderOpen,
   Plus,
@@ -7,8 +7,15 @@ import {
   Pencil,
   Trash2,
   Upload,
+  Music2,
+  ImageOff,
 } from "lucide-react";
-import { chooseDirectory, chooseFiles, request } from "./bridge";
+import {
+  chooseDirectory,
+  chooseFiles,
+  materialPreviewUrl,
+  request,
+} from "./bridge";
 import { bytes } from "./types";
 import { StyledSelect } from "./StyledSelect";
 import { uiText, uiNode, formatDateTime } from "./i18n";
@@ -42,7 +49,7 @@ const materialExtensions = [
 ];
 const selectedLibraryKey = "screator.materials.selectedLibrary";
 
-function savedLibrary() {
+export function savedLibrary() {
   try {
     return localStorage.getItem(selectedLibraryKey) ?? "";
   } catch {
@@ -51,29 +58,116 @@ function savedLibrary() {
 }
 
 export type Library = { id: string; name: string };
-type Material = { name: string; kind: string; size: number; modified: number };
+type Material = {
+  name: string;
+  kind: string;
+  size: number;
+  modified: number;
+  path?: string;
+};
 export type MaterialAction = (
   fn: () => Promise<any>,
   success?: string,
 ) => Promise<any>;
 
+function MaterialPreview({ item }: { item: Material }) {
+  const [failed, setFailed] = useState(false);
+  const player = useRef<HTMLMediaElement | null>(null);
+  const src = item.path ? materialPreviewUrl(item.path) : "";
+  const unavailable = failed || !src;
+  useEffect(() => {
+    const media = player.current;
+    return () => media?.pause();
+  }, [src, unavailable]);
+  const label = `${uiText("预览")}：${item.name}`;
+  return (
+    <div className="material-preview" role="group" aria-label={label}>
+      {unavailable ? (
+        <div className="material-preview-unavailable">
+          <ImageOff size={24} aria-hidden="true" />
+          <span>{uiText("无法内嵌预览，请点击下方“预览”打开。")}</span>
+        </div>
+      ) : item.kind === "image" ? (
+        <img
+          src={src}
+          alt={item.name}
+          loading="lazy"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <>
+          {item.kind === "audio" && (
+            <Music2
+              className="material-audio-icon"
+              size={32}
+              aria-hidden="true"
+            />
+          )}
+          {item.kind === "video" ? (
+            <video
+              ref={(node) => {
+                player.current = node;
+              }}
+              src={src}
+              aria-label={label}
+              controls
+              playsInline
+              preload="metadata"
+              onError={() => setFailed(true)}
+              onPlay={pauseOtherPreviews}
+            />
+          ) : (
+            <audio
+              ref={(node) => {
+                player.current = node;
+              }}
+              src={src}
+              aria-label={label}
+              controls
+              preload="none"
+              onError={() => setFailed(true)}
+              onPlay={pauseOtherPreviews}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function pauseOtherPreviews(event: React.SyntheticEvent<HTMLMediaElement>) {
+  const player = event.currentTarget;
+  player
+    .closest(".material-grid")
+    ?.querySelectorAll<HTMLMediaElement>("video, audio")
+    .forEach((other) => {
+      if (other !== player) other.pause();
+    });
+}
+
 export function LibraryPicker({
   value,
   onChange,
   action,
+  validateSelection = false,
 }: {
   value: string;
   onChange: (id: string) => void;
   action: MaterialAction;
+  validateSelection?: boolean;
 }) {
   const { showError } = useToast();
   const [libraries, setLibraries] = useState<Library[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [creating, setCreating] = useState(false);
   const [directory, setDirectory] = useState("");
   const [saving, setSaving] = useState(false);
   const load = useCallback(async (isCurrent: () => boolean = () => true) => {
     const result = await request("materials.libraries");
-    if (isCurrent()) setLibraries(result.items);
+    if (isCurrent()) {
+      setLibraries(result.items);
+      setLoaded(true);
+    }
   }, []);
   useEffect(() => {
     let current = true;
@@ -86,6 +180,15 @@ export function LibraryPicker({
       current = false;
     };
   }, [load, showError]);
+  useEffect(() => {
+    if (
+      validateSelection &&
+      loaded &&
+      value &&
+      !libraries.some((l) => l.id === value)
+    )
+      onChange("");
+  }, [validateSelection, loaded, libraries, value, onChange]);
   return (
     <div className="library-picker">
       <label className="field">
@@ -166,21 +269,27 @@ export function LibraryPicker({
 export function Materials({
   action,
   busy,
+  library,
+  onLibraryChange,
 }: {
   action: MaterialAction;
   busy: boolean;
+  library: string;
+  onLibraryChange: (id: string) => void;
 }) {
   const { showSuccess, showError } = useToast();
-  const [library, setLibrary] = useState(savedLibrary);
-  const selectLibrary = useCallback((id: string) => {
-    setLibrary(id);
-    try {
-      if (id) localStorage.setItem(selectedLibraryKey, id);
-      else localStorage.removeItem(selectedLibraryKey);
-    } catch {
-      /* The selection remains available for the current page. */
-    }
-  }, []);
+  const selectLibrary = useCallback(
+    (id: string) => {
+      onLibraryChange(id);
+      try {
+        if (id) localStorage.setItem(selectedLibraryKey, id);
+        else localStorage.removeItem(selectedLibraryKey);
+      } catch {
+        /* The selection remains available for the current page. */
+      }
+    },
+    [onLibraryChange],
+  );
   const [items, setItems] = useState<Material[]>([]);
   const [path, setPath] = useState("");
   const [search, setSearch] = useState("");
@@ -332,7 +441,7 @@ export function Materials({
                 {visible.slice(offset, offset + 20).map((item) => (
                   <article
                     className="section-card material-card"
-                    key={item.name}
+                    key={`${library}:${item.name}:${item.size}:${item.modified}`}
                   >
                     <div className="material-kind">
                       {uiText(
@@ -349,6 +458,7 @@ export function Materials({
                     <strong data-no-localize title={item.name}>
                       {item.name}
                     </strong>
+                    <MaterialPreview item={item} />
                     <small data-no-localize>
                       {formatDateTime(item.modified * 1000)}
                     </small>

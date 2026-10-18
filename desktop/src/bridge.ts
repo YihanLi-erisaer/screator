@@ -1,5 +1,5 @@
 import { uiText } from "./i18n";
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Image as TauriImage } from "@tauri-apps/api/image";
@@ -11,6 +11,9 @@ export const preview =
   !isTauri() &&
   new URLSearchParams(location.search).has("preview");
 let shuttingDown = false;
+export function materialPreviewUrl(path: string) {
+  return isTauri() ? convertFileSrc(path) : path;
+}
 export function beginShutdown() {
   shuttingDown = true;
 }
