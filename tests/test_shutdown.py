@@ -300,12 +300,13 @@ class ShutdownServiceTests(unittest.TestCase):
         cleanup = self.service.scheduler.uploader.cleanup
         def slow_cleanup(task_id):
             entered.set()
-            if not release.wait(5): raise RuntimeError("test did not release cleanup")
+            if not release.wait(desktop_tests.ASYNC_TIMEOUT): raise RuntimeError("test did not release cleanup")
             return cleanup(task_id)
         try:
             with self.mocks(), patch.object(self.service.scheduler.uploader, "cleanup", side_effect=slow_cleanup):
                 self.create(mode="auto")
-                self.assertTrue(entered.wait(3))
+                # Pipeline startup is not the shutdown response being timed.
+                self.wait_until(entered.is_set, "slow cleanup entry")
                 thread = threading.Thread(target=lambda: (self.service.prepare_shutdown(), replied.set()))
                 thread.start()
                 try:
