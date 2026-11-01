@@ -695,14 +695,18 @@ class DesktopService:
             raise AppError("分页参数无效。")
         if platform and platform not in publications.PLATFORMS:
             raise AppError("投稿记录平台筛选参数无效。")
-        page, total, counts, all_total = self.store.desktop_page(
-            offset=offset, limit=limit, search=search, status=status, account_id=account_id,
-            history_statuses=tuple(sorted(history_transfer.HISTORY_STATUSES)) if history else (),
-            platform=platform)
+        with self.store._lock:
+            page, total, counts, all_total = self.store.desktop_page(
+                offset=offset, limit=limit, search=search, status=status, account_id=account_id,
+                history_statuses=tuple(sorted(history_transfer.HISTORY_STATUSES)) if history else (),
+                platform=platform)
+            local_tasks = [item for item in page if isinstance(item, Task)]
+            page_publications = publications.items_for_tasks(self.store, local_tasks)
+            page_jobs = self.store.jobs_for_tasks([task.task_id for task in local_tasks])
         items = [history_transfer.view(item) if isinstance(item, dict) else
                  {**{key: value for key, value in asdict(item).items() if key not in ("desc_orig", "desc_zh")},
-                  "publications": publications.items(self.store, item.task_id),
-                  "run_id": (self.store.get_job(item.task_id) or {}).get("run_id")} for item in page]
+                  "publications": page_publications[item.task_id],
+                  "run_id": (page_jobs.get(item.task_id) or {}).get("run_id")} for item in page]
         today = datetime.now().astimezone().date()
         start = datetime.combine(today, time.min).astimezone(timezone.utc).isoformat()
         end = datetime.combine(today + timedelta(days=1), time.min).astimezone(timezone.utc).isoformat()

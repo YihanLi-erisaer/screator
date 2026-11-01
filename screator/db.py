@@ -384,13 +384,25 @@ class TaskStore:
             direction = "DESC" if history_statuses else "ASC"
             page = self._conn.execute(f"SELECT * FROM ({matched}) ORDER BY updated_at DESC,task_id {direction} LIMIT ? OFFSET ?",
                                       (*params, limit, offset)).fetchall()
+            # Fetch each source in one query instead of reopening a read
+            # transaction for every row in the page.
+            local_ids = [row["task_id"] for row in page if row["source"] == "local"]
+            imported_ids = [row["task_id"] for row in page if row["source"] == "imported"]
+            local, imported = {}, {}
+            if local_ids:
+                placeholders = ",".join("?" for _ in local_ids)
+                local = {row["task_id"]: Task(**dict(row)) for row in self._conn.execute(
+                    f"SELECT * FROM tasks WHERE task_id IN ({placeholders})", local_ids)}
+            if imported_ids:
+                placeholders = ",".join("?" for _ in imported_ids)
+                imported = {row["task_id"]: json.loads(row["payload"]) for row in self._conn.execute(
+                    f"SELECT task_id,payload FROM imported_publishing_history WHERE task_id IN ({placeholders})", imported_ids)}
             items = []
             for row in page:
                 if row["source"] == "imported":
-                    payload = self._conn.execute("SELECT payload FROM imported_publishing_history WHERE task_id=?", (row["task_id"],)).fetchone()[0]
-                    items.append(json.loads(payload))
+                    items.append(imported[row["task_id"]])
                 else:
-                    items.append(self.require(row["task_id"]))
+                    items.append(local[row["task_id"]])
             counts = {row[0]: row[1] for row in self._conn.execute("SELECT status,COUNT(*) FROM tasks GROUP BY status")}
             all_total = sum(counts.values())
             if history_statuses:
@@ -442,6 +454,15 @@ class TaskStore:
                 return None
             row = self._conn.execute("SELECT payload FROM desktop_jobs WHERE task_id=?", (task.task_id,)).fetchone()
             return json.loads(row[0]) if row else None
+
+    def jobs_for_tasks(self, task_ids):
+        """Read jobs for an already resolved page of task IDs."""
+        if not task_ids:
+            return {}
+        placeholders = ",".join("?" for _ in task_ids)
+        with self._lock:
+            return {row["task_id"]: json.loads(row["payload"]) for row in self._conn.execute(
+                f"SELECT task_id,payload FROM desktop_jobs WHERE task_id IN ({placeholders})", task_ids)}
 
     def session_jobs(self, session_id, states=("queued", "running", "waiting")):
         """Read current execution records together, without per-task lookups."""

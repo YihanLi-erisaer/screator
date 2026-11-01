@@ -74,6 +74,47 @@ class StartupTests(unittest.TestCase):
             self.assertEqual((first["total"], first["all_total"]), (2, 2))
             filtered = self.service.list_tasks(history=True, account_id="account")
             self.assertEqual([row["task_id"] for row in filtered["items"]], ["imported"])
+            mixed = self.service.list_tasks(history=True)["items"]
+            self.assertEqual([row["task_id"] for row in mixed], ["local", "imported"])
+            self.assertTrue(mixed[1]["imported_history"])
+
+    def test_list_query_count_does_not_grow_with_page_size(self):
+        for index in range(25):
+            task = self.task(f"task-{index:02d}", account_name_snapshot=f"Account {index}",
+                             desc_orig="large description", desc_zh="translated description")
+            if index % 2:
+                self.service.store.save_job(task.task_id, {"run_id": f"run-{index}"})
+            with self.service.store.transaction() as db:
+                if index == 24:
+                    db.execute("INSERT INTO desktop_jobs VALUES(?, 'null')", (task.task_id,))
+                db.execute("""INSERT INTO task_publications
+                    (publication_id,task_id,platform,source_video_id,status,snapshot)
+                    VALUES(?,?,'acfun',?,'submitted',?)""",
+                    (f"acfun-{index}", task.task_id, task.video_id, json.dumps({"nickname": f"AcFun {index}"})))
+
+        def read(limit):
+            statements = []
+            # Keep dispatcher queries outside the trace.
+            with self.service.scheduler.guard, self.service.store._lock:
+                self.service.store._conn.set_trace_callback(statements.append)
+                try:
+                    result = self.service.list_tasks(limit=limit)
+                finally:
+                    self.service.store._conn.set_trace_callback(None)
+            return result, len(statements)
+
+        _, single_queries = read(1)
+        page, page_queries = read(20)
+        self.assertEqual(page_queries, single_queries)
+        self.assertLessEqual(page_queries, 12)
+        self.assertEqual((len(page["items"]), page["total"]), (20, 25))
+        for item in page["items"]:
+            index = int(item["task_id"].split("-")[1])
+            self.assertEqual(item["run_id"], f"run-{index}" if index % 2 else None)
+            self.assertNotIn("desc_orig", item)
+            self.assertNotIn("desc_zh", item)
+            self.assertEqual([(p["platform"], p["account_label"]) for p in item["publications"]],
+                             [("acfun", f"AcFun {index}"), ("bilibili", f"Account {index}")])
 
     def test_recovery_preserves_settled_history_and_freezes_uncertain_uploads(self):
         settled = self.task("settled")

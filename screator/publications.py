@@ -223,10 +223,24 @@ def migrate_youtube(store):
 def items(store, task_id):
     with store._lock:
         task = store.require(task_id)
-        result = [dict(r) for r in store._conn.execute("SELECT * FROM task_publications WHERE task_id=? ORDER BY platform", (task.task_id,))]
-        for p in result:
+        return items_for_tasks(store, [task])[task.task_id]
+
+
+def items_for_tasks(store, tasks):
+    """Read a page's publications without per-task database lookups."""
+    by_id = {task.task_id: task for task in tasks}
+    result = {task_id: [] for task_id in by_id}
+    if not by_id:
+        return result
+    placeholders = ",".join("?" for _ in by_id)
+    with store._lock:
+        for row in store._conn.execute(
+                f"SELECT * FROM task_publications WHERE task_id IN ({placeholders}) ORDER BY task_id,platform", tuple(by_id)):
+            p = dict(row)
+            task = by_id[p["task_id"]]
             snapshot = json.loads(p["snapshot"])
             p["account_label"] = task.account_name_snapshot if p["platform"] == "bilibili" else snapshot.get("nickname", p["account_id"])
+            result[task.task_id].append(p)
         return result
 
 

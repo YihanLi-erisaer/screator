@@ -86,6 +86,7 @@ import {
 import { accountLabel, canConfirmPublication, type BiliAccount } from "./types";
 import { StyledSelect } from "./StyledSelect";
 import { StatusBadge } from "./StatusBadge";
+import { startVisiblePolling } from "./polling";
 import { SubmissionTrend, type SubmissionTrendData } from "./SubmissionTrend";
 import { ReportError, useToast } from "./Toast";
 import {
@@ -321,7 +322,7 @@ export default function App() {
         });
     }
   }, []);
-  const loadTasks = useCallback(async () => {
+  const loadTasks = useCallback(async (isCurrent: () => boolean = () => true) => {
     const generation = ++taskRequest.current;
     const result = await request("tasks.list", {
       platform: listPlatform,
@@ -331,7 +332,7 @@ export default function App() {
       limit: PAGE_SIZE,
       history: page === "history",
     });
-    if (generation !== taskRequest.current) return;
+    if (!isCurrent() || generation !== taskRequest.current) return;
     result.items = result.items.map((t: Task) => {
       const old = latestTasks.current[t.task_id];
       const value = old && old.revision > t.revision ? { ...t, ...old } : t;
@@ -498,25 +499,7 @@ export default function App() {
 
   useEffect(() => {
     if (!connected || page === "data" || shutdownStarted) return;
-    let disposed = false;
-    let loading = false;
-    const update = async () => {
-      if (loading || disposed) return;
-      loading = true;
-      try {
-        await loadTasks();
-      } catch {
-        /* connection lifecycle reports the failure */
-      } finally {
-        loading = false;
-      }
-    };
-    void update();
-    const interval = setInterval(update, 1500);
-    return () => {
-      disposed = true;
-      clearInterval(interval);
-    };
+    return startVisiblePolling(loadTasks, 1500);
   }, [connected, loadTasks, page, shutdownStarted]);
 
   useEffect(() => {
@@ -2652,13 +2635,10 @@ function TaskDetail({
   }, [task.task_id, task.cover_path]);
   useEffect(() => {
     if (tab !== "logs") return;
-    const load = () =>
-      request("logs.tail", { task_id: task.task_id })
-        .then((value) => setLogs(value.items))
-        .catch(() => {});
-    void load();
-    const timer = setInterval(load, 1500);
-    return () => clearInterval(timer);
+    return startVisiblePolling(async (isCurrent) => {
+      const value = await request("logs.tail", { task_id: task.task_id });
+      if (isCurrent()) setLogs(value.items);
+    }, 1500);
   }, [task.task_id, tab]);
   const command = (method: string, success: string) =>
     action(async () => {

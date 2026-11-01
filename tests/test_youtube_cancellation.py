@@ -1,6 +1,7 @@
 """Real yt-dlp subprocess regressions using only local HTTP fixtures."""
 from __future__ import annotations
 
+import io
 import os
 import subprocess
 import sys
@@ -100,15 +101,19 @@ class YoutubeCancellationTests(unittest.TestCase):
     def test_download_cancel_keeps_partial_and_stops_process(self):
         entered, release = threading.Event(), threading.Event()
         calls = []
+        # Progress hooks can run before Python flushes its file-write buffer.
+        # Send enough data to create a real partial, but leave the response open
+        # so cancellation must still interrupt an unfinished network read.
+        body = b"v" * (4 * io.DEFAULT_BUFFER_SIZE)
 
         def serve(handler):
             calls.append(handler.path)
             handler.send_response(200)
             handler.send_header("Content-Type", "video/mp4")
-            handler.send_header("Content-Length", str(1024 * 1024))
+            handler.send_header("Content-Length", str(2 * len(body)))
             handler.end_headers()
             if len(calls) > 1:
-                handler.wfile.write(b"v" * 16384)
+                handler.wfile.write(body)
                 handler.wfile.flush()
                 entered.set()
                 release.wait(10)
@@ -121,17 +126,32 @@ class YoutubeCancellationTests(unittest.TestCase):
                 retained.write_bytes(b"keep completed assets")
                 cancel, stopped, errors, progress = self.start_task(
                     lambda: youtube.download_video(url, root, None, validate=False))
-                self.assertTrue(entered.wait(15), "yt-dlp did not start the media transfer")
-                deadline = time.monotonic() + 3
-                while not progress and time.monotonic() < deadline:
-                    time.sleep(.02)
-                self.assertTrue(progress, "download progress did not cross the subprocess pipe")
-                self.assert_cancelled(cancel, stopped, errors)
-                self.assertEqual(len(calls), 2, "cancelled download was retried")
-                partial = root / "source.mp4.part"
-                self.assertTrue(partial.is_file())
-                self.assertGreater(partial.stat().st_size, 0)
-                self.assertEqual(retained.read_bytes(), b"keep completed assets")
+                try:
+                    self.assertTrue(entered.wait(15), "yt-dlp did not start the media transfer")
+                    partial = root / "source.mp4.part"
+                    written = 0
+                    deadline = time.monotonic() + 3
+                    while time.monotonic() < deadline:
+                        written = partial.stat().st_size if partial.is_file() else 0
+                        if progress and written > 0:
+                            break
+                        time.sleep(.02)
+                    self.assertTrue(progress, "download progress did not cross the subprocess pipe")
+                    self.assertGreater(written, 0, "download did not write a partial before cancellation")
+                    self.assert_cancelled(cancel, stopped, errors)
+                    self.assertEqual(len(calls), 2, "cancelled download was retried")
+                    self.assertTrue(partial.is_file())
+                    content = partial.read_bytes()
+                    self.assertGreaterEqual(len(content), written)
+                    self.assertEqual(content, body[:len(content)])
+                    self.assertFalse((root / "source.mp4").exists())
+                    self.assertEqual(retained.read_bytes(), b"keep completed assets")
+                finally:
+                    # Stop the writer before TemporaryDirectory cleanup, even
+                    # when a readiness assertion fails on a slow machine.
+                    cancel.set()
+                    release.set()
+                    stopped.wait(3)
         finally:
             release.set()
 

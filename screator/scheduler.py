@@ -339,8 +339,19 @@ class Scheduler:
             except (OSError, AppError):
                 pass  # Keep the marker; never delete another owner's material.
         while not self.closed.is_set():
-            self.signal.wait(.25)
-            self.signal.clear()
+            # Enqueue, cancellation and shutdown signal explicitly. An idle
+            # queue needs no repeated database scan or WebView notification;
+            # active work still refreshes stage changes and upload countdowns.
+            with self.guard:
+                timeout = .25 if self.active else None
+            signaled = self.signal.wait(timeout)
+            if signaled:
+                self.signal.clear()
+            if self.closed.is_set():
+                break
+            with self.guard:
+                if not signaled and not self.active:
+                    continue
             pending = [(task, saved) for task, saved, _ in self.store.session_jobs(self.session_id, ("queued",))]
             for task, saved in sorted(pending, key=lambda pair: pair[1]["sequence"]):
                 with self.guard:
