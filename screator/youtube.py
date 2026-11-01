@@ -108,6 +108,18 @@ _SSL_MARKERS = (
     "unexpected_eof_while_reading",
     "eof occurred in violation of protocol",
 )
+_CONNECTION_MARKERS = (
+    "timed out",
+    "timeout",
+    "connection refused",
+    "connection reset",
+    "network is unreachable",
+    "no route to host",
+    "temporary failure in name resolution",
+    "name or service not known",
+    "nodename nor servname provided",
+    "getaddrinfo failed",
+)
 _MIN_THUMBNAIL_WIDTH = 1280
 _MIN_THUMBNAIL_HEIGHT = 720
 _HIGH_RES_THUMBNAIL_NAMES = {"maxresdefault", "hq720"}
@@ -798,6 +810,13 @@ def _is_bot_block(exc: BaseException) -> bool:
 
 def _format_ytdlp_error(prefix: str, exc: BaseException | None, *, cookies_configured=False) -> str:
     detail = str(exc).strip() if exc else "未知错误"
+    if any(marker in detail.lower() for marker in _CONNECTION_MARKERS):
+        return (
+            f"{prefix}：连接 YouTube 超时或网络连接失败。\n"
+            "请检查应用使用的网络或代理是否能访问 YouTube；"
+            "浏览器能播放时，也请确认下载进程使用了相同的代理线路，再重试。\n"
+            f"原始错误：{detail}"
+        )
     if cookies_configured and exc is not None and (_is_bot_block(exc) or "video unavailable" in detail.lower()):
         return (
             f"{prefix}：{detail}\n"
@@ -832,11 +851,7 @@ def _format_ytdlp_error(prefix: str, exc: BaseException | None, *, cookies_confi
             "请用 retry 续传；若仍失败可减小并行数（DOWNLOAD_JOBS=1）或换网络后再试。\n"
             f"原始错误：{detail}"
         )
-    return (
-        f"{prefix}：{detail}\n"
-        "若视频有年龄限制或地区限制，请导出浏览器 cookies 到 secrets/youtube_cookies.txt，"
-        "并在 .env 中设置 YOUTUBE_COOKIES。"
-    )
+    return f"{prefix}：{detail}"
 
 
 def _best_thumbnail(info: dict[str, Any]) -> str:

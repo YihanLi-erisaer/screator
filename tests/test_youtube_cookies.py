@@ -86,6 +86,27 @@ class YoutubeCookieExportTests(unittest.TestCase):
         self.assertIn("已配置 YouTube cookies", message)
         self.assertNotIn("当前 IP 已无法匿名解析", message)
 
+    def test_connection_failures_report_network_instead_of_cookie_import(self):
+        for detail in (
+            "Unable to download API page: Connection to www.youtube.com timed out. (connect timeout=30.0)",
+            "[Errno 61] Connection refused",
+            "[Errno 8] nodename nor servname provided, or not known",
+        ):
+            for configured in (False, True):
+                with self.subTest(detail=detail, cookies_configured=configured):
+                    message = youtube._format_ytdlp_error("解析 YouTube 链接失败",
+                        RuntimeError(detail), cookies_configured=configured)
+                    self.assertIn("网络连接失败", message)
+                    self.assertIn("代理", message)
+                    self.assertIn(detail, message)
+                    self.assertNotIn("cookies", message)
+                    self.assertNotIn("YOUTUBE_COOKIES", message)
+
+    def test_unrelated_failure_does_not_suggest_importing_cookies(self):
+        message = youtube._format_ytdlp_error("解析 YouTube 链接失败",
+            RuntimeError("[Errno 1] Operation not permitted"), cookies_configured=True)
+        self.assertEqual(message, "解析 YouTube 链接失败：[Errno 1] Operation not permitted")
+
 
 if __name__ == "__main__":
     unittest.main()
