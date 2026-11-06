@@ -166,6 +166,25 @@ export default function MembershipPanel({
           ? request<MemberOrder>("membership.order", { order_id: selectedId })
           : Promise.resolve(null),
       ]);
+      if (selected && selected.state !== "pending") {
+        // A payment/refund can commit between the first status read and this
+        // order read. Read status after the terminal receipt before stopping
+        // polling, otherwise the UI could retain the earlier entitlement.
+        const latest = await request<MemberStatus>("membership.status");
+        if (!mounted.current || current !== generation.current) return;
+        setStatus(latest);
+        if (!latest.authenticated || latest.user?.id !== next.user?.id) {
+          selectedOrderId.current = null;
+          setActiveOrder(null);
+          setHistory({
+            count: 0,
+            results: [],
+            pending_checkouts: [],
+            pending_error: "",
+          });
+          return;
+        }
+      }
       if (mounted.current && current === generation.current) {
         setHistory(orders);
         setOffset(pageOffset);
