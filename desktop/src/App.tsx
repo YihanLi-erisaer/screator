@@ -100,6 +100,7 @@ import { Materials, LibraryPicker, savedLibrary } from "./Materials";
 import { ImagePostForm, PostImages, type PostImage } from "./ImagePost";
 import { XiaohongshuAccountPanel, type XiaohongshuStatus } from "./Xiaohongshu";
 
+const MembershipPanel = lazy(() => import("./MembershipPanel"));
 const SetupWizard = lazy(() => import("./SetupWizard"));
 const TranslationPanel = lazy(() => import("./TranslationPanel"));
 const DataCenter = lazy(() =>
@@ -111,7 +112,7 @@ const ResourceMonitor = lazy(() =>
   })),
 );
 
-type Page = "tasks" | "materials" | "history" | "data" | "account" | "settings";
+type Page = "tasks" | "materials" | "history" | "data" | "account" | "membership" | "settings";
 const PAGE_SIZE = 20;
 type ShutdownStatus = {
   closing?: boolean;
@@ -127,6 +128,7 @@ const titles = {
   history: "投稿记录",
   data: "数据中心",
   account: "账号与连接",
+  membership: "会员订阅",
   settings: "设置",
 };
 const progressSpeed = (progress?: Progress) => {
@@ -645,6 +647,7 @@ export default function App() {
     { id: "history", icon: History },
     { id: "data", icon: ChartNoAxesCombined },
     { id: "account", icon: KeyRound },
+    { id: "membership", icon: ShieldCheck },
     { id: "settings", icon: Settings2 },
   ] as const;
 
@@ -741,7 +744,9 @@ export default function App() {
                           ? "创作数据分析"
                           : page === "account"
                             ? "已连接服务"
-                            : "个性化设置",
+                            : page === "membership"
+                              ? "Screator 会员"
+                              : "个性化设置",
                 )}
               </span>
               <h1>{uiNode(titles[page])}</h1>
@@ -757,7 +762,9 @@ export default function App() {
                           ? "查看账号和稿件表现，以及平台审核结果。"
                           : page === "account"
                             ? "连接你的账号，开始本地创作流程。"
-                            : "按你的习惯设置工作目录与投稿默认值。",
+                            : page === "membership"
+                              ? "管理邮箱账号、会员订阅和充值订单。"
+                              : "按你的习惯设置工作目录与投稿默认值。",
                 )}
               </p>
             </div>
@@ -1401,6 +1408,7 @@ export default function App() {
                 </div>
               </>
             )}
+            {page === "membership" && <MembershipPanel paused={shutdownStarted} />}
             {page === "account" && config && (
               <Account
                 config={config}

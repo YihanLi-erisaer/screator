@@ -230,7 +230,9 @@ class MultiAccountTests(unittest.TestCase):
     def test_cancel_before_popen_and_late_stage_write_cannot_resurrect(self):
         entered, release = threading.Event(), threading.Event()
         def renew(settings):
-            entered.set(); release.wait(4)
+            entered.set()
+            if not release.wait(desktop_tests.ASYNC_TIMEOUT):
+                raise TimeoutError("Test did not release the cancelled upload preflight")
         with self.mocks():
             tid = self.create()["task_id"]
             self.wait_idle()
@@ -238,7 +240,7 @@ class MultiAccountTests(unittest.TestCase):
             with patch.object(bili_upload, "renew", side_effect=renew), patch.object(bili_upload, "upload") as upload:
                 try:
                     self.service.submit(tid, "submit-cancel")
-                    self.assertTrue(entered.wait(3))
+                    self.assertTrue(entered.wait(desktop_tests.ASYNC_TIMEOUT))
                     self.service.cancel(tid)
                     stale.status = "ready"
                     self.service.store.upsert(stale)

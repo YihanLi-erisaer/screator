@@ -225,6 +225,8 @@ const materialFiles = [
 ];
 const filesByLibrary = new Map([["sample-library", materialFiles]]);
 export async function request(method: string, params: any): Promise<any> {
+  if (method === "membership.status") return { configured: false, service_url: "", authenticated: false, user: null, subscription: null };
+  if (method.startsWith("membership.")) throw new Error("界面预览不会创建真实会员账号或模拟支付成功。");
   if (method === "materials.libraries") return { items: [...materialLibraries], root: "示例素材目录" };
   if (method === "materials.create_library") {
     const path = params.directory.replace(/[\\/]+$/, "");
