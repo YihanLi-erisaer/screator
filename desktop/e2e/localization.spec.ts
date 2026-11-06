@@ -25,6 +25,7 @@ for (const locale of ["en", "zh-HK"] as const) {
       "投稿记录",
       "数据中心",
       "账号与连接",
+      "会员订阅",
       "设置",
     ]) {
       await page
@@ -70,6 +71,7 @@ test("English UI has no untranslated application copy across all pages", async (
     "投稿记录",
     "数据中心",
     "账号与连接",
+    "会员订阅",
     "设置",
   ]) {
     await page
@@ -251,6 +253,7 @@ test("English layout stays within a compact desktop window", async ({
     "投稿记录",
     "数据中心",
     "账号与连接",
+    "会员订阅",
     "设置",
   ]) {
     await page

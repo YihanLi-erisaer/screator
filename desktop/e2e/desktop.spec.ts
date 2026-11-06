@@ -4,7 +4,7 @@ test("data center loads account metrics and pages through recorded submissions",
   await page.setViewportSize({ width: 1024, height: 680 });
   await page.goto("/?preview&accounts=2&populated&manyTasks&slowData");
   const nav = page.getByRole("navigation", { name: "主导航" }).getByRole("button");
-  await expect(nav).toHaveText(["投稿中心", "素材管理", "投稿记录", "数据中心", "账号与连接", "设置"]);
+  await expect(nav).toHaveText(["投稿中心", "素材管理", "投稿记录", "数据中心", "账号与连接", "会员订阅", "设置"]);
   await page.getByRole("button", { name: "数据中心", exact: true }).click();
   await expect(page.getByRole("status", { name: "正在加载稿件数据" })).toBeVisible();
   await expect(page.locator(".data-account-card")).toHaveCount(2);

@@ -49,6 +49,8 @@ class DesktopService:
         self.login = None
         self.auth_state = {"status": "idle"}
         self.config = config or DesktopSettings(paths, vault)
+        from screator.desktop_membership import MembershipService
+        self.membership = MembershipService(paths, self.config)
         self.owner_lock = FileLock(paths.root / "execution.lock")
         self.owner_lock.__enter__()
         try:
@@ -172,6 +174,22 @@ class DesktopService:
         if self.scheduler.closing and method not in ("system.prepare_shutdown", "system.shutdown_status"):
             raise AppError("应用正在退出。")
         handlers = {
+            "membership.status": self.membership.status,
+            "membership.plans": self.membership.plans,
+            "membership.providers": self.membership.providers,
+            "membership.register": self.membership.register,
+            "membership.resend_verification": self.membership.resend_verification,
+            "membership.forgot_password": self.membership.forgot_password,
+            "membership.verify_email": self.membership.verify_email,
+            "membership.reset_password": self.membership.reset_password,
+            "membership.login": self.membership.login,
+            "membership.logout": self.membership.logout,
+            "membership.orders": self.membership.orders,
+            "membership.checkout": self.membership.checkout,
+            "membership.retry_checkout": self.membership.retry_checkout,
+            "membership.dismiss_checkout": self.membership.dismiss_checkout,
+            "membership.order": self.membership.order,
+            "membership.open_checkout": self.membership.open_checkout,
             "materials.libraries": self.materials.libraries, "materials.create_library": self.materials.create,
             "materials.list": self.materials.list, "materials.rename": self.materials.rename,
             "materials.import": self.materials.import_files,
@@ -253,7 +271,7 @@ class DesktopService:
     def health(self):
         from screator.db import SCHEMA_VERSION
         capabilities = ["single_url", "account_lanes", "graceful_shutdown", "local_translation_v1", "douyin_sync_v1", "acfun_sync_v1", "youtube_sync_v1", "social_sync_v1", "materials_v1", "local_publish_v1", "image_posts_v1"]
-        capabilities.append("xiaohongshu_sync_v1")
+        capabilities.extend(["xiaohongshu_sync_v1", "membership_v1"])
         return {"protocol_version": 2, "schema_version": SCHEMA_VERSION, "account_limit": 5,
                 "capabilities": capabilities,
                 "migration_notes": self.migration_notes, "version": __version__,
@@ -1526,6 +1544,7 @@ class DesktopService:
         if self._closed:
             return
         self.login_cancel()
+        self.membership.close()
         self.youtube_upload.close()
         self.translation_jobs.close()
         self.scheduler.close()
